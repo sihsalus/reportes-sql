@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+ 
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog/1.9"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog/1.9
+                  http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-1.9.xsd">
+ 
+    <!--
+        CONCEPTO: Liquibase y el control de versiones de BD
+        ─────────────────────────────────────────────────────
+        Liquibase es la herramienta que usa OpenMRS para manejar cambios en la BD.
+        En lugar de escribir scripts SQL manualmente, defines "changeSets" en XML.
+
+        Beneficios:
+        - Liquibase rastrea qué changeSets ya se ejecutaron (tabla databasechangelog)
+        - Si ya se ejecutó un changeSet, no lo vuelve a ejecutar (idempotente)
+        - Funciona en MySQL, PostgreSQL, Oracle, etc. (independiente de BD)
+        - Se ejecuta automáticamente cuando OpenMRS carga tu módulo
+
+        REGLA IMPORTANTE: Un changeSet nunca se modifica una vez ejecutado.
+        Si necesitas cambiar la BD, creas un NUEVO changeSet con nuevo ID.
+
+        Estructura de nombres de ID: "indicators-YYYY-MM-DD-N" donde N es secuencial.
+    -->
+
+    <!--
+        changeSet 1: Tabla principal de IndicatorDefinition
+
+        CONCEPTO: Columnas heredadas de BaseOpenmrsMetadata
+        ─────────────────────────────────────────────────────
+        Tu clase extiende BaseOpenmrsMetadata, que tiene campos como:
+        - uuid, name, description, retired, retiredBy, dateRetired, retireReason
+        - creator, dateCreated, changedBy, dateChanged (de BaseOpenmrsObject)
+
+        Hibernate espera que estas columnas EXISTAN en la tabla.
+        Debes crearlas en Liquibase con los nombres exactos que Hibernate espera.
+    -->
+    <changeSet id="indicators-2024-01-01-1" author="indicators-module">
+        <preConditions onFail="MARK_RAN">
+            <not><tableExists tableName="indicators_definition"/></not>
+        </preConditions>
+        <comment>Crear tabla principal para IndicatorDefinition</comment>
+        <createTable tableName="indicators_definition">
+
+            <!-- Clave primaria autoincremental -->
+            <column name="indicator_definition_id" type="int" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+
+            <!-- Campos de BaseOpenmrsObject -->
+            <column name="uuid" type="char(38)">
+                <constraints nullable="false" unique="true"/>
+            </column>
+
+            <!-- Campos de BaseOpenmrsMetadata -->
+            <column name="name" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="varchar(1000)"/>
+            <column name="retired" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="retired_by" type="int"/>
+            <column name="date_retired" type="datetime"/>
+            <column name="retire_reason" type="varchar(255)"/>
+
+            <!-- Auditoría (requerida por OpenMRS para todos los objetos) -->
+            <column name="creator" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="date_created" type="datetime">
+                <constraints nullable="false"/>
+            </column>
+            <column name="changed_by" type="int"/>
+            <column name="date_changed" type="datetime"/>
+
+            <!-- Campos específicos de IndicatorDefinition -->
+            <column name="min_age" type="int"/>
+            <column name="max_age" type="int"/>
+            <column name="start_date" type="datetime"/>
+            <column name="end_date" type="datetime"/>
+        </createTable>
+
+        <!-- Foreign keys hacia la tabla users de OpenMRS -->
+        <addForeignKeyConstraint
+            constraintName="indicators_def_creator_fk"
+            baseTableName="indicators_definition"
+            baseColumnNames="creator"
+            referencedTableName="users"
+            referencedColumnNames="user_id"/>
+        <addForeignKeyConstraint
+            constraintName="indicators_def_changed_by_fk"
+            baseTableName="indicators_definition"
+            baseColumnNames="changed_by"
+            referencedTableName="users"
+            referencedColumnNames="user_id"/>
+        <addForeignKeyConstraint
+            constraintName="indicators_def_retired_by_fk"
+            baseTableName="indicators_definition"
+            baseColumnNames="retired_by"
+            referencedTableName="users"
+            referencedColumnNames="user_id"/>
+    </changeSet>
+
+    <!--
+        changeSet 2: Tabla auxiliar para la lista de conceptIds
+
+        CONCEPTO: @ElementCollection → tabla auxiliar
+        ──────────────────────────────────────────────
+        Como explicamos en IndicatorDefinition.java, un List<Integer> necesita
+        una tabla aparte. Cada fila = una entrada de la lista.
+
+        indicator_definition_id: FK al indicador que contiene este concepto
+        concept_order: posición en la lista (para mantener el orden)
+        concept_id: el ID del concepto de OpenMRS
+    -->
+    <changeSet id="indicators-2024-01-01-2" author="indicators-module">
+        <preConditions onFail="MARK_RAN">
+            <not><tableExists tableName="indicators_definition_concept_ids"/></not>
+        </preConditions>
+        <comment>Tabla auxiliar para los conceptIds de IndicatorDefinition</comment>
+        <createTable tableName="indicators_definition_concept_ids">
+            <column name="indicator_definition_id" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="concept_order" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="concept_id" type="int">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addPrimaryKey
+            tableName="indicators_definition_concept_ids"
+            columnNames="indicator_definition_id, concept_order"/>
+        <addForeignKeyConstraint
+            constraintName="indicators_concept_ids_def_fk"
+            baseTableName="indicators_definition_concept_ids"
+            baseColumnNames="indicator_definition_id"
+            referencedTableName="indicators_definition"
+            referencedColumnNames="indicator_definition_id"/>
+    </changeSet>
+
+    <!--
+        changeSet 3: Tabla auxiliar para la lista de conceptFrequencies
+        Misma estructura que concept_ids pero para las frecuencias mínimas.
+    -->
+    <changeSet id="indicators-2024-01-01-3" author="indicators-module">
+        <preConditions onFail="MARK_RAN">
+            <not><tableExists tableName="indicators_definition_concept_freqs"/></not>
+        </preConditions>
+        <comment>Tabla auxiliar para las frecuencias mínimas de IndicatorDefinition</comment>
+        <createTable tableName="indicators_definition_concept_freqs">
+            <column name="indicator_definition_id" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="freq_order" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="frequency" type="int">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addPrimaryKey
+            tableName="indicators_definition_concept_freqs"
+            columnNames="indicator_definition_id, freq_order"/>
+        <addForeignKeyConstraint
+            constraintName="indicators_concept_freqs_def_fk"
+            baseTableName="indicators_definition_concept_freqs"
+            baseColumnNames="indicator_definition_id"
+            referencedTableName="indicators_definition"
+            referencedColumnNames="indicator_definition_id"/>
+    </changeSet>
+
+</databaseChangeLog>

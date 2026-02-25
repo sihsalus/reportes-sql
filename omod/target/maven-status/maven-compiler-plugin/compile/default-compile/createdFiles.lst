@@ -1,0 +1,2 @@
+org/openmrs/module/indicators/extension/html/AdminList.class
+org/openmrs/module/indicators/web/controller/IndicatorsController.class
