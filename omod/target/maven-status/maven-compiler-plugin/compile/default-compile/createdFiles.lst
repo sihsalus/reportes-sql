@@ -1,2 +1,8 @@
-org/openmrs/module/indicators/extension/html/AdminList.class
+org/openmrs/module/indicators/web/controller/IndicatorsRestController$ErrorResponse.class
+org/openmrs/module/indicators/web/controller/IndicatorsRestController.class
 org/openmrs/module/indicators/web/controller/IndicatorsController.class
+org/openmrs/module/indicators/web/controller/IndicatorsRestController$IndicatorResultResponse.class
+org/openmrs/module/indicators/extension/html/AdminList.class
+org/openmrs/module/indicators/web/controller/IndicatorsRestController$IndicatorDefinitionResponse.class
+org/openmrs/module/indicators/web/controller/IndicatorsRestController$EvaluateIndicatorRequest.class
+org/openmrs/module/indicators/web/controller/IndicatorsRestController$CreateIndicatorDefinitionRequest.class

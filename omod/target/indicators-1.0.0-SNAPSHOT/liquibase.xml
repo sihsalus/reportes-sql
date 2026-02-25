@@ -103,39 +103,39 @@
     </changeSet>
 
     <!--
-        changeSet 2: Tabla auxiliar para la lista de conceptIds
+        changeSet 2: Tabla auxiliar para la lista de conceptUuids
 
         CONCEPTO: @ElementCollection → tabla auxiliar
         ──────────────────────────────────────────────
-        Como explicamos en IndicatorDefinition.java, un List<Integer> necesita
+        Como explicamos en IndicatorDefinition.java, un List<String> necesita
         una tabla aparte. Cada fila = una entrada de la lista.
 
         indicator_definition_id: FK al indicador que contiene este concepto
         concept_order: posición en la lista (para mantener el orden)
-        concept_id: el ID del concepto de OpenMRS
+        concept_uuid: el UUID del concepto de OpenMRS
     -->
     <changeSet id="indicators-2024-01-01-2" author="indicators-module">
         <preConditions onFail="MARK_RAN">
-            <not><tableExists tableName="indicators_definition_concept_ids"/></not>
+            <not><tableExists tableName="indicators_definition_concept_uuids"/></not>
         </preConditions>
-        <comment>Tabla auxiliar para los conceptIds de IndicatorDefinition</comment>
-        <createTable tableName="indicators_definition_concept_ids">
+        <comment>Tabla auxiliar para los conceptUuids de IndicatorDefinition</comment>
+        <createTable tableName="indicators_definition_concept_uuids">
             <column name="indicator_definition_id" type="int">
                 <constraints nullable="false"/>
             </column>
             <column name="concept_order" type="int">
                 <constraints nullable="false"/>
             </column>
-            <column name="concept_id" type="int">
+            <column name="concept_uuid" type="char(38)">
                 <constraints nullable="false"/>
             </column>
         </createTable>
         <addPrimaryKey
-            tableName="indicators_definition_concept_ids"
+            tableName="indicators_definition_concept_uuids"
             columnNames="indicator_definition_id, concept_order"/>
         <addForeignKeyConstraint
-            constraintName="indicators_concept_ids_def_fk"
-            baseTableName="indicators_definition_concept_ids"
+            constraintName="indicators_concept_uuids_def_fk"
+            baseTableName="indicators_definition_concept_uuids"
             baseColumnNames="indicator_definition_id"
             referencedTableName="indicators_definition"
             referencedColumnNames="indicator_definition_id"/>
@@ -170,6 +170,51 @@
             baseColumnNames="indicator_definition_id"
             referencedTableName="indicators_definition"
             referencedColumnNames="indicator_definition_id"/>
+    </changeSet>
+
+    <!--
+        changeSet 4: Migración de installations existentes
+
+        Si una instalación vieja ya tenía concept_id (int), este changeSet:
+        1) Crea la nueva tabla de UUIDs si no existe
+        2) Migra concept_id -> concept.uuid preservando concept_order
+        3) Elimina la tabla antigua
+    -->
+    <changeSet id="indicators-2026-02-25-4" author="indicators-module">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="indicators_definition_concept_ids"/>
+        </preConditions>
+
+        <createTable tableName="indicators_definition_concept_uuids">
+            <column name="indicator_definition_id" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="concept_order" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="concept_uuid" type="char(38)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <sql>
+            INSERT INTO indicators_definition_concept_uuids (indicator_definition_id, concept_order, concept_uuid)
+            SELECT old.indicator_definition_id, old.concept_order, c.uuid
+            FROM indicators_definition_concept_ids old
+            INNER JOIN concept c ON c.concept_id = old.concept_id
+        </sql>
+
+        <addPrimaryKey
+            tableName="indicators_definition_concept_uuids"
+            columnNames="indicator_definition_id, concept_order"/>
+        <addForeignKeyConstraint
+            constraintName="indicators_concept_uuids_def_fk"
+            baseTableName="indicators_definition_concept_uuids"
+            baseColumnNames="indicator_definition_id"
+            referencedTableName="indicators_definition"
+            referencedColumnNames="indicator_definition_id"/>
+
+        <dropTable tableName="indicators_definition_concept_ids"/>
     </changeSet>
 
 </databaseChangeLog>

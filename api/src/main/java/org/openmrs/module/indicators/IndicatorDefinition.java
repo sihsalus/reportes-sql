@@ -51,8 +51,8 @@ import org.openmrs.BaseOpenmrsMetadata;
  * pero NO ejecuta ninguna lógica. La evaluación la delega el IndicatorTranslator al Reporting
  * Module.
  * <p>
- * Ejemplo de uso: "Pacientes entre 5 y 15 años que tuvieron el concepto 'Fiebre' (ID 123) al menos
- * 2 veces entre enero y marzo de 2025."
+ * Ejemplo de uso: "Pacientes entre 5 y 15 años que tuvieron el concepto 'Fiebre' (UUID xyz-123) al
+ * menos 2 veces entre enero y marzo de 2025."
  */
 @Entity(name = "indicators.IndicatorDefinition")
 @Table(name = "indicators_definition")
@@ -73,30 +73,31 @@ public class IndicatorDefinition extends BaseOpenmrsMetadata {
 	/*
 	 * CONCEPTO: @ElementCollection + @CollectionTable
 	 * ─────────────────────────────────────────────────
-	 * Un List<Integer> no puede mapearse directamente a una columna de BD.
+	 * Un List<String> no puede mapearse directamente a una columna de BD.
 	 * @ElementCollection le dice a Hibernate que cree una tabla auxiliar
 	 * para almacenar estos valores.
 	 *
-	 * Tabla "indicators_definition_concept_ids":
-	 *   indicator_definition_id (FK) | concept_id
-	 *   ─────────────────────────────────────────
-	 *   1                            | 123
-	 *   1                            | 456
+	 * Tabla "indicators_definition_concept_uuids":
+	 *   indicator_definition_id (FK) | concept_uuid
+	 *   ───────────────────────────────────────────
+	 *   1                            | 47f4c7d2-5f38-4f62-b407-f5a89f8eecf9
+	 *   1                            | 9f6f7fd7-8d57-4dc4-bf88-86f311f4fca7
 	 *
 	 * @OrderColumn garantiza que el orden de la lista se preserve.
-	 * Esto es crítico porque conceptIds[0] debe corresponder a conceptFrequencies[0].
+	 * Esto es crítico porque conceptUuids[0] debe corresponder a conceptFrequencies[0].
 	 */
 	@ElementCollection
-	@CollectionTable(name = "indicators_definition_concept_ids", joinColumns = @JoinColumn(name = "indicator_definition_id"))
-	@Column(name = "concept_id")
+	@CollectionTable(name = "indicators_definition_concept_uuids", joinColumns = @JoinColumn(name = "indicator_definition_id"))
+	@Column(name = "concept_uuid")
 	@OrderColumn(name = "concept_order")
-	private List<Integer> conceptIds;
+	private List<String> conceptUuids;
 	
 	/**
 	 * Frecuencia mínima requerida para cada concepto. La posición i de esta lista corresponde al
-	 * concepto en la posición i de conceptIds. Ejemplo: conceptIds=[123, 456],
-	 * conceptFrequencies=[2, 1] significa: concepto 123 debe aparecer >= 2 veces, concepto 456 >= 1
-	 * vez.
+	 * concepto en la posición i de conceptUuids. Ejemplo:
+	 * conceptUuids=["47f4c7d2-5f38-4f62-b407-f5a89f8eecf9",
+	 * "9f6f7fd7-8d57-4dc4-bf88-86f311f4fca7"], conceptFrequencies=[2, 1] significa: primer concepto
+	 * debe aparecer >= 2 veces, segundo >= 1 vez.
 	 */
 	@ElementCollection
 	@CollectionTable(name = "indicators_definition_concept_freqs", joinColumns = @JoinColumn(name = "indicator_definition_id"))
@@ -132,12 +133,12 @@ public class IndicatorDefinition extends BaseOpenmrsMetadata {
 		this.id = id;
 	}
 	
-	public List<Integer> getConceptIds() {
-		return conceptIds;
+	public List<String> getConceptUuids() {
+		return conceptUuids;
 	}
 	
-	public void setConceptIds(List<Integer> conceptIds) {
-		this.conceptIds = conceptIds;
+	public void setConceptUuids(List<String> conceptUuids) {
+		this.conceptUuids = conceptUuids;
 	}
 	
 	public List<Integer> getConceptFrequencies() {

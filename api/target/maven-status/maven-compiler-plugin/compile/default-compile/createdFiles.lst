@@ -1,5 +1,5 @@
-org/openmrs/module/indicators/api/dao/IndicatorsDao.class
 org/openmrs/module/indicators/IndicatorsConfig.class
+org/openmrs/module/indicators/api/dao/IndicatorsDao.class
 org/openmrs/module/indicators/api/IndicatorResult.class
 org/openmrs/module/indicators/api/IndicatorsService.class
 org/openmrs/module/indicators/Item.class

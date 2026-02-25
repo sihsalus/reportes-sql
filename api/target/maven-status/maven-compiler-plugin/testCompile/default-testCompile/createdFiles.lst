@@ -1,2 +1,2 @@
-org/openmrs/module/indicators/api/dao/IndicatorsDaoTest.class
 org/openmrs/module/indicators/api/IndicatorsServiceTest.class
+org/openmrs/module/indicators/api/dao/IndicatorsDaoTest.class

@@ -27,7 +27,7 @@ package org.openmrs.module.indicators.api;
  * ────────────────────────────────────────────────────────
  * La arquitectura del Reporting Module separa completamente:
  *
- *   DEFINICIÓN → "Pacientes entre 5 y 15 años con concepto 123 >= 2 veces"
+	 *   DEFINICIÓN → "Pacientes entre 5 y 15 años con concepto {uuid} >= 2 veces"
  *   (objeto Java, no toca la BD)
  *
  *   EVALUACIÓN → ejecuta esa definición contra la BD con un contexto específico
@@ -65,8 +65,8 @@ import org.springframework.stereotype.Component;
  *         │
  *         ├─ minAge/maxAge ──────────→ AgeCohortDefinition
  *         │
- *         ├─ conceptIds[0]/freqs[0] ─→ SqlCohortDefinition (concepto 0)
- *         ├─ conceptIds[1]/freqs[1] ─→ SqlCohortDefinition (concepto 1)
+	 *         ├─ conceptUuids[0]/freqs[0] ─→ SqlCohortDefinition (concepto 0)
+	 *         ├─ conceptUuids[1]/freqs[1] ─→ SqlCohortDefinition (concepto 1)
  *         │   ...
  *         │
  *         └─ (todos los anteriores) ─→ CompositionCohortDefinition (AND)
@@ -120,16 +120,16 @@ public class IndicatorTranslator {
 		}
 		
 		// ── 2. Filtro por conceptos y frecuencias ───────────────────────────────
-		List<Integer> conceptIds = definition.getConceptIds();
+		List<String> conceptUuids = definition.getConceptUuids();
 		List<Integer> conceptFrequencies = definition.getConceptFrequencies();
 		
-		if (conceptIds != null) {
-			for (int i = 0; i < conceptIds.size(); i++) {
-				Integer conceptId = conceptIds.get(i);
+		if (conceptUuids != null) {
+			for (int i = 0; i < conceptUuids.size(); i++) {
+				String conceptUuid = conceptUuids.get(i);
 				Integer minFrequency = (conceptFrequencies != null && i < conceptFrequencies.size()) ? conceptFrequencies
 				        .get(i) : 1;
 				
-				SqlCohortDefinition sqlDef = buildObsFrequencyCohortDefinition(conceptId, minFrequency);
+				SqlCohortDefinition sqlDef = buildObsFrequencyCohortDefinition(conceptUuid, minFrequency);
 				parts.add(Mapped.mapStraightThrough(sqlDef));
 			}
 		}
@@ -221,10 +221,10 @@ public class IndicatorTranslator {
 	 * valores del EvaluationContext. Esto previene SQL injection y permite reutilizar la definición
 	 * con distintos valores.
 	 * 
-	 * @param conceptId ID del concepto a buscar
+	 * @param conceptUuid UUID del concepto a buscar
 	 * @param minFrequency número mínimo de veces que debe aparecer el concepto
 	 */
-	private SqlCohortDefinition buildObsFrequencyCohortDefinition(Integer conceptId, Integer minFrequency) {
+	private SqlCohortDefinition buildObsFrequencyCohortDefinition(String conceptUuid, Integer minFrequency) {
 		
 		/*
 		 * SQL explicado línea por línea:
@@ -234,10 +234,11 @@ public class IndicatorTranslator {
 		 *     llamada "patient_id" o "person_id")
 		 *
 		 * FROM obs o
+		 * JOIN concept c ON c.concept_id = o.concept_id
 		 *   → tabla de observaciones clínicas de OpenMRS
 		 *
-		 * WHERE o.concept_id = :conceptId
-		 *   → solo las observaciones de este concepto específico
+		 * WHERE c.uuid = :conceptUuid
+		 *   → solo las observaciones del concepto identificado por UUID
 		 *
 		 * AND o.voided = 0
 		 *   → solo registros activos (en OpenMRS, "voided" = borrado lógico)
@@ -253,18 +254,19 @@ public class IndicatorTranslator {
 		 *   → solo pacientes que tienen el concepto AL MENOS N veces
 		 *   → esto es lo que no puede hacer ObsCohortDefinition fácilmente
 		 */
-		String sql = "SELECT DISTINCT o.person_id " + "FROM obs o " + "WHERE o.concept_id = :conceptId "
-		        + "AND o.voided = 0 " + "AND o.obs_datetime BETWEEN :startDate AND :endDate " + "GROUP BY o.person_id "
+		String sql = "SELECT DISTINCT o.person_id " + "FROM obs o " + "JOIN concept c ON c.concept_id = o.concept_id "
+		        + "WHERE c.uuid = :conceptUuid " + "AND o.voided = 0 "
+		        + "AND o.obs_datetime BETWEEN :startDate AND :endDate " + "GROUP BY o.person_id "
 		        + "HAVING COUNT(*) >= :minFrequency";
 		
 		SqlCohortDefinition sqlDef = new SqlCohortDefinition(sql);
-		sqlDef.setName("Concepto " + conceptId + " >= " + minFrequency + " veces");
+		sqlDef.setName("Concepto " + conceptUuid + " >= " + minFrequency + " veces");
 		
 		// Declarar los parámetros que usa este SQL
 		// Esto es lo que permite al EvaluationContext inyectar los valores correctos
 		sqlDef.addParameter(new Parameter("startDate", "Start Date", java.util.Date.class));
 		sqlDef.addParameter(new Parameter("endDate", "End Date", java.util.Date.class));
-		sqlDef.addParameter(new Parameter("conceptId", "Concept ID", Integer.class));
+		sqlDef.addParameter(new Parameter("conceptUuid", "Concept UUID", String.class));
 		sqlDef.addParameter(new Parameter("minFrequency", "Min Frequency", Integer.class));
 		
 		return sqlDef;
