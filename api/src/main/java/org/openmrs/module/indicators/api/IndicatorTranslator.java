@@ -44,7 +44,6 @@ import org.openmrs.module.indicators.IndicatorDefinition;
 import org.openmrs.module.reporting.cohort.definition.AgeCohortDefinition;
 import org.openmrs.module.reporting.cohort.definition.CohortDefinition;
 import org.openmrs.module.reporting.cohort.definition.CompositionCohortDefinition;
-import org.openmrs.module.reporting.cohort.definition.SqlCohortDefinition;
 import org.openmrs.module.reporting.evaluation.parameter.Mapped;
 import org.openmrs.module.reporting.evaluation.parameter.Parameter;
 import org.openmrs.module.reporting.indicator.CohortIndicator;
@@ -56,7 +55,9 @@ import org.springframework.stereotype.Component;
  * <p>
  * Esta clase es el "puente" entre tu modelo simplificado y la potencia del Reporting Module.
  * Siguiendo el principio de responsabilidad única (SRP), este componente solo traduce, nunca evalúa
- * ni persiste.
+ * ni persiste. Importante: Esta clase NO genera SQL raw. En lugar de eso, delega la lógica de SQL a
+ * clases especializadas como {@link ObsFrequencyCohortDefinition} y sus correspondientes
+ * evaluadores.
  * <p>
  * Diagrama del flujo de traducción:
  * 
@@ -65,8 +66,8 @@ import org.springframework.stereotype.Component;
  *         │
  *         ├─ minAge/maxAge ──────────→ AgeCohortDefinition
  *         │
-	 *         ├─ conceptUuids[0]/freqs[0] ─→ SqlCohortDefinition (concepto 0)
-	 *         ├─ conceptUuids[1]/freqs[1] ─→ SqlCohortDefinition (concepto 1)
+	 *         ├─ conceptUuids[0]/freqs[0] ─→ ObsFrequencyCohortDefinition (concepto 0)
+	 *         ├─ conceptUuids[1]/freqs[1] ─→ ObsFrequencyCohortDefinition (concepto 1)
  *         │   ...
  *         │
  *         └─ (todos los anteriores) ─→ CompositionCohortDefinition (AND)
@@ -129,8 +130,9 @@ public class IndicatorTranslator {
 				Integer minFrequency = (conceptFrequencies != null && i < conceptFrequencies.size()) ? conceptFrequencies
 				        .get(i) : 1;
 				
-				SqlCohortDefinition sqlDef = buildObsFrequencyCohortDefinition(conceptUuid, minFrequency);
-				parts.add(Mapped.mapStraightThrough(sqlDef));
+				// ObsFrequencyCohortDefinition encapsula el SQL - build() lo construye internamente
+				ObsFrequencyCohortDefinition obsDef = new ObsFrequencyCohortDefinition(conceptUuid, minFrequency);
+				parts.add(Mapped.mapStraightThrough(obsDef.build()));
 			}
 		}
 		
@@ -202,74 +204,6 @@ public class IndicatorTranslator {
 		}
 		
 		return ageDef;
-	}
-	
-	/**
-	 * Construye una {@link SqlCohortDefinition} que encuentra pacientes que tienen observaciones de
-	 * un concepto específico al menos {@code minFrequency} veces dentro del rango de fechas
-	 * proporcionado en el EvaluationContext.
-	 * <p>
-	 * CONCEPTO: SqlCohortDefinition vs ObsCohortDefinition
-	 * ───────────────────────────────────────────────────────── El Reporting Module tiene dos
-	 * formas de filtrar por observaciones: ObsCohortDefinition: configurable con UI, pero solo
-	 * filtra "tiene/no tiene" el obs. No soporta fácilmente el conteo de frecuencias mínimas.
-	 * SqlCohortDefinition: SQL directo. Más flexible, soporta HAVING COUNT(*) >= N. Ideal cuando
-	 * necesitas lógica como "al menos N ocurrencias". VENTAJA de SqlCohortDefinition: el motor de
-	 * BD hace el trabajo pesado. No iteramos pacientes en Java, dejamos que SQL filtre
-	 * eficientemente. CONCEPTO: Parámetros en SqlCohortDefinition
-	 * ───────────────────────────────────────────── El SQL puede usar :parameterName para inyectar
-	 * valores del EvaluationContext. Esto previene SQL injection y permite reutilizar la definición
-	 * con distintos valores.
-	 * 
-	 * @param conceptUuid UUID del concepto a buscar
-	 * @param minFrequency número mínimo de veces que debe aparecer el concepto
-	 */
-	private SqlCohortDefinition buildObsFrequencyCohortDefinition(String conceptUuid, Integer minFrequency) {
-		
-		/*
-		 * SQL explicado línea por línea:
-		 *
-		 * SELECT DISTINCT o.person_id
-		 *   → queremos los IDs únicos de pacientes (el Reporting Module necesita una columna
-		 *     llamada "patient_id" o "person_id")
-		 *
-		 * FROM obs o
-		 * JOIN concept c ON c.concept_id = o.concept_id
-		 *   → tabla de observaciones clínicas de OpenMRS
-		 *
-		 * WHERE c.uuid = :conceptUuid
-		 *   → solo las observaciones del concepto identificado por UUID
-		 *
-		 * AND o.voided = 0
-		 *   → solo registros activos (en OpenMRS, "voided" = borrado lógico)
-		 *
-		 * AND o.obs_datetime BETWEEN :startDate AND :endDate
-		 *   → solo observaciones dentro del período de búsqueda
-		 *   → :startDate y :endDate son parámetros que vendrán del EvaluationContext
-		 *
-		 * GROUP BY o.person_id
-		 *   → agrupar por paciente para poder contar
-		 *
-		 * HAVING COUNT(*) >= :minFrequency
-		 *   → solo pacientes que tienen el concepto AL MENOS N veces
-		 *   → esto es lo que no puede hacer ObsCohortDefinition fácilmente
-		 */
-		String sql = "SELECT DISTINCT o.person_id " + "FROM obs o " + "JOIN concept c ON c.concept_id = o.concept_id "
-		        + "WHERE c.uuid = :conceptUuid " + "AND o.voided = 0 "
-		        + "AND o.obs_datetime BETWEEN :startDate AND :endDate " + "GROUP BY o.person_id "
-		        + "HAVING COUNT(*) >= :minFrequency";
-		
-		SqlCohortDefinition sqlDef = new SqlCohortDefinition(sql);
-		sqlDef.setName("Concepto " + conceptUuid + " >= " + minFrequency + " veces");
-		
-		// Declarar los parámetros que usa este SQL
-		// Esto es lo que permite al EvaluationContext inyectar los valores correctos
-		sqlDef.addParameter(new Parameter("startDate", "Start Date", java.util.Date.class));
-		sqlDef.addParameter(new Parameter("endDate", "End Date", java.util.Date.class));
-		sqlDef.addParameter(new Parameter("conceptUuid", "Concept UUID", String.class));
-		sqlDef.addParameter(new Parameter("minFrequency", "Min Frequency", Integer.class));
-		
-		return sqlDef;
 	}
 	
 	/**
