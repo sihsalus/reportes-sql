@@ -1,0 +1,483 @@
+"""SQL builder — translates DefinicionIndicador into parameterized MySQL queries.
+
+All SQL generation lives here, isolated from routers and ORM.
+User-supplied values (dates, numbers, strings) use MySQL %(name)s
+parameterized syntax. No string interpolation.
+"""
+
+from datetime import date
+
+from app.types.definicion import (
+    DefinicionIndicador,
+    FiltroDiagnostico,
+    FiltroOrden,
+    FiltrosEvento,
+    FiltrosPoblacion,
+)
+
+
+# ── Public entry point ────────────────────────────────────────────────
+
+
+def build_query(
+    definicion: DefinicionIndicador,
+    periodo_inicio: date,
+    periodo_fin: date,
+    concept_map: dict[str, int] | None = None,
+) -> tuple[str, dict]:
+    """Translate an indicator definition into a parameterized MySQL query.
+
+    Args:
+        definicion: Fully validated indicator definition (Pydantic).
+        periodo_inicio: Start date of the calculation period (inclusive).
+        periodo_fin: End date of the calculation period (inclusive).
+        concept_map: Resolved mapping from concepto string to OpenMRS concept_id.
+
+    Returns:
+        (sql_string, params_dict) — ready for PyMySQL `cursor.execute(sql, params)`.
+    """
+    if definicion.tipo == "conteo_atenciones":
+        return _build_conteo_atenciones(definicion, periodo_inicio, periodo_fin, concept_map)
+    return _build_conteo_pacientes(definicion, periodo_inicio, periodo_fin, concept_map)
+
+
+# ── Internal builders ─────────────────────────────────────────────────
+
+
+def _build_conteo_atenciones(
+    d: DefinicionIndicador,
+    inicio: date,
+    fin: date,
+    concept_map: dict[str, int] | None = None,
+) -> tuple[str, dict]:
+    """Build a COUNT(*) query across encounters matching filters.
+
+    Single-evento only. No agrupacion or condicion_temporal.
+    """
+    params: dict = {
+        "inicio": inicio,
+        "fin": fin,
+    }
+
+    select_cols = ["COUNT(*) as valor"]
+    tables = "encounter e"
+    joins = ""
+    conditions = [
+        "e.encounter_datetime BETWEEN %(inicio)s AND %(fin)s",
+        "e.voided = 0",
+    ]
+
+    # ── Evento filter (encounter_type_uuids) ──
+    evento = d.evento
+    encounter_uuids: list[str] = []
+    if evento is not None and evento.encounter_type_uuids:
+        encounter_uuids = evento.encounter_type_uuids
+
+    if encounter_uuids:
+        joins += "\nJOIN encounter_type et ON e.encounter_type = et.encounter_type_id"
+        et_placeholders = ", ".join(
+            f"%({_param_name('et', i)})s" for i in range(len(encounter_uuids))
+        )
+        conditions.append(f"et.uuid IN ({et_placeholders})")
+        for i, u in enumerate(encounter_uuids):
+            params[_param_name("et", i)] = u
+
+    has_minimo = (
+        evento is not None
+        and evento.minimo_ocurrencias is not None
+        and evento.minimo_ocurrencias > 1
+    )
+
+    # ── Diagnosticos filter (nested in evento) ──
+    diagnosticos: list[FiltroDiagnostico] | None = (
+        evento.diagnosticos if evento is not None else None
+    )
+    diag_clause, diag_params = _build_diagnosticos_filter(diagnosticos, concept_map)
+    if diag_clause:
+        joins += "\nJOIN encounter_diagnosis ed ON ed.encounter_id = e.encounter_id AND ed.voided = 0"
+        conditions.append(diag_clause)
+        params.update(diag_params)
+
+    # ── Poblacion (age filter on person table) ──
+    # When minimo_ocurrencias > 1 the age filter is applied inside
+    # _build_minimo_ocurrencias_subquery (which joins person internally).
+    # Avoid duplicating the person join — only join here for the
+    # direct (no-minimo) aggregate path.
+    if d.poblacion is not None and d.poblacion.has_age_filter and not has_minimo:
+        joins += "\nJOIN person p ON e.patient_id = p.person_id"
+        conditions.append("p.voided = 0")
+        age_clause, age_params = _build_age_filter(d.poblacion)
+        conditions.append(age_clause)
+        params.update(age_params)
+
+    # ── Poblacion (sexo-only, no age filter) + minimo_ocurrencias ──
+    # When poblacion has sexo but no age filter, AND minimo_ocurrencias > 1,
+    # we still need the person join for the subquery. The outer query
+    # references e.patient_id directly so no person join needed at outer level.
+    # The person join is handled inside the subquery below.
+
+    # ── Ordenes filter (nested in evento) ──
+    ordenes: list[FiltroOrden] | None = (
+        evento.ordenes if evento is not None else None
+    )
+    ord_clause, ord_params = _build_ordenes_filter(ordenes, concept_map)
+    if ord_clause:
+        conditions.append(ord_clause)
+        params.update(ord_params)
+
+    where_clause = "WHERE " + "\n  AND ".join(conditions)
+
+    query = (
+        f"SELECT {', '.join(select_cols)}\n"
+        f"FROM {tables}\n"
+        f"{joins}\n"
+        f"{where_clause}"
+    )
+
+    # ── minimo_ocurrencias subquery ──
+    if has_minimo:
+        params["min_oc"] = evento.minimo_ocurrencias  # type: ignore[union-attr]
+        subquery = _build_minimo_ocurrencias_subquery(
+            encounter_uuids=encounter_uuids,
+            poblacion=d.poblacion,
+            diagnosticos=diagnosticos,
+            params=params,
+            param_key="min_oc",
+            concept_map=concept_map,
+            ordenes=ordenes,
+        )
+        query += f"\nAND e.patient_id IN (\n{subquery}\n)"
+
+    query = query.strip() + ";"
+
+    return query, params
+
+
+def _build_conteo_pacientes(
+    d: DefinicionIndicador,
+    inicio: date,
+    fin: date,
+    concept_map: dict[str, int] | None = None,
+) -> tuple[str, dict]:
+    """Build a COUNT(DISTINCT patient) query — no GROUP BY, scalar aggregate.
+
+    Single-evento only. No agrupacion or condicion_temporal.
+    """
+    params: dict = {
+        "inicio": inicio,
+        "fin": fin,
+    }
+
+    # ── Evento filter ──
+    evento = d.evento
+    encounter_uuids: list[str] = []
+    if evento is not None and evento.encounter_type_uuids:
+        encounter_uuids = evento.encounter_type_uuids
+
+    has_minimo = (
+        evento is not None
+        and evento.minimo_ocurrencias is not None
+        and evento.minimo_ocurrencias > 1
+    )
+
+    diagnosticos: list[FiltroDiagnostico] | None = (
+        evento.diagnosticos if evento is not None else None
+    )
+    ordenes: list[FiltroOrden] | None = (
+        evento.ordenes if evento is not None else None
+    )
+
+    # ── minimo_ocurrencias subquery path ──
+    if has_minimo:
+        params["min_oc"] = evento.minimo_ocurrencias  # type: ignore[union-attr]
+        subquery = _build_minimo_ocurrencias_subquery(
+            encounter_uuids=encounter_uuids,
+            poblacion=d.poblacion,
+            diagnosticos=diagnosticos,
+            params=params,
+            param_key="min_oc",
+            concept_map=concept_map,
+            ordenes=ordenes,
+        )
+
+        query = (
+            f"SELECT COUNT(DISTINCT patient_id) as valor\n"
+            f"FROM (\n{subquery}\n) AS _sub"
+        ).strip() + ";"
+
+        return query, params
+
+    # ── Normal path (no minimo_ocurrencias > 1) ──
+    select_cols = ["COUNT(DISTINCT p.person_id) as valor"]
+    tables = "person p"
+    joins = "JOIN encounter e ON e.patient_id = p.person_id"
+
+    conditions: list[str] = [
+        "e.encounter_datetime BETWEEN %(inicio)s AND %(fin)s",
+        "e.voided = 0",
+        "p.voided = 0",
+    ]
+
+    if encounter_uuids:
+        joins += "\nJOIN encounter_type et ON e.encounter_type = et.encounter_type_id"
+        et_placeholders = ", ".join(
+            f"%({_param_name('et', i)})s" for i in range(len(encounter_uuids))
+        )
+        conditions.append(f"et.uuid IN ({et_placeholders})")
+        for i, u in enumerate(encounter_uuids):
+            params[_param_name("et", i)] = u
+
+    # ── Diagnosticos filter ──
+    diag_clause, diag_params = _build_diagnosticos_filter(diagnosticos, concept_map)
+    if diag_clause:
+        joins += "\nJOIN encounter_diagnosis ed ON ed.encounter_id = e.encounter_id AND ed.voided = 0"
+        conditions.append(diag_clause)
+        params.update(diag_params)
+
+    # ── Age filter ──
+    if d.poblacion is not None and d.poblacion.has_age_filter:
+        age_clause, age_params = _build_age_filter(d.poblacion)
+        conditions.append(age_clause)
+        params.update(age_params)
+
+    # ── Sexo filter ──
+    if d.poblacion is not None and d.poblacion.sexo is not None:
+        params["sexo"] = d.poblacion.sexo
+        conditions.append("p.gender = %(sexo)s")
+
+    # ── Ordenes filter ──
+    ord_clause, ord_params = _build_ordenes_filter(ordenes, concept_map)
+    if ord_clause:
+        conditions.append(ord_clause)
+        params.update(ord_params)
+
+    where_clause = "WHERE " + "\n  AND ".join(conditions)
+
+    query = (
+        f"SELECT {', '.join(select_cols)}\n"
+        f"FROM {tables}\n"
+        f"{joins}\n"
+        f"{where_clause}"
+    ).strip() + ";"
+
+    return query, params
+
+
+def _build_minimo_ocurrencias_subquery(
+    encounter_uuids: list[str],
+    poblacion: FiltrosPoblacion | None,
+    diagnosticos: list[FiltroDiagnostico] | None,
+    params: dict,
+    param_key: str,
+    concept_map: dict[str, int] | None = None,
+    ordenes: list[FiltroOrden] | None = None,
+) -> str:
+    """Build an inner subquery that identifies patients meeting the
+    minimo_ocurrencias threshold.
+
+    Returns patient_id for patients whose encounter count in the period
+    meets the threshold. Embed in outer query via ``patient_id IN (...)``
+    or ``FROM (...) AS _sub``.
+    """
+    tables = "encounter e"
+    joins = ""
+
+    if encounter_uuids:
+        joins += "JOIN encounter_type et ON e.encounter_type = et.encounter_type_id"
+
+    conditions: list[str] = [
+        "e.encounter_datetime BETWEEN %(inicio)s AND %(fin)s",
+        "e.voided = 0",
+    ]
+
+    if encounter_uuids:
+        et_placeholders = ", ".join(
+            f"%({_param_name('et', i)})s" for i in range(len(encounter_uuids))
+        )
+        conditions.append(f"et.uuid IN ({et_placeholders})")
+        for i, u in enumerate(encounter_uuids):
+            params[_param_name("et", i)] = u
+
+    # ── Person join for poblacion filters ──
+    join_person = False
+    if poblacion is not None:
+        if poblacion.has_age_filter or poblacion.sexo is not None:
+            join_person = True
+
+    if join_person:
+        joins += "\nJOIN person p ON e.patient_id = p.person_id"
+        conditions.append("p.voided = 0")
+
+        if poblacion is not None and poblacion.has_age_filter:
+            age_clause, age_params = _build_age_filter(poblacion)
+            conditions.append(age_clause)
+            params.update(age_params)
+
+        if poblacion is not None and poblacion.sexo is not None:
+            params["sexo"] = poblacion.sexo
+            conditions.append("p.gender = %(sexo)s")
+
+    # ── Diagnosticos filter (inside subquery) ──
+    diag_clause, diag_params = _build_diagnosticos_filter(diagnosticos, concept_map)
+    if diag_clause:
+        joins += (
+            "\nJOIN encounter_diagnosis ed ON ed.encounter_id = e.encounter_id"
+            " AND ed.voided = 0"
+        )
+        conditions.append(diag_clause)
+        params.update(diag_params)
+
+    # ── Ordenes filter (inside subquery) ──
+    ord_clause, ord_params = _build_ordenes_filter(ordenes, concept_map)
+    if ord_clause:
+        conditions.append(ord_clause)
+        params.update(ord_params)
+
+    where_clause = "WHERE " + "\n  AND ".join(conditions)
+
+    select_cols = ["e.patient_id"]
+    group_clause = "GROUP BY e.patient_id"
+    having_clause = f"HAVING COUNT(e.encounter_id) >= %({param_key})s"
+
+    return (
+        f"SELECT {', '.join(select_cols)}\n"
+        f"FROM {tables}\n"
+        f"{joins}\n"
+        f"{where_clause}\n"
+        f"{group_clause}\n"
+        f"{having_clause}"
+    )
+
+
+# ── Helpers ───────────────────────────────────────────────────────────
+
+
+def _build_ordenes_filter(
+    ordenes: list[FiltroOrden] | None,
+    concept_map: dict[str, int] | None,
+) -> tuple[str, dict]:
+    """Build EXISTS subqueries for order-based encounter filtering.
+
+    Each FiltroOrden in ordenes generates one EXISTS subquery on the
+    orders table. All subqueries use AND logic — every concept must be present.
+
+    Args:
+        ordenes: List of FiltroOrden from evento.ordenes, or None/[].
+        concept_map: Resolved mapping from concepto string to OpenMRS concept_id.
+
+    Returns:
+        (clause_string, params_dict) — ready to append to WHERE conditions.
+        Returns ("", {}) when ordenes is None or empty.
+    """
+    if not ordenes or concept_map is None:
+        return "", {}
+
+    clauses: list[str] = []
+    oparams: dict = {}
+
+    for i, f in enumerate(ordenes):
+        concept_id = concept_map.get(f.concepto_uuid)
+        if concept_id is None:
+            continue
+        param_key = f"ord_{i}"
+        oparams[param_key] = concept_id
+        clauses.append(
+            f"EXISTS (\n"
+            f"    SELECT 1 FROM orders o{i}\n"
+            f"    WHERE o{i}.encounter_id = e.encounter_id\n"
+            f"      AND o{i}.concept_id = %({param_key})s\n"
+            f"      AND o{i}.voided = 0\n"
+            f")"
+        )
+
+    if not clauses:
+        return "", {}
+
+    return "\nAND ".join(clauses), oparams
+
+
+def _build_age_filter(
+    poblacion: FiltrosPoblacion,
+) -> tuple[str, dict]:
+    """Build a DATEDIFF-based age filter clause.
+
+    Uses the period start date as the reference point for age calculation.
+    Age bounds are computed from FiltrosPoblacion properties.
+    """
+    min_days = poblacion.edad_min_total_dias
+    max_days = poblacion.edad_max_total_dias
+
+    clause = (
+        "DATEDIFF(%(inicio)s, p.birthdate) "
+        "BETWEEN %(edad_min)s AND %(edad_max)s"
+    )
+    age_params = {
+        "edad_min": min_days,
+        "edad_max": max_days,
+    }
+    return clause, age_params
+
+
+def _build_diagnosticos_filter(
+    diagnosticos: list[FiltroDiagnostico] | None,
+    concept_map: dict[str, int] | None = None,
+) -> tuple[str, dict]:
+    """Build WHERE conditions for diagnosis-based filtering.
+
+    For each FiltroDiagnostico, resolves concepto_uuid to concept_id
+    and filters encounter_diagnosis.diagnosis_coded. Items use OR logic
+    — an encounter must match at least one. tipo_diagnostico (first
+    non-None across all items) further restricts by diagnosis_type.
+
+    Does NOT emit the JOIN itself — the caller is responsible for adding
+    ``JOIN encounter_diagnosis ed ON ... AND ed.voided = 0`` when this
+    function returns a non-empty clause.
+
+    Args:
+        diagnosticos: List of FiltroDiagnostico from evento.diagnosticos.
+        concept_map: Resolved mapping from concepto string to OpenMRS concept_id.
+
+    Returns:
+        (clause_string, params_dict) or ("", {}).
+    """
+    if not diagnosticos:
+        return "", {}
+
+    params: dict = {}
+    conditions: list[str] = []
+
+    # ── Concept UUID conditions (OR logic across items) ──
+    item_clauses: list[str] = []
+    for i, fd in enumerate(diagnosticos):
+        item_conds: list[str] = []
+        if fd.concepto_uuid and concept_map and fd.concepto_uuid in concept_map:
+            pk = f"diag_cd_{i}"
+            params[pk] = concept_map[fd.concepto_uuid]
+            item_conds.append(f"ed.diagnosis_coded = %({pk})s")
+        if item_conds:
+            item_clauses.append("(" + " AND ".join(item_conds) + ")")
+
+    if item_clauses:
+        conditions.append("(" + " OR ".join(item_clauses) + ")")
+
+    # ── Tipo diagnóstico (first non-None across all items) ──
+    first_tipo = next(
+        (fd.tipo_diagnostico for fd in diagnosticos if fd.tipo_diagnostico), None
+    )
+    if first_tipo:
+        params["tipo_diag"] = first_tipo
+        conditions.append("ed.diagnosis_type = %(tipo_diag)s")
+
+    if not conditions:
+        return "", {}
+
+    return " AND ".join(conditions), params
+
+
+# Re-export old name for backward compat in tests
+_build_diagnostico_filter = _build_diagnosticos_filter
+
+
+def _param_name(prefix: str, index: int) -> str:
+    """Generate a unique parameter key for indexed lists."""
+    return f"{prefix}_{index}"

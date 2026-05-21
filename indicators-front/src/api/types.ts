@@ -1,0 +1,153 @@
+/**
+ * Shared TypeScript types for the API layer.
+ *
+ * These types match the backend Pydantic schemas defined in
+ * app/schemas/indicador.py. UUIDs are serialized as strings in JSON.
+ */
+
+export interface Indicador {
+  /** UUID — serialized as string in JSON */
+  id: string;
+  /** Human-readable indicator name */
+  nombre: string;
+  /** Optional free-text description */
+  descripcion: string | null;
+  /** Soft-delete flag */
+  activo: boolean;
+  /** ISO 8601 datetime string */
+  creado_en: string;
+}
+
+/** Single version of an indicator — matches backend VersionOut schema. */
+export interface IndicadorVersion {
+  /** UUID of the version record */
+  id: string;
+  /** UUID of the parent indicator */
+  indicador_id: string;
+  /** Sequential version number (auto-incremented) */
+  version: number;
+  /** Arbitrary JSON definition object */
+  definicion: Record<string, unknown>;
+  /** ISO 8601 datetime string */
+  creado_en: string;
+}
+
+/** Full indicator with its version history. */
+export interface IndicadorDetail extends Indicador {
+  versiones: IndicadorVersion[];
+}
+
+/** Generic paginated response envelope — matches IndicadorListResponse */
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+}
+
+/** FastAPI error body shape: { "detail": "..." } or { "detail": [...] } for 422 */
+export interface ApiError {
+  detail: string | unknown[];
+}
+
+// ── Form / Request Types ────────────────────────────────────────────────
+
+/** Payload for POST /indicadores/ */
+export interface IndicadorCreatePayload {
+  nombre: string;
+  descripcion: string | null;
+  definicion: DefinicionIndicadorForm;
+}
+
+/** Payload for PUT /indicadores/{id} */
+export interface IndicadorUpdatePayload {
+  nombre: string;
+  descripcion: string | null;
+  definicion?: DefinicionIndicadorForm;
+}
+
+/** Encounter type option returned by GET /conceptos/encounter-types */
+export interface EncounterTypeOption {
+  uuid: string;
+  display: string;
+}
+
+/** Frontend representation of DefinicionIndicador for forms */
+export interface DefinicionIndicadorForm {
+  tipo: 'conteo_atenciones' | 'conteo_pacientes';
+  periodo: 'mes_actual' | 'mes_anterior' | 'semana_actual' | 'semana_anterior';
+  evento: FiltrosEventoForm | null;
+  poblacion?: PoblacionForm;
+}
+
+/** Single event definition for forms — diagnosticos/ordenes nested inside. */
+export interface FiltrosEventoForm {
+  encounter_type_uuids: string[];
+  minimo_ocurrencias?: number;
+  diagnosticos?: FiltroDiagnosticoForm[];
+  ordenes?: FiltroOrdenForm[];
+}
+
+/** Single diagnosis filter for forms — nested inside evento. */
+export interface FiltroDiagnosticoForm {
+  concepto_uuid: string;
+  tipo_diagnostico?: 'definitivo' | 'presuntivo';
+}
+
+/** Single order filter for forms — nested inside evento. */
+export interface FiltroOrdenForm {
+  concepto_uuid: string;
+}
+
+/** Optional population filter for forms */
+export interface PoblacionForm {
+  edad_min_anios?: number;
+  edad_max_anios?: number;
+  edad_min_meses?: number;
+  edad_max_meses?: number;
+  edad_min_dias?: number;
+  edad_max_dias?: number;
+  sexo?: 'M' | 'F';
+}
+
+// ── Resultados Types ────────────────────────────────────────────────────
+
+/** Single enriched indicator result — matches backend IndicadorResultadoEnrichedResponse */
+export interface IndicadorResultado {
+  id: string;
+  indicador_version_id: string;
+  indicador_nombre: string | null;
+  indicador_version_num: number | null;
+  periodo_inicio: string;
+  periodo_fin: string;
+  valor: number;
+  calculado_en: string;
+}
+
+/** Error entry for a single indicator during batch calculation */
+export interface ErrorCalculo {
+  indicador_id: string;
+  indicador_nombre: string;
+  error: string;
+}
+
+/** Response from POST /resultados/calcular-ahora */
+export interface BatchCalcularNowResponse {
+  calculados: number;
+  errores: ErrorCalculo[];
+  total: number;
+}
+
+/** Filter values for the resultados list */
+export interface ResultadosFilters {
+  indicador_id?: string;
+  periodo_inicio?: string;
+  periodo_fin?: string;
+}
+
+/** Query parameters for GET /resultados */
+export interface GetResultadosParams extends ResultadosFilters {
+  page: number;
+  size: number;
+}

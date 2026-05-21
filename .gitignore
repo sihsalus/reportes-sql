@@ -1,62 +1,52 @@
-# Maven
-target/
-pom.xml.tag
-pom.xml.releaseBackup
-pom.xml.versionsBackup
-pom.xml.next
-release.properties
-dependency-reduced-pom.xml
-buildNumber.properties
-.mvn/timing.properties
-.mvn/wrapper/maven-wrapper.jar
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment
+.env
+.env.*
 
 # IDE
-.idea/
 .vscode/
-*.swp
-*.swo
-*~
-.DS_Store
-.classpath
-.project
-.settings/
-*.iml
-*.iws
-*.ipr
-.netbeans/
-nbproject/
-
-# Compiled classes
-*.class
-*.jar
-*.war
-*.ear
-
-# Gradle
-.gradle/
-build/
-
-# Node (si es necesario)
-node_modules/
-npm-debug.log
-yarn-error.log
+.idea/
 
 # OS
 .DS_Store
 Thumbs.db
-.directory
 
-# Backup files
-*.bak
-*.swp
-*.swo
-*~
+# Coverage
+htmlcov/
+frontend/coverage/
+.coverage
+.coverage.*
+coverage.xml
 
-# Local environment
-.env
-.env.local
-*.pem
-*.key
+# Testing & type checking
+.pytest_cache/
+.mypy_cache/
 
-# Misc
-.history/
+# Node
+node_modules/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+.agents/
+.atl/
+.engram/
+AGENTS.md
+openspec
