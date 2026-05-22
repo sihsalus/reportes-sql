@@ -3,13 +3,20 @@
 Task 4.4:
 - GET /conceptos/encounter-types → proxy OpenMRS encountertype endpoint.
 - GET /conceptos/buscar?q=...&clase=... → proxy OpenMRS concept search.
+- GET /conceptos/diagnosticos/buscar?q= → proxy OpenMRS concept search
+  with v=full and CIE-10 code extraction from names[] (Task 1.2).
 
 All communication uses httpx.AsyncClient with Basic Auth. Connection errors
 return 502 Bad Gateway with a descriptive message.
 """
 
+import re
+import uuid as _uuid
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Query, status
 from httpx import AsyncClient, BasicAuth, HTTPStatusError, RequestError, TimeoutException
+from pydantic import BaseModel, ConfigDict
 
 from app.config import settings
 
@@ -34,6 +41,45 @@ def _openmrs_url(path: str) -> str:
     """
     base = settings.openmrs_api_url.rstrip("/")
     return f"{base}/ws/rest/v1/{path.lstrip('/')}"
+
+
+# ── CIE-10 extraction helpers ───────────────────────────────────────────
+
+# Regex: Starts with a letter (A-Z), followed by one or more digits.
+# Case-insensitive, anchored to the start of the string.
+_CIE10_RE = re.compile(r"^[A-Z]\d", re.IGNORECASE)
+
+
+def _extract_cie10_from_names(names: list[dict]) -> Optional[str]:
+    """Return the first names[].display that matches the CIE-10 code pattern."""
+    for entry in names:
+        if _CIE10_RE.match(entry.get("display", "")):
+            return entry["display"]
+    return None
+
+
+def _extract_nombre_from_names(names: list[dict]) -> Optional[str]:
+    """Return the first names[].display that does NOT match the CIE-10 pattern."""
+    for entry in names:
+        if not _CIE10_RE.match(entry.get("display", "")):
+            return entry["display"]
+    return None
+
+
+# ── Response model ──────────────────────────────────────────────────────
+
+
+class DiagnosticoConceptoOut(BaseModel):
+    """Diagnosis concept option returned by the search endpoint.
+
+    `codigo` is optional and excluded from JSON when absent.
+    `nombre` falls back to the root `display` if no suitable name is found.
+    """
+
+    model_config = ConfigDict(exclude_none=True)
+    uuid: _uuid.UUID
+    codigo: Optional[str] = None
+    nombre: str
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────
@@ -107,6 +153,82 @@ async def buscar_conceptos(
                 {"uuid": item["uuid"], "display": item["display"]}
                 for item in data.get("results", [])
             ]
+    except (RequestError, TimeoutException) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error conectando a OpenMRS: {exc}",
+        )
+    except HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"OpenMRS respondió con error: {exc.response.status_code}",
+        )
+
+
+@router.get(
+    "/diagnosticos/buscar",
+    summary="Buscar conceptos de diagnóstico con código CIE-10",
+    response_model=list[DiagnosticoConceptoOut],
+    response_model_exclude_none=True,
+)
+async def buscar_diagnosticos(
+    q: str = Query(
+        "",
+        description="Search text for diagnosis concepts",
+    ),
+):
+    """Search OpenMRS diagnosis concepts, extracting CIE-10 codes from names.
+
+    Proxies: GET {OPENMRS_API_URL}/ws/rest/v1/concept
+             ?q={q}&v=full&limit=10&class=Diagnosis
+
+    For each result, extracts:
+    - uuid from root
+    - codigo from names[].display matching CIE-10 regex (/^[A-Z]\\d/i)
+    - nombre from names[].display NOT matching the code pattern,
+      falling back to root.display if no non-code name is found
+
+    Returns 400 when q is empty or whitespace-only (after strip).
+    Returns 502 on any OpenMRS connection or HTTP error.
+    """
+    query = q.strip()
+    if not query:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El parámetro 'q' es obligatorio y no puede estar vacío",
+        )
+
+    url = _openmrs_url("concept")
+    params = {
+        "q": query,
+        "v": "full",
+        "limit": 10,
+        "class": "Diagnosis",
+    }
+
+    try:
+        async with AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, params=params, auth=_auth())
+            response.raise_for_status()
+            data = response.json()
+
+            results: list[DiagnosticoConceptoOut] = []
+            for item in data.get("results", []):
+                names: list[dict] = item.get("names", [])
+                codigo = _extract_cie10_from_names(names)
+                nombre = _extract_nombre_from_names(names)
+                if nombre is None:
+                    nombre = item.get("display", "Sin nombre")
+
+                results.append(
+                    DiagnosticoConceptoOut(
+                        uuid=item["uuid"],
+                        codigo=codigo,
+                        nombre=nombre,
+                    )
+                )
+            return results
+
     except (RequestError, TimeoutException) as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

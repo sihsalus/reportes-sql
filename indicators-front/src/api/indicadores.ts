@@ -13,6 +13,7 @@ import type {
   IndicadorUpdatePayload,
   IndicadorVersion,
   EncounterTypeOption,
+  DiagnosticoOption,
   PaginatedResponse,
 } from './types';
 
@@ -94,6 +95,16 @@ export function updateIndicador(id: string, data: IndicadorUpdatePayload): Promi
  */
 export function getEncounterTypes(): Promise<EncounterTypeOption[]> {
   return apiGet<EncounterTypeOption[]>('/conceptos/encounter-types');
+}
+
+/**
+ * Search diagnosis concepts with CIE-10 code extraction.
+ *
+ * Backend: `GET /conceptos/diagnosticos/buscar?q={q}`
+ * Returns a list of [{uuid, codigo?, nombre}].
+ */
+export function searchDiagnosticos(q: string): Promise<DiagnosticoOption[]> {
+  return apiGet<DiagnosticoOption[]>('/conceptos/diagnosticos/buscar', { q });
 }
 
 /**

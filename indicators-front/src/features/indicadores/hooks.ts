@@ -11,6 +11,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
 import {
   getIndicadores,
   getIndicador,
@@ -19,6 +20,7 @@ import {
   createIndicador,
   updateIndicador,
   getEncounterTypes,
+  searchDiagnosticos,
 } from '@/api/indicadores';
 import type {
   Indicador,
@@ -27,6 +29,7 @@ import type {
   IndicadorUpdatePayload,
   IndicadorVersion,
   EncounterTypeOption,
+  DiagnosticoOption,
   PaginatedResponse,
 } from '@/api/types';
 
@@ -281,6 +284,54 @@ export function useEncounterTypes(): UseEncounterTypesResult {
   const { data, isLoading, isError, error } = useQuery<EncounterTypeOption[], Error>({
     queryKey: ['encounter-types'],
     queryFn: () => getEncounterTypes(),
+  });
+
+  return { data, isLoading, isError, error };
+}
+
+// ── Debounce hook ──────────────────────────────────────────────────────
+
+/**
+ * Debounce a value by the specified delay in milliseconds.
+ *
+ * The debounced value only updates after `delay` ms of inactivity.
+ * Used to delay search queries until the user stops typing.
+ */
+export function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+// ── Diagnóstico search hook ────────────────────────────────────────────
+
+/** Return type for useDiagnosticoSearch query hook. */
+export interface UseDiagnosticoSearchResult {
+  data: DiagnosticoOption[] | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+}
+
+/**
+ * Search diagnosis concepts via OpenMRS proxy with debounce control.
+ *
+ * Query is enabled only when the input has 2+ characters,
+ * preventing premature requests on short or empty inputs.
+ * The debounce should be applied OUTSIDE this hook — pass the
+ * already-debounced value as `query`.
+ */
+export function useDiagnosticoSearch(query: string): UseDiagnosticoSearchResult {
+  const { data, isLoading, isError, error } = useQuery<DiagnosticoOption[], Error>({
+    queryKey: ['diagnosticos', query],
+    queryFn: () => searchDiagnosticos(query),
+    enabled: query.trim().length >= 2,
+    staleTime: 60_000, // 1-minute cache for repeated searches
   });
 
   return { data, isLoading, isError, error };

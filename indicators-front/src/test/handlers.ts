@@ -6,7 +6,7 @@
  */
 
 import { http, HttpResponse } from 'msw';
-import type { Indicador, IndicadorDetail, IndicadorVersion, PaginatedResponse, IndicadorResultado, BatchCalcularNowResponse } from '@/api/types';
+import type { Indicador, IndicadorDetail, IndicadorVersion, PaginatedResponse, IndicadorResultado, BatchCalcularNowResponse, DiagnosticoOption } from '@/api/types';
 
 /** In-memory fixture store — shared across handlers. */
 const fixtureIndicadores: Indicador[] = [
@@ -475,6 +475,55 @@ export const handlers = [
       { uuid: '550e8400-e29b-41d4-a716-446655440000', display: 'Consulta' },
       { uuid: '550e8400-e29b-41d4-a716-446655440001', display: 'Hospitalización' },
     ]);
+  }),
+
+  /**
+   * GET /conceptos/diagnosticos/buscar — returns diagnosis concepts.
+   *
+   * Supports testing: with CIE-10 code, without code,
+   * code-only concept (nombre falls back to display),
+   * empty results when q matches "zzz_no_existe".
+   */
+  http.get('/conceptos/diagnosticos/buscar', ({ request }) => {
+    const url = new URL(request.url);
+    const q = url.searchParams.get('q') || '';
+
+    // Edge case: request with empty q returns empty (shouldn't happen in normal flow)
+    if (!q || q.trim().length === 0) {
+      return HttpResponse.json([]);
+    }
+
+    // Simulate no results
+    if (q === 'zzz_no_existe') {
+      return HttpResponse.json([]);
+    }
+
+    const results: DiagnosticoOption[] = [
+      {
+        uuid: 'aaaa1111-bbbb-2222-cccc-333333333333',
+        codigo: 'A379',
+        nombre: 'TOS FERINA',
+      },
+      {
+        uuid: 'bbbb2222-cccc-3333-dddd-444444444444',
+        nombre: 'CONSULTA EXTERNA',
+      },
+      {
+        uuid: 'cccc3333-dddd-4444-eeee-555555555555',
+        codigo: 'J180',
+        nombre: 'BRONCONEUMONIA NO ESPECIFICADA',
+      },
+    ];
+
+    // Filter results by search query
+    const lowerQ = q.toLowerCase();
+    const filtered = results.filter(
+      (r) =>
+        r.nombre.toLowerCase().includes(lowerQ) ||
+        r.codigo?.toLowerCase().includes(lowerQ),
+    );
+
+    return HttpResponse.json(filtered);
   }),
 
   /**

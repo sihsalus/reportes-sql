@@ -73,6 +73,13 @@ export interface EncounterTypeOption {
   display: string;
 }
 
+/** Diagnosis concept option returned by GET /conceptos/diagnosticos/buscar */
+export interface DiagnosticoOption {
+  uuid: string;
+  codigo?: string;
+  nombre: string;
+}
+
 /** Frontend representation of DefinicionIndicador for forms */
 export interface DefinicionIndicadorForm {
   tipo: 'conteo_atenciones' | 'conteo_pacientes';

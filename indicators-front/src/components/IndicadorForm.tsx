@@ -7,6 +7,7 @@ import Label from '@/components/ui/Label';
 import Textarea from '@/components/ui/Textarea';
 import Select from '@/components/ui/Select';
 import EncounterTypeSelector from '@/components/EncounterTypeSelector';
+import DiagnosticoSelector from '@/components/DiagnosticoSelector';
 import {
   indicadorFormSchema,
   type IndicadorFormValues,
@@ -321,16 +322,12 @@ export default function IndicadorForm({
 
                         <div className="space-y-3">
                           <div>
-                            <Label htmlFor={`evento.diagnosticos.${index}.concepto_uuid`}>
-                              UUID del concepto
-                            </Label>
-                            <Input
-                              id={`evento.diagnosticos.${index}.concepto_uuid`}
-                              type="text"
-                              placeholder="UUID del concepto de diagnóstico"
-                              {...register(
-                                `evento.diagnosticos.${index}.concepto_uuid`,
-                              )}
+                            <Label>Diagnóstico</Label>
+                            <DiagnosticoSelector
+                              control={control}
+                              name={
+                                `evento.diagnosticos.${index}.concepto_uuid` as const
+                              }
                             />
                           </div>
 

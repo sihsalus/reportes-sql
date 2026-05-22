@@ -183,7 +183,7 @@ describe('IndicadorForm Filtro toggle', () => {
 
     // Should show the diagnosticos section
     expect(screen.getByText('Agregar diagnóstico')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('UUID del concepto de diagnóstico')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Buscar diagnóstico…')).toBeInTheDocument();
   });
 
   it('shows ordenes fields when Órdenes toggle is clicked', async () => {
@@ -202,12 +202,12 @@ describe('IndicadorForm Filtro toggle', () => {
 
     // First select diagnosticos
     await userEvent.click(screen.getByRole('button', { name: 'Diagnósticos' }));
-    expect(screen.getByPlaceholderText('UUID del concepto de diagnóstico')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Buscar diagnóstico…')).toBeInTheDocument();
 
     // Then switch to ordenes
     await userEvent.click(screen.getByRole('button', { name: 'Órdenes' }));
     // The diagnosticos input should be gone
-    expect(screen.queryByPlaceholderText('UUID del concepto de diagnóstico')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Buscar diagnóstico…')).not.toBeInTheDocument();
     // The ordenes input should be visible
     expect(screen.getByPlaceholderText('UUID o identificador del concepto')).toBeInTheDocument();
   });

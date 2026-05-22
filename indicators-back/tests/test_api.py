@@ -76,6 +76,7 @@ def test_all_routers_mounted(client: TestClient):
     # Conceptos router
     assert "/conceptos/encounter-types" in paths  # GET
     assert "/conceptos/buscar" in paths  # GET
+    assert "/conceptos/diagnosticos/buscar" in paths  # GET
 
 
 # ── Schema validation ───────────────────────────────────────────────────
