@@ -90,7 +90,7 @@ export default function IndicadorForm({
     if (mode === 'diagnosticos') {
       // Clear ordenes, set one empty diagnostico
       setValue('evento.ordenes', undefined);
-      setValue('evento.diagnosticos', [{ concepto_uuid: '', tipo_diagnostico: undefined }]);
+      setValue('evento.diagnosticos', [{ concepto_uuids: [], tipo_diagnostico: undefined }]);
     } else if (mode === 'ordenes') {
       // Clear diagnosticos, set one empty orden
       setValue('evento.diagnosticos', undefined);
@@ -291,7 +291,7 @@ export default function IndicadorForm({
                         variant="outline"
                         size="sm"
                         onClick={() =>
-                          appendDiag({ concepto_uuid: '', tipo_diagnostico: undefined })
+                          appendDiag({ concepto_uuids: [], tipo_diagnostico: undefined })
                         }
                       >
                         Agregar diagnóstico
@@ -322,12 +322,12 @@ export default function IndicadorForm({
 
                         <div className="space-y-3">
                           <div>
-                            <Label>Diagnóstico</Label>
+                            <Label htmlFor={`evento.diagnosticos.${index}.concepto_uuids`}>
+                              Conceptos de diagnóstico
+                            </Label>
                             <DiagnosticoSelector
                               control={control}
-                              name={
-                                `evento.diagnosticos.${index}.concepto_uuid` as const
-                              }
+                              name={`evento.diagnosticos.${index}.concepto_uuids` as `evento.diagnosticos.${number}.concepto_uuids`}
                             />
                           </div>
 

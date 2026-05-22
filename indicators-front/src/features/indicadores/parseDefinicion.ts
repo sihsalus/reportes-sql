@@ -49,7 +49,7 @@ export function parseDefinicion(def: unknown): DefinicionIndicadorForm {
       (item) => {
         const i = item as Record<string, unknown>;
         return {
-          concepto_uuid: typeof i.concepto_uuid === 'string' ? i.concepto_uuid : '',
+          concepto_uuids: Array.isArray(i.concepto_uuids) ? i.concepto_uuids as string[] : [],
           tipo_diagnostico:
             (i.tipo_diagnostico as 'definitivo' | 'presuntivo' | undefined) ?? undefined,
         };
@@ -60,7 +60,7 @@ export function parseDefinicion(def: unknown): DefinicionIndicadorForm {
     const oldDiag = d.diagnostico as Record<string, unknown>;
     const tipo = oldDiag.tipo_diagnostico as 'definitivo' | 'presuntivo' | undefined;
     if (tipo) {
-      diagnosticos = [{ concepto_uuid: '', tipo_diagnostico: tipo }];
+      diagnosticos = [{ concepto_uuids: [], tipo_diagnostico: tipo }];
     }
   }
 

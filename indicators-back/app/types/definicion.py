@@ -81,28 +81,31 @@ class FiltrosPoblacion(BaseModel):
 
 
 class FiltroDiagnostico(BaseModel):
-    """Diagnosis filter using OpenMRS concept UUID for diagnosis_coded.
+    """Diagnosis filter using OpenMRS concept UUIDs for diagnosis_coded.
 
-    concepto_uuid identifies a diagnosis concept in OpenMRS. The SQL
-    interpreter resolves it to a concept_id and filters encounter_diagnosis.
-    tipo_diagnostico optionally restricts by diagnosis type.
+    concepto_uuids identifies one or more diagnosis concepts in OpenMRS
+    by their UUID. The SQL interpreter joins encounter_diagnosis → concept
+    and filters by c.uuid IN (:uuids). Multiple UUIDs within a single item
+    use OR logic — the encounter must match at least one.
 
-    concepto_uuid is a plain str — format/existence validation is deferred
-    to the router layer. An empty string means no concept filter (used as
-    backward-compat fallback for old CIE-10 data that cannot be mapped).
+    tipo_diagnostico optionally restricts by certainty:
+    "definitivo" → CONFIRMED, "presuntivo" → PROVISIONAL.
+
+    An empty list means no concept filter (used as backward-compat fallback
+    for old CIE-10 data that cannot be mapped to concept UUIDs).
     """
 
-    concepto_uuid: str
+    concepto_uuids: list[str] = []
     tipo_diagnostico: Literal["definitivo", "presuntivo"] | None = None
 
 
 class FiltroOrden(BaseModel):
     """Order filter using an OpenMRS concept UUID.
 
-    Replaces FiltroObservacion — points to the orders table instead of obs.
-    Each FiltroOrden represents one concept that must be present as a
-    non-voided order on every encounter counted by the indicator.
-    Multiple entries use AND logic — ALL listed concepts must be ordered.
+    Points to the orders table. Each FiltroOrden represents one concept
+    that must be present as a non-voided order on every encounter counted
+    by the indicator. Multiple entries use AND logic — ALL listed concepts
+    must be ordered.
     """
 
     concepto_uuid: str = Field(..., min_length=1)
@@ -198,11 +201,11 @@ class DefinicionIndicador(BaseModel):
         if isinstance(old_diag, dict):
             tipo = old_diag.get("tipo_diagnostico")
             if tipo is not None:
-                # Preserve the tipo_diagnostico with empty concepto_uuid
+                # Preserve the tipo_diagnostico with empty concepto_uuids
                 # (old CIE-10 codes cannot be converted to concept UUIDs)
                 evento["diagnosticos"] = [
                     {
-                        "concepto_uuid": "",
+                        "concepto_uuids": [],
                         "tipo_diagnostico": tipo,
                     }
                 ]

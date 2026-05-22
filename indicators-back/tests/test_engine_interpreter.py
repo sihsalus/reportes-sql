@@ -12,6 +12,7 @@ from app.types.definicion import (
 
 UUID_ENC = "12345678-1234-1234-1234-123456789abc"
 UUID_DIAG = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+UUID_DIAG2 = "11111111-2222-3333-4444-555555555555"
 UUID_ORD = "ffffffff-gggg-hhhh-iiii-jjjjjjjjjjjj"
 INICIO = date(2026, 4, 1)
 FIN = date(2026, 4, 30)
@@ -52,8 +53,9 @@ class TestBuildQuery:
         sql, params = build_query(definicion, INICIO, FIN)
         assert "HAVING" in sql
 
-    def test_diagnosticos_join_present(self):
-        """Nested diagnosticos inside evento generates encounter_diagnosis join."""
+    def test_diagnosticos_join_and_filter(self):
+        """Nested diagnosticos generates encounter_diagnosis + concept JOIN
+        and filters by c.uuid + certainty."""
         definicion = DefinicionIndicador(
             tipo="conteo_atenciones",
             periodo="mes_actual",
@@ -61,21 +63,21 @@ class TestBuildQuery:
                 encounter_type_uuids=[UUID_ENC],
                 diagnosticos=[
                     FiltroDiagnostico(
-                        concepto_uuid=UUID_DIAG,
+                        concepto_uuids=[UUID_DIAG],
                         tipo_diagnostico="definitivo",
                     ),
                 ],
             ),
         )
-        concept_map = {UUID_DIAG: 42}
-        sql, params = build_query(definicion, INICIO, FIN, concept_map=concept_map)
+        sql, params = build_query(definicion, INICIO, FIN)
         assert "encounter_diagnosis" in sql
-        assert "diagnosis_coded" in sql
-        assert "diagnosis_type" in sql
-        assert "definitivo" in params.values()
+        assert "concept c" in sql
+        assert "c.uuid IN" in sql
+        assert "ed.certainty" in sql
+        assert "CONFIRMED" in params.values()
 
-    def test_diagnosticos_tipo_only(self):
-        """Diagnostico with only tipo_diagnostico (empty concepto)."""
+    def test_diagnosticos_presuntivo(self):
+        """tipo_diagnostico="presuntivo" maps to certainty PROVISIONAL."""
         definicion = DefinicionIndicador(
             tipo="conteo_atenciones",
             periodo="mes_actual",
@@ -83,30 +85,73 @@ class TestBuildQuery:
                 encounter_type_uuids=[UUID_ENC],
                 diagnosticos=[
                     FiltroDiagnostico(
-                        concepto_uuid=UUID_DIAG,
+                        concepto_uuids=[UUID_DIAG],
                         tipo_diagnostico="presuntivo",
                     ),
                 ],
             ),
         )
-        concept_map = {}  # Concept not resolved — only tipo filter applies
-        sql, params = build_query(definicion, INICIO, FIN, concept_map=concept_map)
-        assert "diagnosis_type" in sql
-        assert "presuntivo" in params.values()
+        sql, params = build_query(definicion, INICIO, FIN)
+        assert "ed.certainty" in sql
+        assert "PROVISIONAL" in params.values()
 
-    def test_diagnosticos_no_match_omits_filter(self):
-        """When no diagnosticos concept resolves, no filter emitted."""
+    def test_diagnosticos_empty_uuids_omits_concept_filter(self):
+        """Empty concepto_uuids emits only certainty filter, no concept JOIN."""
         definicion = DefinicionIndicador(
             tipo="conteo_atenciones",
             periodo="mes_actual",
             evento=FiltrosEvento(
                 encounter_type_uuids=[UUID_ENC],
                 diagnosticos=[
-                    FiltroDiagnostico(concepto_uuid=UUID_DIAG),
+                    FiltroDiagnostico(
+                        concepto_uuids=[],
+                        tipo_diagnostico="definitivo",
+                    ),
                 ],
             ),
         )
-        sql, params = build_query(definicion, INICIO, FIN, concept_map={})
+        sql, params = build_query(definicion, INICIO, FIN)
+        # certainty filter still present
+        assert "ed.certainty" in sql
+        # but no concept UUID filter
+        assert "c.uuid IN" not in sql
+
+    def test_diagnosticos_multiple_uuids_or_logic(self):
+        """Multiple UUIDs in one FiltroDiagnostico use IN clause."""
+        definicion = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            evento=FiltrosEvento(
+                encounter_type_uuids=[UUID_ENC],
+                diagnosticos=[
+                    FiltroDiagnostico(
+                        concepto_uuids=[UUID_DIAG, UUID_DIAG2],
+                    ),
+                ],
+            ),
+        )
+        sql, params = build_query(definicion, INICIO, FIN)
+        assert "c.uuid IN" in sql
+        # Both UUIDs should be in params
+        found = False
+        for v in params.values():
+            if isinstance(v, tuple) and UUID_DIAG in v and UUID_DIAG2 in v:
+                found = True
+        assert found, "Params should contain tuple with both UUIDs"
+
+    def test_diagnosticos_no_match_omits_filter(self):
+        """When no diagnosticos have concept_uuids, no filter emitted."""
+        definicion = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            evento=FiltrosEvento(
+                encounter_type_uuids=[UUID_ENC],
+                diagnosticos=[
+                    FiltroDiagnostico(concepto_uuids=[]),
+                ],
+            ),
+        )
+        sql, params = build_query(definicion, INICIO, FIN)
         assert "encounter_diagnosis" not in sql
 
     def test_ordenes_generates_exists(self):
@@ -202,14 +247,13 @@ class TestBuildQuery:
                 minimo_ocurrencias=3,
                 diagnosticos=[
                     FiltroDiagnostico(
-                        concepto_uuid=UUID_DIAG,
+                        concepto_uuids=[UUID_DIAG],
                         tipo_diagnostico="definitivo",
                     ),
                 ],
             ),
         )
-        concept_map = {UUID_DIAG: 42}
-        sql, params = build_query(definicion, INICIO, FIN, concept_map=concept_map)
+        sql, params = build_query(definicion, INICIO, FIN)
         assert "HAVING" in sql
         assert "encounter_diagnosis" in sql
 

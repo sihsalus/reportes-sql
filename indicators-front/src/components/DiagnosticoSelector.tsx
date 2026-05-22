@@ -18,10 +18,10 @@ export interface DiagnosticoSelectorProps<
 }
 
 /**
- * Controlled diagnosis concept selector for react-hook-form.
+ * Multi-select diagnosis concept selector for react-hook-form.
  *
- * Renders a search input with debounced query to the backend.
- * On selection, stores only the concept `uuid` in the form field.
+ * Stores an array of concept UUIDs in the form field.
+ * Selected concepts appear as removable chips below the search input.
  */
 export default function DiagnosticoSelector<
   TFieldValues extends Record<string, unknown> = Record<string, unknown>,
@@ -31,16 +31,23 @@ export default function DiagnosticoSelector<
       control={control}
       name={name}
       render={({ field }) => {
-        const selectedUuid = (field.value as string) || '';
+        const selectedUuids: string[] = Array.isArray(field.value) ? field.value : [];
 
         const handleSelect = (uuid: string) => {
-          field.onChange(uuid);
+          if (!selectedUuids.includes(uuid)) {
+            field.onChange([...selectedUuids, uuid]);
+          }
+        };
+
+        const handleRemove = (uuid: string) => {
+          field.onChange(selectedUuids.filter((u) => u !== uuid));
         };
 
         return (
           <DiagnosticoDropdown
-            selectedUuid={selectedUuid}
+            selectedUuids={selectedUuids}
             onSelect={handleSelect}
+            onRemove={handleRemove}
           />
         );
       }}
@@ -53,13 +60,15 @@ export default function DiagnosticoSelector<
 // ══════════════════════════════════════════════════════════════════════════
 
 interface DiagnosticoDropdownProps {
-  selectedUuid: string;
+  selectedUuids: string[];
   onSelect: (uuid: string) => void;
+  onRemove: (uuid: string) => void;
 }
 
 function DiagnosticoDropdown({
-  selectedUuid,
+  selectedUuids,
   onSelect,
+  onRemove,
 }: DiagnosticoDropdownProps): ReactElement {
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
@@ -97,23 +106,17 @@ function DiagnosticoDropdown({
 
   const handleSelect = (option: DiagnosticoOption) => {
     onSelect(option.uuid);
-    setSearch(formatLabel(option));
+    setSearch('');
     setOpen(false);
   };
 
-  const selectedOption = data?.find((opt) => opt.uuid === selectedUuid);
-
   return (
-    <div ref={wrapperRef} className="relative">
+    <div ref={wrapperRef} className="space-y-2">
       {/* Search input */}
       <div className="relative">
         <Input
           type="text"
-          placeholder={
-            selectedOption
-              ? formatLabel(selectedOption)
-              : 'Buscar diagnóstico…'
-          }
+          placeholder="Buscar diagnóstico…"
           value={search}
           onChange={handleInputChange}
           onFocus={handleInputFocus}
@@ -123,6 +126,30 @@ function DiagnosticoDropdown({
           role="combobox"
         />
       </div>
+
+      {/* Selected chips */}
+      {selectedUuids.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {selectedUuids.map((uuid) => (
+            <span
+              key={uuid}
+              className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700"
+            >
+              <span className="font-mono">
+                {uuid.length > 8 ? `${uuid.slice(0, 8)}…` : uuid}
+              </span>
+              <button
+                type="button"
+                onClick={() => onRemove(uuid)}
+                className="ml-0.5 rounded-full p-0.5 text-blue-500 hover:bg-blue-200 hover:text-blue-800"
+                aria-label={`Quitar ${uuid}`}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Dropdown */}
       {showDropdown && (
@@ -165,9 +192,14 @@ function DiagnosticoDropdown({
                 key={option.uuid}
                 type="button"
                 role="option"
-                aria-selected={option.uuid === selectedUuid}
+                aria-selected={selectedUuids.includes(option.uuid)}
+                disabled={selectedUuids.includes(option.uuid)}
                 onClick={() => handleSelect(option)}
-                className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none"
+                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 focus:bg-blue-50 focus:outline-none ${
+                  selectedUuids.includes(option.uuid)
+                    ? 'cursor-default bg-blue-50 text-gray-400'
+                    : 'cursor-pointer text-gray-700'
+                }`}
               >
                 {option.codigo && (
                   <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-mono text-gray-600">
@@ -175,19 +207,15 @@ function DiagnosticoDropdown({
                   </span>
                 )}
                 <span className="truncate">{option.nombre}</span>
+                {selectedUuids.includes(option.uuid) && (
+                  <span className="ml-auto shrink-0 text-xs text-gray-400">
+                    Seleccionado
+                  </span>
+                )}
               </button>
             ))}
         </div>
       )}
     </div>
   );
-}
-
-// ── Label formatting ─────────────────────────────────────────────────────
-
-function formatLabel(option: DiagnosticoOption): string {
-  if (option.codigo) {
-    return `${option.codigo} → ${option.nombre}`;
-  }
-  return option.nombre;
 }

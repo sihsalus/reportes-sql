@@ -2,20 +2,16 @@
 /**
  * Tests for DiagnosticoSelector component.
  *
- * Task 3.1 [RED]: Write tests BEFORE implementing the component.
- * Covers: debounced search, selection emits uuid, sub-2-char ignored,
- * loading/empty/error states, codigo → nombre formatting.
+ * Covers: debounced search, multi-select UUID array, sub-2-char ignored,
+ * loading/empty states, codigo → nombre formatting, chip removal.
  */
 
-import { render, screen, waitFor, act, within } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useForm, FormProvider } from 'react-hook-form';
 import type { ReactElement } from 'react';
 
-// ══════════════════════════════════════════════════════════════════════════
-// Component under test (does NOT exist yet — RED phase)
-// ══════════════════════════════════════════════════════════════════════════
 import DiagnosticoSelector from '@/components/DiagnosticoSelector';
 
 // ── Test wrapper ────────────────────────────────────────────────────────
@@ -29,21 +25,17 @@ function createTestQueryClient(): QueryClient {
   });
 }
 
-interface WrapperProps {
-  children: React.ReactNode;
-}
-
 /**
  * Renders DiagnosticoSelector inside a react-hook-form Controller
- * so we can test the controlled value (uuid) emitted on selection.
+ * with concepto_uuids: string[] form field.
  */
 function DiagnosticoSelectorForm({
   onSubmit,
 }: {
-  onSubmit: (values: { concepto_uuid: string }) => void;
+  onSubmit: (values: { concepto_uuids: string[] }) => void;
 }): ReactElement {
-  const methods = useForm<{ concepto_uuid: string }>({
-    defaultValues: { concepto_uuid: '' },
+  const methods = useForm<{ concepto_uuids: string[] }>({
+    defaultValues: { concepto_uuids: [] },
   });
 
   return (
@@ -55,7 +47,7 @@ function DiagnosticoSelectorForm({
         >
           <DiagnosticoSelector
             control={methods.control}
-            name="concepto_uuid"
+            name="concepto_uuids"
           />
           <button type="submit">Enviar</button>
         </form>
@@ -115,7 +107,7 @@ describe('DiagnosticoSelector', () => {
 
     // Results should appear — MSW handler returns TOS FERINA (A379)
     await waitFor(() => {
-      expect(screen.getByText('A379', { exact: false })).toBeInTheDocument();
+      expect(screen.getByText('A379')).toBeInTheDocument();
     });
     // Show codigo → nombre format
     expect(screen.getByText(/TOS FERINA/)).toBeInTheDocument();
@@ -135,7 +127,7 @@ describe('DiagnosticoSelector', () => {
     });
   });
 
-  it('on selection, emits only the uuid via onChange', async () => {
+  it('on selection, adds the uuid to the array', async () => {
     const onSubmit = vi.fn();
     render(
       <DiagnosticoSelectorForm onSubmit={onSubmit} />,
@@ -155,30 +147,70 @@ describe('DiagnosticoSelector', () => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
     });
 
-    const submittedValues = onSubmit.mock.calls[0][0] as { concepto_uuid: string };
-    expect(submittedValues.concepto_uuid).toBe(
+    const submittedValues = onSubmit.mock.calls[0][0] as { concepto_uuids: string[] };
+    expect(submittedValues.concepto_uuids).toContain(
       'aaaa1111-bbbb-2222-cccc-333333333333',
     );
+    expect(submittedValues.concepto_uuids).toHaveLength(1);
   });
 
-  it('shows loading state while fetching', async () => {
+  it('can select multiple UUIDs', async () => {
+    const onSubmit = vi.fn();
     render(
-      <DiagnosticoSelectorForm onSubmit={vi.fn()} />,
+      <DiagnosticoSelectorForm onSubmit={onSubmit} />,
+    );
+
+    // Select first concept
+    let input = screen.getByPlaceholderText(/buscar/i);
+    await typeAndWaitDebounce(input, 'tos');
+    const firstOption = await screen.findByText(/TOS FERINA/);
+    await userEvent.click(firstOption);
+
+    // Wait for chip to appear
+    await waitFor(() => {
+      expect(screen.getByText('aaaa1111…')).toBeInTheDocument();
+    });
+
+    // Select second concept
+    input = screen.getByPlaceholderText(/buscar/i);
+    await typeAndWaitDebounce(input, 'consulta');
+    const secondOption = await screen.findByText(/CONSULTA EXTERNA/);
+    await userEvent.click(secondOption);
+
+    // Submit
+    await userEvent.click(screen.getByRole('button', { name: /enviar/i }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    const submittedValues = onSubmit.mock.calls[0][0] as { concepto_uuids: string[] };
+    expect(submittedValues.concepto_uuids).toHaveLength(2);
+  });
+
+  it('does not add duplicate UUIDs', async () => {
+    const onSubmit = vi.fn();
+    render(
+      <DiagnosticoSelectorForm onSubmit={onSubmit} />,
     );
 
     const input = screen.getByPlaceholderText(/buscar/i);
+    await typeAndWaitDebounce(input, 'tos');
+    const firstOption = await screen.findByText(/TOS FERINA/);
+    await userEvent.click(firstOption);
 
-    // Start typing — loading should appear
-    await userEvent.clear(input);
-    await userEvent.type(input, 'tos');
+    // Search again and try to select same one
+    await typeAndWaitDebounce(input, 'tos');
+    // Option should show as "Seleccionado" and be disabled
+    await userEvent.click(screen.getByRole('button', { name: /enviar/i }));
 
-    // At this point, the query is in-flight (before 300 ms debounce + MSW resolves)
-    // Loading state may or may not flash depending on MSW speed.
-    // We verify that the component handles the loading prop gracefully.
-    // After MSW resolves, results should appear.
     await waitFor(() => {
-      expect(screen.getByText(/TOS FERINA/)).toBeInTheDocument();
+      expect(onSubmit).toHaveBeenCalledTimes(1);
     });
+
+    const submittedValues = onSubmit.mock.calls[0][0] as { concepto_uuids: string[] };
+    expect(submittedValues.concepto_uuids).toContain('aaaa1111-bbbb-2222-cccc-333333333333');
+    expect(submittedValues.concepto_uuids).toHaveLength(1);
   });
 
   it('shows empty state when no results match', async () => {

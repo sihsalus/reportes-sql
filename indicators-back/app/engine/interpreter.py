@@ -92,9 +92,10 @@ def _build_conteo_atenciones(
     diagnosticos: list[FiltroDiagnostico] | None = (
         evento.diagnosticos if evento is not None else None
     )
-    diag_clause, diag_params = _build_diagnosticos_filter(diagnosticos, concept_map)
+    diag_joins, diag_clause, diag_params = _build_diagnosticos_filter(diagnosticos)
+    if diag_joins:
+        joins += "\n" + diag_joins
     if diag_clause:
-        joins += "\nJOIN encounter_diagnosis ed ON ed.encounter_id = e.encounter_id AND ed.voided = 0"
         conditions.append(diag_clause)
         params.update(diag_params)
 
@@ -228,9 +229,10 @@ def _build_conteo_pacientes(
             params[_param_name("et", i)] = u
 
     # ── Diagnosticos filter ──
-    diag_clause, diag_params = _build_diagnosticos_filter(diagnosticos, concept_map)
+    diag_joins, diag_clause, diag_params = _build_diagnosticos_filter(diagnosticos)
+    if diag_joins:
+        joins += "\n" + diag_joins
     if diag_clause:
-        joins += "\nJOIN encounter_diagnosis ed ON ed.encounter_id = e.encounter_id AND ed.voided = 0"
         conditions.append(diag_clause)
         params.update(diag_params)
 
@@ -318,12 +320,10 @@ def _build_minimo_ocurrencias_subquery(
             conditions.append("p.gender = %(sexo)s")
 
     # ── Diagnosticos filter (inside subquery) ──
-    diag_clause, diag_params = _build_diagnosticos_filter(diagnosticos, concept_map)
+    diag_joins, diag_clause, diag_params = _build_diagnosticos_filter(diagnosticos)
+    if diag_joins:
+        joins += "\n" + diag_joins
     if diag_clause:
-        joins += (
-            "\nJOIN encounter_diagnosis ed ON ed.encounter_id = e.encounter_id"
-            " AND ed.voided = 0"
-        )
         conditions.append(diag_clause)
         params.update(diag_params)
 
@@ -420,28 +420,24 @@ def _build_age_filter(
 
 def _build_diagnosticos_filter(
     diagnosticos: list[FiltroDiagnostico] | None,
-    concept_map: dict[str, int] | None = None,
-) -> tuple[str, dict]:
-    """Build WHERE conditions for diagnosis-based filtering.
+) -> tuple[str, str, dict]:
+    """Build JOINs and WHERE conditions for diagnosis-based filtering.
 
-    For each FiltroDiagnostico, resolves concepto_uuid to concept_id
-    and filters encounter_diagnosis.diagnosis_coded. Items use OR logic
-    — an encounter must match at least one. tipo_diagnostico (first
-    non-None across all items) further restricts by diagnosis_type.
-
-    Does NOT emit the JOIN itself — the caller is responsible for adding
-    ``JOIN encounter_diagnosis ed ON ... AND ed.voided = 0`` when this
-    function returns a non-empty clause.
+    Joins encounter_diagnosis → concept and filters by c.uuid IN (:uuids).
+    Items use OR logic — an encounter must match at least one FiltroDiagnostico
+    item. tipo_diagnostico (first non-None across all items) restricts by
+    encounter_diagnosis.certainty.
 
     Args:
         diagnosticos: List of FiltroDiagnostico from evento.diagnosticos.
-        concept_map: Resolved mapping from concepto string to OpenMRS concept_id.
 
     Returns:
-        (clause_string, params_dict) or ("", {}).
+        (joins_string, clause_string, params_dict) or ("", "", {}).
+        The caller appends joins_string to the query joins and
+        clause_string to WHERE conditions.
     """
     if not diagnosticos:
-        return "", {}
+        return "", "", {}
 
     params: dict = {}
     conditions: list[str] = []
@@ -449,33 +445,32 @@ def _build_diagnosticos_filter(
     # ── Concept UUID conditions (OR logic across items) ──
     item_clauses: list[str] = []
     for i, fd in enumerate(diagnosticos):
-        item_conds: list[str] = []
-        if fd.concepto_uuid and concept_map and fd.concepto_uuid in concept_map:
-            pk = f"diag_cd_{i}"
-            params[pk] = concept_map[fd.concepto_uuid]
-            item_conds.append(f"ed.diagnosis_coded = %({pk})s")
-        if item_conds:
-            item_clauses.append("(" + " AND ".join(item_conds) + ")")
+        if fd.concepto_uuids:
+            pk = f"diag_uuids_{i}"
+            params[pk] = tuple(fd.concepto_uuids)
+            item_clauses.append(f"c.uuid IN %({pk})s")
 
     if item_clauses:
         conditions.append("(" + " OR ".join(item_clauses) + ")")
 
-    # ── Tipo diagnóstico (first non-None across all items) ──
+    # ── Tipo diagnóstico → certainty mapping ──
     first_tipo = next(
         (fd.tipo_diagnostico for fd in diagnosticos if fd.tipo_diagnostico), None
     )
     if first_tipo:
-        params["tipo_diag"] = first_tipo
-        conditions.append("ed.diagnosis_type = %(tipo_diag)s")
+        certainty = "CONFIRMED" if first_tipo == "definitivo" else "PROVISIONAL"
+        params["diag_certainty"] = certainty
+        conditions.append("ed.certainty = %(diag_certainty)s")
 
     if not conditions:
-        return "", {}
+        return "", "", {}
 
-    return " AND ".join(conditions), params
-
-
-# Re-export old name for backward compat in tests
-_build_diagnostico_filter = _build_diagnosticos_filter
+    joins = (
+        "JOIN encounter_diagnosis ed ON ed.encounter_id = e.encounter_id AND ed.voided = 0\n"
+        "JOIN concept c ON c.concept_id = ed.diagnosis_coded"
+    )
+    clause = " AND ".join(conditions)
+    return joins, clause, params
 
 
 def _param_name(prefix: str, index: int) -> str:

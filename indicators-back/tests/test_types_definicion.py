@@ -29,7 +29,7 @@ class TestDefinicionIndicador:
                 encounter_type_uuids=["uuid-consulta-externa"],
                 diagnosticos=[
                     FiltroDiagnostico(
-                        concepto_uuid="uuid-diag-1",
+                        concepto_uuids=["uuid-diag-1"],
                         tipo_diagnostico="definitivo",
                     ),
                 ],
@@ -37,7 +37,7 @@ class TestDefinicionIndicador:
         )
         assert d.evento is not None
         assert d.evento.diagnosticos is not None
-        assert d.evento.diagnosticos[0].concepto_uuid == "uuid-diag-1"
+        assert d.evento.diagnosticos[0].concepto_uuids == ["uuid-diag-1"]
         assert d.evento.diagnosticos[0].tipo_diagnostico == "definitivo"
 
     def test_full_with_ordenes(self):
@@ -80,7 +80,7 @@ class TestMutualExclusivity:
     def test_only_diagnosticos_passes(self):
         ev = FiltrosEvento(
             encounter_type_uuids=["uuid-x"],
-            diagnosticos=[FiltroDiagnostico(concepto_uuid="uuid-d")],
+            diagnosticos=[FiltroDiagnostico(concepto_uuids=["uuid-d"])],
         )
         assert ev.diagnosticos is not None
         assert ev.ordenes is None
@@ -102,7 +102,7 @@ class TestMutualExclusivity:
         with pytest.raises(ValidationError, match="mutually exclusive"):
             FiltrosEvento(
                 encounter_type_uuids=["uuid-x"],
-                diagnosticos=[FiltroDiagnostico(concepto_uuid="uuid-d")],
+                diagnosticos=[FiltroDiagnostico(concepto_uuids=["uuid-d"])],
                 ordenes=[FiltroOrden(concepto_uuid="uuid-o")],
             )
 
@@ -113,7 +113,7 @@ class TestMutualExclusivity:
                 periodo="mes_actual",
                 evento=FiltrosEvento(
                     encounter_type_uuids=["uuid-x"],
-                    diagnosticos=[FiltroDiagnostico(concepto_uuid="uuid-d")],
+                    diagnosticos=[FiltroDiagnostico(concepto_uuids=["uuid-d"])],
                     ordenes=[FiltroOrden(concepto_uuid="uuid-o")],
                 ),
             )
@@ -136,7 +136,7 @@ class TestBackwardCompatNormalizer:
         assert d.evento is not None
         assert d.evento.diagnosticos is not None
         assert len(d.evento.diagnosticos) == 1
-        assert d.evento.diagnosticos[0].concepto_uuid == ""
+        assert d.evento.diagnosticos[0].concepto_uuids == []
         assert d.evento.diagnosticos[0].tipo_diagnostico == "definitivo"
 
     def test_old_flat_observaciones_normalizes_to_ordenes(self):
@@ -175,14 +175,14 @@ class TestBackwardCompatNormalizer:
             "evento": {
                 "encounter_type_uuids": ["uuid-x"],
                 "diagnosticos": [
-                    {"concepto_uuid": "uuid-d", "tipo_diagnostico": "presuntivo"},
+                    {"concepto_uuids": ["uuid-d"], "tipo_diagnostico": "presuntivo"},
                 ],
             },
         }
         d = DefinicionIndicador.model_validate(new_data)
         assert d.evento is not None
         assert d.evento.diagnosticos is not None
-        assert d.evento.diagnosticos[0].concepto_uuid == "uuid-d"
+        assert d.evento.diagnosticos[0].concepto_uuids == ["uuid-d"]
 
     def test_idempotent_double_parse(self):
         """Double-validating produces identical model_dump."""
@@ -228,23 +228,28 @@ class TestBackwardCompatNormalizer:
 class TestFiltroDiagnosticoValidation:
     """Validates FiltroDiagnostico model constraints."""
 
-    def test_valid_concepto_uuid(self):
-        fd = FiltroDiagnostico(concepto_uuid="uuid-abc")
-        assert fd.concepto_uuid == "uuid-abc"
+    def test_valid_concepto_uuids(self):
+        fd = FiltroDiagnostico(concepto_uuids=["uuid-abc"])
+        assert fd.concepto_uuids == ["uuid-abc"]
         assert fd.tipo_diagnostico is None
 
     def test_valid_with_tipo(self):
-        fd = FiltroDiagnostico(concepto_uuid="uuid-abc", tipo_diagnostico="definitivo")
+        fd = FiltroDiagnostico(concepto_uuids=["uuid-abc"], tipo_diagnostico="definitivo")
         assert fd.tipo_diagnostico == "definitivo"
 
-    def test_valid_empty_concepto_uuid(self):
-        """Empty concepto_uuid accepted for backward compat (no filter applied)."""
-        fd = FiltroDiagnostico(concepto_uuid="")
-        assert fd.concepto_uuid == ""
+    def test_valid_empty_concepto_uuids(self):
+        """Empty concepto_uuids accepted for backward compat (no filter applied)."""
+        fd = FiltroDiagnostico()
+        assert fd.concepto_uuids == []
+
+    def test_valid_multiple_uuids(self):
+        """Multiple UUIDs in one FiltroDiagnostico."""
+        fd = FiltroDiagnostico(concepto_uuids=["uuid-a", "uuid-b"])
+        assert len(fd.concepto_uuids) == 2
 
     def test_invalid_tipo_rejected(self):
         with pytest.raises(ValidationError):
-            FiltroDiagnostico(concepto_uuid="uuid-abc", tipo_diagnostico="invalido")
+            FiltroDiagnostico(concepto_uuids=["uuid-abc"], tipo_diagnostico="invalido")
 
 
 class TestFiltroOrdenValidation:

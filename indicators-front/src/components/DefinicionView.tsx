@@ -117,11 +117,11 @@ export default function DefinicionView({ definicion }: DefinicionViewProps): Rea
           <ul className="ml-4 list-disc pl-4 text-gray-600">
             {ev.diagnosticos.map((diag, idx) => (
               <li key={idx}>
-                {diag.concepto_uuid ? (
+                {diag.concepto_uuids && diag.concepto_uuids.length > 0 ? (
                   <span className="font-mono text-xs">
-                    {diag.concepto_uuid.length > 8
-                      ? `${diag.concepto_uuid.slice(0, 8)}…`
-                      : diag.concepto_uuid}
+                    {diag.concepto_uuids
+                      .map((u) => (u.length > 8 ? `${u.slice(0, 8)}…` : u))
+                      .join(', ')}
                   </span>
                 ) : (
                   <span className="text-gray-400">Sin concepto</span>

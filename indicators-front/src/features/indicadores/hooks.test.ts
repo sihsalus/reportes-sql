@@ -266,7 +266,7 @@ describe('useCreateVersion', () => {
           minimo_ocurrencias: 1,
           diagnosticos: [
             {
-              concepto_uuid: 'aaaa1111-bbbb-2222-cccc-333333333333',
+              concepto_uuids: ['aaaa1111-bbbb-2222-cccc-333333333333'],
               tipo_diagnostico: 'definitivo',
             },
           ],

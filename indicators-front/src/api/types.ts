@@ -98,7 +98,7 @@ export interface FiltrosEventoForm {
 
 /** Single diagnosis filter for forms — nested inside evento. */
 export interface FiltroDiagnosticoForm {
-  concepto_uuid: string;
+  concepto_uuids: string[];
   tipo_diagnostico?: 'definitivo' | 'presuntivo';
 }
 

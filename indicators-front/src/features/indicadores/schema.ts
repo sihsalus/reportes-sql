@@ -9,7 +9,7 @@ import { z } from 'zod';
  */
 
 export const filtroDiagnosticoSchema = z.object({
-  concepto_uuid: z.string(),
+  concepto_uuids: z.array(z.string()),
   tipo_diagnostico: z.enum(['definitivo', 'presuntivo']).optional(),
 });
 

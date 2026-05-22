@@ -29,7 +29,7 @@ _IRA_DEFINICION = {
         "encounter_type_uuids": ["uuid-consulta-externa"],
         "diagnosticos": [
             {
-                "concepto_uuid": "",
+                "concepto_uuids": ["00000000-0000-0000-0000-000000000ira"],
                 "tipo_diagnostico": "definitivo",
             },
         ],

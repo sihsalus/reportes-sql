@@ -61,7 +61,7 @@ describe('IndicadorForm', () => {
         encounter_type_uuids: [validEncounterUUID],
         minimo_ocurrencias: 2,
         diagnosticos: [
-          { concepto_uuid: 'diag-uuid-1', tipo_diagnostico: 'definitivo' },
+          { concepto_uuids: ['diag-uuid-1'], tipo_diagnostico: 'definitivo' },
         ],
       },
       poblacion: {
@@ -255,7 +255,7 @@ describe('IndicadorForm Filtro toggle', () => {
         encounter_type_uuids: [validEncounterUUID],
         minimo_ocurrencias: 1,
         diagnosticos: [
-          { concepto_uuid: 'diag-uuid-1', tipo_diagnostico: 'definitivo' },
+          { concepto_uuids: ['diag-uuid-1'], tipo_diagnostico: 'definitivo' },
         ],
       },
     };
@@ -277,7 +277,7 @@ describe('IndicadorForm Filtro toggle', () => {
 
     const payload = onSubmit.mock.calls[0][0] as IndicadorFormValues;
     expect(payload.evento?.diagnosticos).toHaveLength(1);
-    expect(payload.evento?.diagnosticos?.[0].concepto_uuid).toBe('diag-uuid-1');
+    expect(payload.evento?.diagnosticos?.[0].concepto_uuids).toContain('diag-uuid-1');
     expect(payload.evento?.diagnosticos?.[0].tipo_diagnostico).toBe('definitivo');
   });
 
