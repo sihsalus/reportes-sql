@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { useForm, useFieldArray, Controller, type Resolver } from 'react-hook-form';
+import { useForm, useFieldArray, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -65,16 +65,6 @@ export default function IndicadorForm({
       : watchedOrdenes && watchedOrdenes.length > 0
         ? 'ordenes'
         : 'ninguno';
-
-  // ── useFieldArray for diagnosticos ──
-  const {
-    fields: diagFields,
-    append: appendDiag,
-    remove: removeDiag,
-  } = useFieldArray({
-    control,
-    name: 'evento.diagnosticos',
-  });
 
   // ── useFieldArray for ordenes ──
   const {
@@ -282,75 +272,35 @@ export default function IndicadorForm({
                 {/* ── Diagnosticos fields ── */}
                 {currentMode === 'diagnosticos' && (
                   <div className="space-y-4 border-t border-gray-100 pt-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-medium text-gray-700">
-                        Diagnósticos
-                      </h3>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          appendDiag({ concepto_uuids: [], tipo_diagnostico: undefined })
-                        }
-                      >
-                        Agregar diagnóstico
-                      </Button>
-                    </div>
+                    <h3 className="text-sm font-medium text-gray-700">
+                      Diagnósticos
+                    </h3>
 
-                    {diagFields.map((field, index) => (
-                      <div
-                        key={field.id}
-                        className="rounded-lg border border-gray-200 bg-gray-50 p-4"
-                      >
-                        <div className="mb-4 flex items-center justify-between">
-                          <h4 className="text-sm font-medium text-gray-600">
-                            Diagnóstico #{index + 1}
-                          </h4>
-                          {diagFields.length > 1 && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => removeDiag(index)}
-                              className="text-red-600 hover:text-red-700"
-                            >
-                              Quitar
-                            </Button>
-                          )}
-                        </div>
-
-                        <div className="space-y-3">
-                          <div>
-                            <Label htmlFor={`evento.diagnosticos.${index}.concepto_uuids`}>
-                              Conceptos de diagnóstico
-                            </Label>
-                            <DiagnosticoSelector
-                              control={control}
-                              name={`evento.diagnosticos.${index}.concepto_uuids` as `evento.diagnosticos.${number}.concepto_uuids`}
-                            />
-                          </div>
-
-                          <div>
-                            <Label
-                              htmlFor={`evento.diagnosticos.${index}.tipo_diagnostico`}
-                            >
-                              Tipo de diagnóstico
-                            </Label>
-                            <Select
-                              id={`evento.diagnosticos.${index}.tipo_diagnostico`}
-                              {...register(
-                                `evento.diagnosticos.${index}.tipo_diagnostico`,
-                              )}
-                            >
-                              <option value="">Sin filtro</option>
-                              <option value="definitivo">Definitivo</option>
-                              <option value="presuntivo">Presuntivo</option>
-                            </Select>
-                          </div>
-                        </div>
+                    <div className="space-y-3">
+                      <div>
+                        <Label htmlFor="evento.diagnosticos.0.concepto_uuids">
+                          Conceptos de diagnóstico
+                        </Label>
+                        <DiagnosticoSelector
+                          control={control}
+                          name={'evento.diagnosticos.0.concepto_uuids' as `evento.diagnosticos.${number}.concepto_uuids`}
+                        />
                       </div>
-                    ))}
+
+                      <div>
+                        <Label htmlFor="evento.diagnosticos.0.tipo_diagnostico">
+                          Tipo de diagnóstico
+                        </Label>
+                        <Select
+                          id="evento.diagnosticos.0.tipo_diagnostico"
+                          {...register('evento.diagnosticos.0.tipo_diagnostico')}
+                        >
+                          <option value="">Sin filtro</option>
+                          <option value="definitivo">Confirmado</option>
+                          <option value="presuntivo">Provisional</option>
+                        </Select>
+                      </div>
+                    </div>
                   </div>
                 )}
 

@@ -181,9 +181,12 @@ describe('IndicadorForm Filtro toggle', () => {
     const diagButton = screen.getByRole('button', { name: 'Diagnósticos' });
     await userEvent.click(diagButton);
 
-    // Should show the diagnosticos section
-    expect(screen.getByText('Agregar diagnóstico')).toBeInTheDocument();
+    // Should show the diagnosticos section with single block, no agregar button
     expect(screen.getByPlaceholderText('Buscar diagnóstico…')).toBeInTheDocument();
+    // "Agregar diagnóstico" button must NOT be present (single unified block)
+    expect(screen.queryByText('Agregar diagnóstico')).not.toBeInTheDocument();
+    // No "Diagnóstico #N" headings in single-block mode
+    expect(screen.queryByText(/Diagnóstico #/)).not.toBeInTheDocument();
   });
 
   it('shows ordenes fields when Órdenes toggle is clicked', async () => {

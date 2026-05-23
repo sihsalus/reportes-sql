@@ -166,10 +166,12 @@ describe('DiagnosticoSelector', () => {
     const firstOption = await screen.findByText(/TOS FERINA/);
     await userEvent.click(firstOption);
 
-    // Wait for chip to appear
+    // Wait for chip with {codigo} → {nombre} format and title tooltip
     await waitFor(() => {
-      expect(screen.getByText('aaaa1111…')).toBeInTheDocument();
+      expect(screen.getByTitle('TOS FERINA')).toBeInTheDocument();
     });
+    const chip = screen.getByTitle('TOS FERINA');
+    expect(chip).toHaveTextContent(/A379.*TOS FERINA/);
 
     // Select second concept
     input = screen.getByPlaceholderText(/buscar/i);
@@ -211,6 +213,28 @@ describe('DiagnosticoSelector', () => {
     const submittedValues = onSubmit.mock.calls[0][0] as { concepto_uuids: string[] };
     expect(submittedValues.concepto_uuids).toContain('aaaa1111-bbbb-2222-cccc-333333333333');
     expect(submittedValues.concepto_uuids).toHaveLength(1);
+  });
+
+  it('renders chip with truncated UUID fallback when concept has no codigo', async () => {
+    render(
+      <DiagnosticoSelectorForm onSubmit={vi.fn()} />,
+    );
+
+    const input = screen.getByPlaceholderText(/buscar/i);
+    await typeAndWaitDebounce(input, 'consulta');
+
+    // Select CONSULTA EXTERNA (has no codigo in mock)
+    const consultaOption = await screen.findByText('CONSULTA EXTERNA');
+    await userEvent.click(consultaOption);
+
+    // Chip should show truncated UUID as fallback (no codigo → no arrow)
+    await waitFor(() => {
+      expect(screen.getByText('bbbb2222…')).toBeInTheDocument();
+    });
+
+    // Should still have a title with the full name
+    const chip = screen.getByTitle('CONSULTA EXTERNA');
+    expect(chip).toBeInTheDocument();
   });
 
   it('shows empty state when no results match', async () => {
