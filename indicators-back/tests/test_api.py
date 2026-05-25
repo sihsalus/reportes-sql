@@ -68,6 +68,7 @@ def test_all_routers_mounted(client: TestClient):
     assert "/indicadores/" in paths  # POST
     assert "/indicadores/{indicador_id}" in paths  # GET + DELETE
     assert "/indicadores/{indicador_id}/versiones" in paths  # POST
+    assert "/indicadores/{indicador_id}/preview-sql" in paths  # GET
 
     # Resultados router
     assert "/resultados/" in paths  # GET
@@ -747,3 +748,213 @@ def test_post_indicador_invalid_max_age_combination_returns_422(
     assert "message" in detail
     assert "poblacion" in detail["field"]
     assert "mutually exclusive" in detail["message"].lower()
+
+
+# ── SQL Preview endpoint tests ────────────────────────────────────────
+
+_INDICADOR_ID_VALID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+_VERSION_ID_VALID = "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+
+_SAMPLE_DEFINICION = {
+    "tipo": "conteo_atenciones",
+    "periodo": "mes_actual",
+    "evento": {"location_uuids": ["550e8400-e29b-41d4-a716-446655440000"]},
+}
+
+
+def test_preview_sql_endpoint_registered(client: TestClient) -> None:
+    """GET /indicadores/{id}/preview-sql is registered and returns 404 for unknown id."""
+    response = client.get(
+        f"/indicadores/{_INDICADOR_ID_VALID}/preview-sql",
+    )
+    # With real DB (TestClient w/o mocks) it'll 404 because the indicator
+    # doesn't exist. The key is that the route exists and responds, not 405/500.
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Indicador no encontrado"
+
+
+def test_preview_sql_success(client: TestClient) -> None:
+    """GET /indicadores/{id}/preview-sql returns SQL, params, and period info.
+
+    Mocks the DB layer and concept resolution so we verify the response shape
+    without a real OpenMRS connection.
+    """
+    import uuid as _uuid
+    from datetime import date, datetime, timezone
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.routers.indicadores import get_db
+    from app.main import app
+
+    indicador = MagicMock()
+    indicador.id = _uuid.UUID(_INDICADOR_ID_VALID)
+    indicador.nombre = "Test Indicator"
+    indicador.descripcion = None
+    indicador.activo = True
+    indicador.creado_en = datetime.now(timezone.utc)
+
+    version = MagicMock()
+    version.id = _uuid.UUID(_VERSION_ID_VALID)
+    version.indicador_id = indicador.id
+    version.version = 1
+    version.definicion = _SAMPLE_DEFINICION
+
+    # Mock DB session — two execute calls: fetch indicador, fetch latest version
+    mock_session = AsyncMock()
+    r1 = MagicMock()
+    r1.scalar_one_or_none.return_value = indicador
+    r2 = MagicMock()
+    r2.scalar_one_or_none.return_value = version
+    mock_session.execute.side_effect = [r1, r2]
+
+    app.dependency_overrides[get_db] = lambda: mock_session
+
+    try:
+        response = client.get(
+            f"/indicadores/{_INDICADOR_ID_VALID}/preview-sql",
+        )
+
+        assert response.status_code == 200, (
+            f"Expected 200, got {response.status_code}: {response.json()}"
+        )
+        data = response.json()
+
+        # Verify response shape
+        assert "sql" in data
+        assert isinstance(data["sql"], str)
+        assert len(data["sql"]) > 0
+        assert "params" in data
+        assert isinstance(data["params"], dict)
+        assert "periodo_inicio" in data
+        assert "periodo_fin" in data
+        assert data["version_id"] == _VERSION_ID_VALID
+        assert data["version_num"] == 1
+
+        # Verify the SQL uses parameterized syntax (no string interpolation)
+        assert "%(inicio)s" in data["sql"]
+        assert "%(fin_excl)s" in data["sql"]
+
+        # Verify params contain the computed period dates
+        assert "inicio" in data["params"]
+        assert "fin_excl" in data["params"]
+        assert data["params"]["inicio"] == str(date.today().replace(day=1))
+        # fin_excl = today + 1 day (exclusive upper bound)
+        from datetime import timedelta
+        assert data["params"]["fin_excl"] == str(date.today() + timedelta(days=1))
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_preview_sql_version_not_found(client: TestClient) -> None:
+    """GET /indicadores/{id}/preview-sql with non-existent version_id → 404."""
+    import uuid as _uuid
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.routers.indicadores import get_db
+    from app.main import app
+
+    indicador = MagicMock()
+    indicador.id = _uuid.UUID(_INDICADOR_ID_VALID)
+
+    mock_session = AsyncMock()
+    r1 = MagicMock()
+    r1.scalar_one_or_none.return_value = indicador
+    # Second execute: version not found
+    r2 = MagicMock()
+    r2.scalar_one_or_none.return_value = None
+    mock_session.execute.side_effect = [r1, r2]
+
+    app.dependency_overrides[get_db] = lambda: mock_session
+
+    try:
+        non_existent_version = "00000000-0000-0000-0000-000000000000"
+        response = client.get(
+            f"/indicadores/{_INDICADOR_ID_VALID}/preview-sql"
+            f"?version_id={non_existent_version}",
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == (
+            "Versión no encontrada para este indicador"
+        )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_preview_sql_indicador_not_found(client: TestClient) -> None:
+    """GET /indicadores/{id}/preview-sql for non-existent indicator → 404."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.routers.indicadores import get_db
+    from app.main import app
+
+    mock_session = AsyncMock()
+    r1 = MagicMock()
+    r1.scalar_one_or_none.return_value = None
+    mock_session.execute.return_value = r1
+
+    app.dependency_overrides[get_db] = lambda: mock_session
+
+    try:
+        response = client.get(
+            "/indicadores/00000000-0000-0000-0000-000000000000/preview-sql",
+        )
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Indicador no encontrado"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_preview_sql_no_versions(client: TestClient) -> None:
+    """GET /indicadores/{id}/preview-sql when indicator has no versions → 404."""
+    import uuid as _uuid
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.routers.indicadores import get_db
+    from app.main import app
+
+    indicador = MagicMock()
+    indicador.id = _uuid.UUID(_INDICADOR_ID_VALID)
+
+    mock_session = AsyncMock()
+    r1 = MagicMock()
+    r1.scalar_one_or_none.return_value = indicador
+    # Second execute: no version found (latest query returns None)
+    r2 = MagicMock()
+    r2.scalar_one_or_none.return_value = None
+    mock_session.execute.side_effect = [r1, r2]
+
+    app.dependency_overrides[get_db] = lambda: mock_session
+
+    try:
+        response = client.get(
+            f"/indicadores/{_INDICADOR_ID_VALID}/preview-sql",
+        )
+        assert response.status_code == 404
+        assert response.json()["detail"] == (
+            "El indicador no tiene versiones definidas"
+        )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_sql_preview_response_schema() -> None:
+    """IndicadorSQLPreviewResponse validates the expected shape."""
+    import uuid as _uuid
+    from datetime import date
+
+    from app.schemas.indicador import IndicadorSQLPreviewResponse
+
+    preview = IndicadorSQLPreviewResponse(
+        sql="SELECT COUNT(*) FROM encounter WHERE voided = 0;",
+        params={"inicio": "2026-01-01", "fin": "2026-01-31"},
+        periodo_inicio=date(2026, 1, 1),
+        periodo_fin=date(2026, 1, 31),
+        version_id=_uuid.UUID(_VERSION_ID_VALID),
+        version_num=1,
+    )
+
+    assert preview.sql == "SELECT COUNT(*) FROM encounter WHERE voided = 0;"
+    assert preview.params["inicio"] == "2026-01-01"
+    assert preview.periodo_inicio == date(2026, 1, 1)
+    assert preview.version_num == 1

@@ -5,11 +5,14 @@ Task 4.4:
 - GET /conceptos/buscar?q=...&clase=... → proxy OpenMRS concept search.
 - GET /conceptos/diagnosticos/buscar?q= → proxy OpenMRS concept search
   with v=full and CIE-10 code extraction from names[] (Task 1.2).
+- GET /conceptos/locations/resolve?uuids=... → batch resolve location UUIDs to display names.
+- GET /conceptos/diagnosticos/resolve?uuids=... → batch resolve diagnosis UUIDs to {uuid, codigo?, nombre}.
 
 All communication uses httpx.AsyncClient with Basic Auth. Connection errors
 return 502 Bad Gateway with a descriptive message.
 """
 
+import asyncio
 import re
 import uuid as _uuid
 from typing import Optional
@@ -330,3 +333,161 @@ async def buscar_locations(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"OpenMRS respondió con error: {exc.response.status_code}",
         )
+
+
+# ── Batch Resolve Endpoints ──────────────────────────────────────────────
+
+
+def _parse_uuid_list(raw: str) -> list[str]:
+    """Parse a comma-separated UUID list into a deduplicated list.
+
+    Strips whitespace from each token and filters out empty strings.
+    """
+    return list(dict.fromkeys(token.strip() for token in raw.split(",") if token.strip()))
+
+
+@router.get(
+    "/locations/resolve",
+    summary="Batch resolve location UUIDs to display names",
+    response_model=list[LocationOptionOut],
+)
+async def resolve_locations(
+    uuids: str = Query(
+        ...,
+        min_length=1,
+        description="Comma-separated location UUIDs to resolve",
+    ),
+):
+    """Resolve one or more location UUIDs to {uuid, display} pairs.
+
+    Calls OpenMRS GET /location/{uuid}?v=custom:(uuid,display) for each
+    UUID in parallel. UUIDs that are not found in OpenMRS are silently
+    skipped — only successfully resolved locations appear in the response.
+
+    Returns 400 when the uuids list is empty after parsing.
+    Returns 502 on any OpenMRS connection or HTTP error.
+    """
+    uuid_list = _parse_uuid_list(uuids)
+    if not uuid_list:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El parámetro 'uuids' debe contener al menos un UUID válido",
+        )
+
+    async def _fetch_one(client: AsyncClient, uid: str) -> Optional[dict]:
+        url = _openmrs_url(f"location/{uid}")
+        params = {"v": "custom:(uuid,display)"}
+        try:
+            resp = await client.get(url, params=params, auth=_auth())
+            resp.raise_for_status()
+            data = resp.json()
+            return {"uuid": data["uuid"], "display": data["display"]}
+        except HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return None  # UUID not found — skip
+            raise  # Re-raise other HTTP errors
+        except (RequestError, TimeoutException):
+            raise
+
+    results: list[LocationOptionOut] = []
+    try:
+        async with AsyncClient(timeout=10.0) as client:
+            fetched = await asyncio.gather(
+                *[_fetch_one(client, uid) for uid in uuid_list],
+                return_exceptions=False,
+            )
+            results = [
+                LocationOptionOut(**item)
+                for item in fetched
+                if item is not None
+            ]
+    except (RequestError, TimeoutException) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error conectando a OpenMRS: {exc}",
+        )
+    except HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"OpenMRS respondió con error: {exc.response.status_code}",
+        )
+
+    return results
+
+
+@router.get(
+    "/diagnosticos/resolve",
+    summary="Batch resolve diagnosis concept UUIDs with CIE-10 extraction",
+    response_model=list[DiagnosticoConceptoOut],
+    response_model_exclude_none=True,
+)
+async def resolve_diagnosticos(
+    uuids: str = Query(
+        ...,
+        min_length=1,
+        description="Comma-separated diagnosis concept UUIDs to resolve",
+    ),
+):
+    """Resolve one or more diagnosis concept UUIDs to {uuid, codigo?, nombre}.
+
+    Calls OpenMRS GET /concept/{uuid}?v=full for each UUID in parallel.
+    Extracts CIE-10 code and human-readable name from the names[] array.
+    UUIDs not found in OpenMRS are silently skipped.
+
+    Returns 400 when the uuids list is empty after parsing.
+    Returns 502 on any OpenMRS connection or HTTP error.
+    """
+    uuid_list = _parse_uuid_list(uuids)
+    if not uuid_list:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El parámetro 'uuids' debe contener al menos un UUID válido",
+        )
+
+    async def _fetch_one(client: AsyncClient, uid: str) -> Optional[dict]:
+        url = _openmrs_url(f"concept/{uid}")
+        params = {"v": "full"}
+        try:
+            resp = await client.get(url, params=params, auth=_auth())
+            resp.raise_for_status()
+            item = resp.json()
+            names: list[dict] = item.get("names", [])
+            codigo = _extract_cie10_from_names(names)
+            nombre = _extract_nombre_from_names(names)
+            if nombre is None:
+                nombre = item.get("display", "Sin nombre")
+            result: dict = {"uuid": item["uuid"], "nombre": nombre}
+            if codigo is not None:
+                result["codigo"] = codigo
+            return result
+        except HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return None
+            raise
+        except (RequestError, TimeoutException):
+            raise
+
+    results: list[DiagnosticoConceptoOut] = []
+    try:
+        async with AsyncClient(timeout=10.0) as client:
+            fetched = await asyncio.gather(
+                *[_fetch_one(client, uid) for uid in uuid_list],
+                return_exceptions=False,
+            )
+            results = [
+                DiagnosticoConceptoOut(**item)
+                for item in fetched
+                if item is not None
+            ]
+    except (RequestError, TimeoutException) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error conectando a OpenMRS: {exc}",
+        )
+    except HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"OpenMRS respondió con error: {exc.response.status_code}",
+        )
+
+    return results

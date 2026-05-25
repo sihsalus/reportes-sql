@@ -4,10 +4,17 @@
  * Replaces raw JSON rendering with human-friendly labels
  * for all definicion fields: tipo, periodo, evento
  * (with nested diagnosticos/ordenes), poblacion filters.
+ *
+ * Resolves location and diagnosis concept UUIDs to display
+ * names via batch API endpoints.
  */
 
-import type { ReactElement } from 'react';
+import { useMemo, type ReactElement } from 'react';
 import type { DefinicionIndicadorForm } from '@/api/types';
+import {
+  useResolvedLocations,
+  useResolvedDiagnosticos,
+} from '@/features/indicadores/hooks';
 
 // ── Label Maps ──────────────────────────────────────────────────────────
 
@@ -51,6 +58,22 @@ function formatAgeDimension(
   return `hasta ${max} ${maxUnit}`;
 }
 
+// ── Helpers: UUID → Display ────────────────────────────────────────────
+
+function formatDiagnosticoDisplay(
+  uuid: string,
+  resolveMap: Map<string, { codigo?: string; nombre: string }>,
+): string {
+  const resolved = resolveMap.get(uuid);
+  if (resolved) {
+    return resolved.codigo
+      ? `${resolved.codigo} → ${resolved.nombre}`
+      : resolved.nombre;
+  }
+  // Fallback: truncated UUID
+  return uuid.length > 8 ? `${uuid.slice(0, 8)}…` : uuid;
+}
+
 // ── Main Component ──────────────────────────────────────────────────────
 
 interface DefinicionViewProps {
@@ -78,8 +101,29 @@ export default function DefinicionView({ definicion }: DefinicionViewProps): Rea
   const sexoLabel = pop?.sexo ? (SEXO_LABELS[pop.sexo] ?? pop.sexo) : undefined;
   const hasPopFilters = ageLines.length > 0 || sexoLabel !== undefined;
 
-  // Evento (singular) — with nested diagnosticos / ordenes
+  // Evento (singular)
   const ev = definicion.evento;
+
+  // Collect all UUIDs that need resolution
+  const locationUuids = useMemo(
+    () => (ev?.location_uuids?.length ? ev.location_uuids : []),
+    [ev?.location_uuids],
+  );
+
+  const diagUuids = useMemo(() => {
+    if (!ev?.diagnosticos?.length) return [];
+    const uuids: string[] = [];
+    for (const diag of ev.diagnosticos) {
+      if (diag.concepto_uuids?.length) {
+        uuids.push(...diag.concepto_uuids);
+      }
+    }
+    return uuids;
+  }, [ev?.diagnosticos]);
+
+  // Batch-resolve UUIDs to display names
+  const { displayMap: locationDisplayMap } = useResolvedLocations(locationUuids);
+  const { resolveMap: diagResolveMap } = useResolvedDiagnosticos(diagUuids);
 
   return (
     <div className="space-y-2 text-sm text-gray-700">
@@ -95,11 +139,18 @@ export default function DefinicionView({ definicion }: DefinicionViewProps): Rea
         <p className="font-medium text-gray-900">🏥 Servicio:</p>
         {ev && ev.location_uuids && ev.location_uuids.length > 0 ? (
           <ul className="ml-4 list-disc pl-4 text-gray-600">
-            {ev.location_uuids.map((uuid) => (
-              <li key={uuid} className="font-mono text-xs">
-                {uuid.length > 8 ? `${uuid.slice(0, 8)}…` : uuid}
-              </li>
-            ))}
+            {ev.location_uuids.map((uuid) => {
+              const displayText = locationDisplayMap.get(uuid);
+              return (
+                <li key={uuid}>
+                  {displayText ?? (
+                    <span className="font-mono text-xs">
+                      {uuid.length > 8 ? `${uuid.slice(0, 8)}…` : uuid}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className="ml-4 text-gray-600">Todos los servicios</p>
@@ -119,9 +170,9 @@ export default function DefinicionView({ definicion }: DefinicionViewProps): Rea
             {ev.diagnosticos.map((diag, idx) => (
               <li key={idx}>
                 {diag.concepto_uuids && diag.concepto_uuids.length > 0 ? (
-                  <span className="font-mono text-xs">
+                  <span>
                     {diag.concepto_uuids
-                      .map((u) => (u.length > 8 ? `${u.slice(0, 8)}…` : u))
+                      .map((u) => formatDiagnosticoDisplay(u, diagResolveMap))
                       .join(', ')}
                   </span>
                 ) : (

@@ -10,19 +10,22 @@ Tasks 4.1 (CRUD) and 4.2 (versioning):
 
 import json
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_async_session_factory
+from app.database import get_async_session_factory, get_sync_engine
+from app.engine.periodo import calcular_periodo
 from app.models.indicador import Indicador, IndicadorVersion
 from app.schemas.indicador import (
     IndicadorCreate,
     IndicadorDetailResponse,
     IndicadorListResponse,
     IndicadorResponse,
+    IndicadorSQLPreviewResponse,
     IndicadorUpdate,
     IndicadorVersionCreate,
     IndicadorVersionResponse,
@@ -341,3 +344,122 @@ async def create_version(
         )
 
     return nueva_version
+
+
+# ── SQL Preview ─────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/{indicador_id}/preview-sql",
+    response_model=IndicadorSQLPreviewResponse,
+    summary="Preview the generated SQL for an indicator version",
+)
+async def preview_sql(
+    indicador_id: uuid.UUID,
+    version_id: uuid.UUID | None = Query(
+        None, description="Specific version UUID. Defaults to the latest version."
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a preview of the SQL query for an indicator version.
+
+    Computes the period dates from the definition's periodo field, builds
+    the parameterized MySQL query via the engine, and returns the SQL string
+    alongside the resolved parameters — without connecting to OpenMRS.
+    """
+    # ── Fetch indicator ──
+    result = await db.execute(
+        select(Indicador).where(Indicador.id == indicador_id)
+    )
+    indicador = result.scalar_one_or_none()
+    if indicador is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Indicador no encontrado",
+        )
+
+    # ── Fetch version (specific or latest) ──
+    if version_id is not None:
+        version_result = await db.execute(
+            select(IndicadorVersion)
+            .where(
+                IndicadorVersion.id == version_id,
+                IndicadorVersion.indicador_id == indicador_id,
+            )
+        )
+        version = version_result.scalar_one_or_none()
+        if version is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Versión no encontrada para este indicador",
+            )
+    else:
+        version_result = await db.execute(
+            select(IndicadorVersion)
+            .where(IndicadorVersion.indicador_id == indicador_id)
+            .order_by(IndicadorVersion.version.desc())
+            .limit(1)
+        )
+        version = version_result.scalar_one_or_none()
+        if version is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="El indicador no tiene versiones definidas",
+            )
+
+    # ── Parse definicion and compute period ──
+    from app.engine.interpreter import build_query
+
+    definicion = DefinicionIndicador.model_validate(version.definicion)
+    periodo_inicio, periodo_fin = calcular_periodo(definicion.periodo)
+
+    # ── Resolve concept_map for ordenes if present ──
+    concept_map: dict[str, int] | None = None
+    ordenes = definicion.evento.ordenes if definicion.evento else None
+    if ordenes:
+        sync_engine = get_sync_engine()
+        uuids = [str(f.concepto_uuid) for f in ordenes]
+        with sync_engine.connect() as conn:
+            from sqlalchemy import text
+
+            result_rows = conn.execute(
+                text(
+                    "SELECT uuid, concept_id FROM concept "
+                    "WHERE uuid IN :uuids AND retired = 0"
+                ),
+                {"uuids": tuple(uuids)},
+            ).fetchall()
+
+        resolved: dict[str, int] = {
+            row.uuid: row.concept_id for row in result_rows
+        }
+
+        concept_map = {}
+        for f in ordenes:
+            suuid = str(f.concepto_uuid)
+            cid = resolved.get(suuid)
+            if cid is None:
+                continue  # Skip unresolved — query may still be valid
+            concept_map[f.concepto_uuid] = cid
+
+    # ── Build query ──
+    query_sql, params = build_query(
+        definicion, periodo_inicio, periodo_fin, concept_map=concept_map
+    )
+
+    # ── Serialize params for JSON (dates → string) ──
+    serializable_params: dict = {}
+    for key, val in params.items():
+        if isinstance(val, date):
+            serializable_params[key] = val.isoformat()
+        else:
+            serializable_params[key] = val
+
+    return IndicadorSQLPreviewResponse(
+        sql=query_sql,
+        params=serializable_params,
+        periodo_inicio=periodo_inicio,
+        periodo_fin=periodo_fin,
+        version_id=version.id,
+        version_num=version.version,
+    )

@@ -170,3 +170,21 @@ export interface GetResultadosParams extends ResultadosFilters {
   page: number;
   size: number;
 }
+
+// ── SQL Preview Types ────────────────────────────────────────────────────
+
+/** Response from GET /indicadores/{id}/preview-sql */
+export interface IndicadorSQLPreview {
+  /** Parameterized MySQL query string (uses %(name)s syntax) */
+  sql: string;
+  /** Resolved parameter values keyed by parameter name */
+  params: Record<string, unknown>;
+  /** Computed period start date (ISO 8601) */
+  periodo_inicio: string;
+  /** Computed period end date (ISO 8601) */
+  periodo_fin: string;
+  /** UUID of the IndicadorVersion used */
+  version_id: string;
+  /** Version number used */
+  version_num: number;
+}

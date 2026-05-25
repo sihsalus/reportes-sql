@@ -6,7 +6,7 @@
  */
 
 import { http, HttpResponse } from 'msw';
-import type { Indicador, IndicadorDetail, IndicadorVersion, PaginatedResponse, IndicadorResultado, BatchCalcularNowResponse, DiagnosticoOption, LocationOption, OrdenOption } from '@/api/types';
+import type { Indicador, IndicadorDetail, IndicadorVersion, PaginatedResponse, IndicadorResultado, BatchCalcularNowResponse, DiagnosticoOption, LocationOption, OrdenOption, IndicadorSQLPreview } from '@/api/types';
 
 /** In-memory fixture store — shared across handlers. */
 const fixtureIndicadores: Indicador[] = [
@@ -468,6 +468,87 @@ export const handlers = [
   }),
 
   /**
+   * GET /indicadores/:id/preview-sql — returns the generated SQL preview.
+   *
+   * Supports optional ?version_id= query param. When omitted, defaults
+   * to the latest version. Returns a parameterized SQL string, params dict,
+   * and computed period dates.
+   */
+  http.get('/indicadores/:id/preview-sql', ({ params, request }) => {
+    const { id } = params;
+    const url = new URL(request.url);
+    const versionId = url.searchParams.get('version_id');
+
+    if (id === '00000000-0000-0000-0000-000000000000') {
+      return HttpResponse.json(
+        { detail: 'Indicador no encontrado' },
+        { status: 404 },
+      );
+    }
+
+    // Build a realistic SQL preview from the fixture definitions
+    let sql: string;
+    let sqlParams: Record<string, unknown>;
+    let periodoInicio: string;
+    let periodoFin: string;
+    let versionNum: number;
+
+    if (versionId === 'v1a1b2c3-d4e5-f678-90ab-cdef12345678') {
+      versionNum = 1;
+      periodoInicio = '2026-05-01';
+      periodoFin = '2026-05-25';
+      sql = 'SELECT COUNT(*) as valor\nFROM encounter e\nWHERE e.encounter_datetime BETWEEN %(inicio)s AND %(fin)s\n  AND e.voided = 0\n  AND l.uuid IN (%(loc_0)s)\nJOIN location l ON e.location_id = l.location_id\nJOIN encounter_diagnosis ed ON ed.encounter_id = e.encounter_id AND ed.voided = 0\nJOIN concept c ON c.concept_id = ed.diagnosis_coded\nAND (c.uuid IN (%(diag_uuid_0_0)s))\nAND ed.certainty = %(diag_certainty)s;';
+      sqlParams = {
+        inicio: '2026-05-01',
+        fin: '2026-05-25',
+        loc_0: '550e8400-e29b-41d4-a716-446655440000',
+        diag_uuid_0_0: 'aaaa1111-bbbb-2222-cccc-333333333333',
+        diag_certainty: 'CONFIRMED',
+      };
+    } else if (versionId === 'v2a1b2c3-d4e5-f678-90ab-cdef12345679') {
+      versionNum = 2;
+      periodoInicio = '2026-04-01';
+      periodoFin = '2026-05-25';
+      sql = 'SELECT COUNT(DISTINCT p.person_id) as valor\nFROM person p\nJOIN encounter e ON e.patient_id = p.person_id\nJOIN location l ON e.location_id = l.location_id\nWHERE e.encounter_datetime BETWEEN %(inicio)s AND %(fin)s\n  AND e.voided = 0\n  AND p.voided = 0\n  AND l.uuid IN (%(loc_0)s, %(loc_1)s)\n  AND DATE_ADD(p.birthdate, INTERVAL %(min_anios)s YEAR) <= %(inicio)s\n  AND DATE_ADD(p.birthdate, INTERVAL %(max_anios_excl)s YEAR) > %(inicio)s\n  AND p.gender = %(sexo)s\n  AND EXISTS (\n    SELECT 1 FROM orders o0\n    WHERE o0.encounter_id = e.encounter_id\n      AND o0.concept_id = %(ord_0)s\n      AND o0.voided = 0\n)\nAND EXISTS (\n    SELECT 1 FROM orders o1\n    WHERE o1.encounter_id = e.encounter_id\n      AND o1.concept_id = %(ord_1)s\n      AND o1.voided = 0\n)\nAND e.patient_id IN (\nSELECT e.patient_id\nFROM encounter e\nJOIN location l ON e.location_id = l.location_id\nJOIN person p ON e.patient_id = p.person_id\nWHERE e.encounter_datetime BETWEEN %(inicio)s AND %(fin)s\n  AND e.voided = 0\n  AND l.uuid IN (%(loc_0)s, %(loc_1)s)\n  AND p.voided = 0\n  AND DATE_ADD(p.birthdate, INTERVAL %(min_anios)s YEAR) <= %(inicio)s\n  AND DATE_ADD(p.birthdate, INTERVAL %(max_anios_excl)s YEAR) > %(inicio)s\n  AND p.gender = %(sexo)s\n  AND EXISTS (\n    SELECT 1 FROM orders o0\n    WHERE o0.encounter_id = e.encounter_id\n      AND o0.concept_id = %(ord_0)s\n      AND o0.voided = 0\n)\nAND EXISTS (\n    SELECT 1 FROM orders o1\n    WHERE o1.encounter_id = e.encounter_id\n      AND o1.concept_id = %(ord_1)s\n      AND o1.voided = 0\n)\nGROUP BY e.patient_id\nHAVING COUNT(e.encounter_id) >= %(min_oc)s\n);';
+      sqlParams = {
+        inicio: '2026-04-01',
+        fin: '2026-05-25',
+        loc_0: '550e8400-e29b-41d4-a716-446655440000',
+        loc_1: '550e8400-e29b-41d4-a716-446655440001',
+        min_anios: 18,
+        max_anios_excl: 65,
+        sexo: 'M',
+        min_oc: 2,
+        ord_0: 42,
+        ord_1: 99,
+      };
+    } else {
+      // Default: latest version (v3)
+      versionNum = 3;
+      periodoInicio = '2026-01-01';
+      periodoFin = '2026-05-25';
+      sql = 'SELECT COUNT(*) as valor\nFROM encounter e\nWHERE e.encounter_datetime BETWEEN %(inicio)s AND %(fin)s\n  AND e.voided = 0\nJOIN person p ON e.patient_id = p.person_id\nAND p.voided = 0\nAND DATEDIFF(%(inicio)s, p.birthdate) >= %(min_dias)s\nAND DATE_ADD(p.birthdate, INTERVAL %(max_meses_excl)s MONTH) > %(inicio)s;';
+      sqlParams = {
+        inicio: '2026-01-01',
+        fin: '2026-05-25',
+        min_dias: 0,
+        max_meses_excl: 12,
+      };
+    }
+
+    const preview: IndicadorSQLPreview = {
+      sql,
+      params: sqlParams,
+      periodo_inicio: periodoInicio,
+      periodo_fin: periodoFin,
+      version_id: (versionId as string) ?? 'v3a1b2c3-d4e5-f678-90ab-cdef12345680',
+      version_num: versionNum,
+    };
+
+    return HttpResponse.json(preview);
+  }),
+
+  /**
    * GET /conceptos/encounter-types — returns encounter type options.
    */
   http.get('/conceptos/encounter-types', () => {
@@ -592,6 +673,75 @@ export const handlers = [
     );
 
     return HttpResponse.json(filtered);
+  }),
+
+  /**
+   * GET /conceptos/locations/resolve — batch resolve location UUIDs.
+   *
+   * Accepts `?uuids=uuid1,uuid2,...`. Returns only matching locations.
+   * UUIDs not in the fixture map are silently omitted.
+   */
+  http.get('/conceptos/locations/resolve', ({ request }) => {
+    const url = new URL(request.url);
+    const uuidsParam = url.searchParams.get('uuids') || '';
+    const uuidList = uuidsParam
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const locationMap: Record<string, string> = {
+      '550e8400-e29b-41d4-a716-446655440000': 'Consulta Externa',
+      '550e8400-e29b-41d4-a716-446655440001': 'Hospitalización',
+      '660e8400-e29b-41d4-a716-446655440002': 'Emergencia',
+    };
+
+    const resolved: LocationOption[] = uuidList
+      .filter((uid) => locationMap[uid])
+      .map((uid) => ({ uuid: uid, display: locationMap[uid] }));
+
+    return HttpResponse.json(resolved);
+  }),
+
+  /**
+   * GET /conceptos/diagnosticos/resolve — batch resolve diagnosis concept UUIDs.
+   *
+   * Accepts `?uuids=uuid1,uuid2,...`. Returns only matching concepts
+   * with CIE-10 code and name. UUIDs not in the fixture map are omitted.
+   */
+  http.get('/conceptos/diagnosticos/resolve', ({ request }) => {
+    const url = new URL(request.url);
+    const uuidsParam = url.searchParams.get('uuids') || '';
+    const uuidList = uuidsParam
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const diagMap: Record<string, { codigo?: string; nombre: string }> = {
+      'aaaa1111-bbbb-2222-cccc-333333333333': {
+        codigo: 'A379',
+        nombre: 'TOS FERINA',
+      },
+      'bbbb2222-cccc-3333-dddd-444444444444': {
+        nombre: 'CONSULTA EXTERNA',
+      },
+      'cccc3333-dddd-4444-eeee-555555555555': {
+        codigo: 'J180',
+        nombre: 'BRONCONEUMONIA NO ESPECIFICADA',
+      },
+    };
+
+    const resolved: DiagnosticoOption[] = uuidList
+      .filter((uid) => diagMap[uid])
+      .map((uid) => {
+        const entry = diagMap[uid];
+        return {
+          uuid: uid,
+          ...(entry.codigo ? { codigo: entry.codigo } : {}),
+          nombre: entry.nombre,
+        };
+      });
+
+    return HttpResponse.json(resolved);
   }),
 
   /**

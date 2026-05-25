@@ -23,6 +23,9 @@ import {
   searchDiagnosticos,
   searchLocations,
   searchConceptos,
+  resolveLocations,
+  resolveDiagnosticos,
+  previewSql,
 } from '@/api/indicadores';
 import type {
   Indicador,
@@ -30,6 +33,7 @@ import type {
   IndicadorDetail,
   IndicadorUpdatePayload,
   IndicadorVersion,
+  IndicadorSQLPreview,
   EncounterTypeOption,
   DiagnosticoOption,
   LocationOption,
@@ -393,6 +397,114 @@ export function useLocationSearch(query: string): UseLocationSearchResult {
     queryFn: () => searchLocations(query),
     enabled: query.trim().length >= 2,
     staleTime: 60_000, // 1-minute cache for repeated searches
+  });
+
+  return { data, isLoading, isError, error };
+}
+
+// ── Batch Resolve Hooks ───────────────────────────────────────────────
+
+/** Return type for useResolvedLocations query hook. */
+export interface UseResolvedLocationsResult {
+  /** Map of UUID → display name for resolved locations. */
+  displayMap: Map<string, string>;
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+}
+
+/**
+ * Batch-resolve location UUIDs to a UUID→display Map.
+ *
+ * Only enabled when `uuids` has at least one entry.
+ * Uses 5-minute staleTime since locations rarely change.
+ */
+export function useResolvedLocations(uuids: string[]): UseResolvedLocationsResult {
+  const enabled = uuids.length > 0;
+  const { data, isLoading, isError, error } = useQuery<LocationOption[], Error>({
+    queryKey: ['locations-resolve', uuids],
+    queryFn: () => resolveLocations(uuids),
+    enabled,
+    staleTime: 300_000, // 5-minute cache
+  });
+
+  const displayMap = new Map<string, string>();
+  if (data) {
+    for (const opt of data) {
+      displayMap.set(opt.uuid, opt.display);
+    }
+  }
+
+  return { displayMap, isLoading, isError, error };
+}
+
+/** Return type for useResolvedDiagnosticos query hook. */
+export interface UseResolvedDiagnosticosResult {
+  /** Map of UUID → {codigo?, nombre} for resolved diagnoses. */
+  resolveMap: Map<string, DiagnosticoOption>;
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+}
+
+/**
+ * Batch-resolve diagnosis concept UUIDs to a UUID→option Map.
+ *
+ * Only enabled when `uuids` has at least one entry.
+ * Uses 5-minute staleTime since concepts rarely change.
+ */
+export function useResolvedDiagnosticos(uuids: string[]): UseResolvedDiagnosticosResult {
+  const enabled = uuids.length > 0;
+  const { data, isLoading, isError, error } = useQuery<DiagnosticoOption[], Error>({
+    queryKey: ['diagnosticos-resolve', uuids],
+    queryFn: () => resolveDiagnosticos(uuids),
+    enabled,
+    staleTime: 300_000, // 5-minute cache
+  });
+
+  const resolveMap = new Map<string, DiagnosticoOption>();
+  if (data) {
+    for (const opt of data) {
+      resolveMap.set(opt.uuid, opt);
+    }
+  }
+
+  return { resolveMap, isLoading, isError, error };
+}
+
+// ── SQL Preview Hook ────────────────────────────────────────────────────
+
+/** Return type for useSQLPreview query hook. */
+export interface UseSQLPreviewResult {
+  data: IndicadorSQLPreview | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+}
+
+/**
+ * Fetch the generated SQL preview for an indicator version.
+ *
+ * Query key: `['indicadores', id, 'preview-sql', versionId]`
+ * Disabled when `id` is empty. When `versionId` is undefined,
+ * the backend defaults to the latest version.
+ *
+ * Uses a 1-minute staleTime since SQL previews don't change
+ * unless the definition changes (handled by re-fetching).
+ */
+export function useSQLPreview(
+  id: string,
+  versionId?: string,
+): UseSQLPreviewResult {
+  const enabled = !!id;
+  const { data, isLoading, isError, error } = useQuery<
+    IndicadorSQLPreview,
+    Error
+  >({
+    queryKey: ['indicadores', id, 'preview-sql', versionId],
+    queryFn: () => previewSql(id, versionId),
+    enabled,
+    staleTime: 60_000, // 1-minute cache
   });
 
   return { data, isLoading, isError, error };

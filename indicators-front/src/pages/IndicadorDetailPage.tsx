@@ -21,6 +21,7 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import DefinicionView from '@/components/DefinicionView';
 import IndicadorForm from '@/components/IndicadorForm';
+import SQLPreviewSection from '@/components/SQLPreviewSection';
 
 /**
  * Format an ISO 8601 datetime string to a locale-friendly short date.
@@ -241,6 +242,7 @@ export default function IndicadorDetailPage(): ReactElement {
           <div className="rounded-md bg-white p-4">
             <DefinicionView definicion={currentDefinicion} />
           </div>
+          <SQLPreviewSection indicadorId={id ?? ''} />
         </section>
       )}
 
@@ -303,6 +305,11 @@ export default function IndicadorDetailPage(): ReactElement {
                         <td colSpan={3} className="px-4 py-4 bg-gray-50">
                           <DefinicionView
                             definicion={parseDefinicion(v.definicion)}
+                          />
+                          <SQLPreviewSection
+                            indicadorId={id ?? ''}
+                            versionId={v.id}
+                            versionNum={v.version}
                           />
                         </td>
                       </tr>

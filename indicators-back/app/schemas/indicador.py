@@ -174,3 +174,40 @@ class BatchCalcularNowResponse(BaseModel):
     calculados: int
     errores: list[ErrorCalculo]
     total: int
+
+
+# ── SQL Preview ────────────────────────────────────────────────────────
+
+
+class IndicadorSQLPreviewResponse(BaseModel):
+    """Response for GET /indicadores/{id}/preview-sql.
+
+    Returns the parameterized SQL string, the parameter values that would
+    be used, and the computed period dates — all without executing against
+    OpenMRS. Useful for debugging and transparency in the UI.
+    """
+
+    sql: str = Field(
+        ...,
+        description="Parameterized MySQL query string (uses %(name)s syntax).",
+    )
+    params: dict = Field(
+        ...,
+        description="Resolved parameter values keyed by parameter name.",
+    )
+    periodo_inicio: date = Field(
+        ...,
+        description="Computed period start date from the definition's periodo.",
+    )
+    periodo_fin: date = Field(
+        ...,
+        description="Computed period end date from the definition's periodo.",
+    )
+    version_id: uuid.UUID = Field(
+        ...,
+        description="UUID of the IndicadorVersion used to generate this preview.",
+    )
+    version_num: int = Field(
+        ...,
+        description="Version number used to generate this preview.",
+    )

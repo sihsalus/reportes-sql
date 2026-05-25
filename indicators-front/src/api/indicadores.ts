@@ -12,6 +12,7 @@ import type {
   IndicadorDetail,
   IndicadorUpdatePayload,
   IndicadorVersion,
+  IndicadorSQLPreview,
   EncounterTypeOption,
   DiagnosticoOption,
   LocationOption,
@@ -139,4 +140,51 @@ export function searchLocations(q: string): Promise<LocationOption[]> {
  */
 export function searchConceptos(q: string, clase: string): Promise<OrdenOption[]> {
   return apiGet<OrdenOption[]>('/conceptos/buscar', { q, clase });
+}
+
+/**
+ * Batch-resolve location UUIDs to display names.
+ *
+ * Backend: `GET /conceptos/locations/resolve?uuids=uuid1,uuid2,...`
+ * Returns a list of [{uuid, display}] for successfully resolved UUIDs.
+ * UUIDs not found in OpenMRS are silently omitted from the response.
+ */
+export function resolveLocations(uuids: string[]): Promise<LocationOption[]> {
+  return apiGet<LocationOption[]>('/conceptos/locations/resolve', {
+    uuids: uuids.join(','),
+  });
+}
+
+/**
+ * Batch-resolve diagnosis concept UUIDs with CIE-10 code extraction.
+ *
+ * Backend: `GET /conceptos/diagnosticos/resolve?uuids=uuid1,uuid2,...`
+ * Returns a list of [{uuid, codigo?, nombre}] for successfully resolved UUIDs.
+ * UUIDs not found in OpenMRS are silently omitted from the response.
+ */
+export function resolveDiagnosticos(uuids: string[]): Promise<DiagnosticoOption[]> {
+  return apiGet<DiagnosticoOption[]>('/conceptos/diagnosticos/resolve', {
+    uuids: uuids.join(','),
+  });
+}
+
+/**
+ * Preview the generated SQL for an indicator version.
+ *
+ * Backend: `GET /indicadores/{id}/preview-sql?version_id={versionId}`
+ * When `versionId` is omitted, the latest version is used.
+ * Returns the parameterized SQL, params, and computed period.
+ *
+ * @param id — Indicator UUID (string)
+ * @param versionId — Optional specific version UUID
+ */
+export function previewSql(
+  id: string,
+  versionId?: string,
+): Promise<IndicadorSQLPreview> {
+  const params: Record<string, string> = {};
+  if (versionId) {
+    params.version_id = versionId;
+  }
+  return apiGet<IndicadorSQLPreview>(`/indicadores/${id}/preview-sql`, params);
 }

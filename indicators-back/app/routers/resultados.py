@@ -9,8 +9,7 @@ Task 4.3:
 """
 
 import uuid
-from calendar import monthrange
-from datetime import date, timedelta
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
@@ -18,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_async_session_factory
+from app.engine.periodo import calcular_periodo
 from app.models.indicador import Indicador, IndicadorResultado, IndicadorVersion
 from app.schemas.indicador import (
     BatchCalcularNowResponse,
@@ -37,42 +37,6 @@ async def get_db():
     factory = get_async_session_factory()
     async with factory() as session:
         yield session
-
-
-# ── Period calculation helper ──────────────────────────────────────────
-
-
-# Mapping from periodo literals to (inicio, fin) relative to today.
-def calcular_periodo(periodo: str) -> tuple[date, date]:
-    """Translate a periodo literal into a concrete (inicio, fin) date pair.
-
-    Uses Python's calendar.monthrange for accurate month boundaries and
-    datetime.weekday() (Monday=0) for week boundaries.
-
-    Raises ValueError for unknown periodo literals.
-    """
-    hoy = date.today()
-
-    if periodo == "mes_actual":
-        inicio = hoy.replace(day=1)
-        return inicio, hoy
-
-    if periodo == "trimestre_actual":
-        trimestre = (hoy.month - 1) // 3
-        inicio_mes = trimestre * 3 + 1
-        inicio = hoy.replace(month=inicio_mes, day=1)
-        return inicio, hoy
-
-    if periodo == "semestre_actual":
-        inicio_mes = 1 if hoy.month <= 6 else 7
-        inicio = hoy.replace(month=inicio_mes, day=1)
-        return inicio, hoy
-
-    if periodo == "anual_actual":
-        inicio = hoy.replace(month=1, day=1)
-        return inicio, hoy
-
-    raise ValueError(f"Periodo desconocido: {periodo}")
 
 
 # ── GET filterable results ─────────────────────────────────────────────
