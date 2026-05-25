@@ -1,5 +1,5 @@
 """Basic SQL generation tests for the indicator engine."""
-from datetime import date
+from datetime import date, timedelta
 
 from app.engine.interpreter import build_query
 from app.types.definicion import (
@@ -131,13 +131,28 @@ class TestBuildQuery:
             ),
         )
         sql, params = build_query(definicion, INICIO, FIN)
-        assert "c.uuid IN" in sql
-        # Both UUIDs should be in params
-        found = False
-        for v in params.values():
-            if isinstance(v, tuple) and UUID_DIAG in v and UUID_DIAG2 in v:
-                found = True
-        assert found, "Params should contain tuple with both UUIDs"
+        assert "c.uuid IN (%(diag_uuid_0_0)s, %(diag_uuid_0_1)s)" in sql
+        assert params["diag_uuid_0_0"] == UUID_DIAG
+        assert params["diag_uuid_0_1"] == UUID_DIAG2
+
+    def test_diagnosticos_single_uuid_uses_parenthesized_placeholder(self):
+        """Single UUID still uses IN (...) with a valid SQL placeholder list."""
+        definicion = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            evento=FiltrosEvento(
+                location_uuids=[UUID_LOC],
+                diagnosticos=[
+                    FiltroDiagnostico(
+                        concepto_uuids=[UUID_DIAG],
+                        tipo_diagnostico="definitivo",
+                    ),
+                ],
+            ),
+        )
+        sql, params = build_query(definicion, INICIO, FIN)
+        assert "c.uuid IN (%(diag_uuid_0_0)s)" in sql
+        assert params["diag_uuid_0_0"] == UUID_DIAG
 
     def test_diagnosticos_no_match_omits_filter(self):
         """When no diagnosticos have concept_uuids, no filter emitted."""
@@ -296,6 +311,102 @@ class TestBuildQuery:
         assert "JOIN location l ON e.location_id = l.location_id" in sql
         assert "l.uuid IN" in sql
         assert any(k.startswith("loc_") for k in params)
+
+
+# ── Bugfix: exclusive upper bound on encounter_datetime ─────────────────
+
+
+class TestFechaBoundsExclusive:
+    """Verify that encounter_datetime uses inclusive lower + exclusive upper
+    bound (>= inicio AND < fin+1day) to avoid dropping the final day."""
+
+    def test_conteo_atenciones_uses_ge_and_lt(self):
+        """conteo_atenciones: >= inicio AND < fin_excl, no BETWEEN."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            evento=FiltrosEvento(location_uuids=[UUID_LOC]),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "BETWEEN" not in sql
+        assert "e.encounter_datetime >= %(inicio)s" in sql
+        assert "e.encounter_datetime < %(fin_excl)s" in sql
+
+    def test_conteo_pacientes_uses_ge_and_lt(self):
+        """conteo_pacientes: >= inicio AND < fin_excl, no BETWEEN."""
+        d = DefinicionIndicador(
+            tipo="conteo_pacientes",
+            periodo="mes_actual",
+            evento=FiltrosEvento(location_uuids=[UUID_LOC]),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "BETWEEN" not in sql
+        assert "e.encounter_datetime >= %(inicio)s" in sql
+        assert "e.encounter_datetime < %(fin_excl)s" in sql
+
+    def test_subquery_uses_ge_and_lt(self):
+        """minimo_ocurrencias subquery also uses >= / < bounds."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            evento=FiltrosEvento(
+                location_uuids=[UUID_LOC],
+                minimo_ocurrencias=3,
+            ),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "BETWEEN" not in sql
+        assert "e.encounter_datetime >= %(inicio)s" in sql
+        # Subquery also uses fin_excl
+        assert "e.encounter_datetime < %(fin_excl)s" in sql
+
+    def test_params_contain_fin_excl_not_fin(self):
+        """Params dict uses fin_excl (inicio + 1 day), not legacy fin."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            evento=FiltrosEvento(location_uuids=[UUID_LOC]),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "fin_excl" in params
+        assert "fin" not in params
+        assert params["inicio"] == INICIO
+
+    def test_fin_excl_is_inicio_plus_one_day(self):
+        """fin_excl = fin + 1 day for full-day inclusive from user POV."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            evento=FiltrosEvento(location_uuids=[UUID_LOC]),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        expected = FIN + timedelta(days=1)
+        assert params["fin_excl"] == expected
+
+    def test_fin_excl_correct_for_conteo_pacientes(self):
+        """conteo_pacientes also computes fin_excl correctly."""
+        d = DefinicionIndicador(
+            tipo="conteo_pacientes",
+            periodo="mes_actual",
+            evento=FiltrosEvento(location_uuids=[UUID_LOC]),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        expected = FIN + timedelta(days=1)
+        assert params["fin_excl"] == expected
+
+    def test_fin_excl_correct_for_subquery(self):
+        """minimo_ocurrencias subquery params also have correct fin_excl."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            evento=FiltrosEvento(
+                location_uuids=[UUID_LOC],
+                minimo_ocurrencias=3,
+            ),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        expected = FIN + timedelta(days=1)
+        assert params["fin_excl"] == expected
 
 
 # ── Phase 2: Age filter SQL generation (canonical six-field) ─────────────

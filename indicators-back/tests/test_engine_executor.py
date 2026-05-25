@@ -7,6 +7,7 @@ signatures without hitting real databases.
 
 import uuid
 from datetime import date
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -74,3 +75,86 @@ class TestExecutorConstruction:
         assert hasattr(IndicadorResultado, "periodo_fin")
         assert hasattr(IndicadorResultado, "valor")
         assert hasattr(IndicadorResultado, "calculado_en")
+
+
+class TestExecutorExecutionPath:
+    def test_execute_and_persist_uses_driver_sql_for_pyformat_params(self, monkeypatch) -> None:
+        calls: list[tuple[str, dict]] = []
+
+        class FakeResult:
+            def fetchall(self):
+                return []
+
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def exec_driver_sql(self, sql, params):
+                calls.append((sql, params))
+                return FakeResult()
+
+        class FakeEngine:
+            def connect(self):
+                return FakeConnection()
+
+        monkeypatch.setattr(ex, "get_sync_engine", lambda: FakeEngine())
+        monkeypatch.setattr(ex, "_persist_resultados", lambda resultados: None)
+
+        ex.execute_and_persist(
+            "SELECT COUNT(*) as valor WHERE foo IN (%(foo_0)s)",
+            {"foo_0": "bar"},
+            uuid.uuid4(),
+            date(2026, 1, 1),
+            date(2026, 1, 31),
+        )
+
+        assert calls == [
+            (
+                "SELECT COUNT(*) as valor WHERE foo IN (%(foo_0)s)",
+                {"foo_0": "bar"},
+            )
+        ]
+
+    @pytest.mark.asyncio
+    async def test_execute_and_persist_async_uses_driver_sql_for_pyformat_params(self, monkeypatch) -> None:
+        calls: list[tuple[str, dict]] = []
+
+        class FakeResult:
+            def fetchall(self):
+                return []
+
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def exec_driver_sql(self, sql, params):
+                calls.append((sql, params))
+                return FakeResult()
+
+        class FakeEngine:
+            def connect(self):
+                return FakeConnection()
+
+        monkeypatch.setattr(ex, "get_sync_engine", lambda: FakeEngine())
+        monkeypatch.setattr(ex, "_persist_resultados_async", AsyncMock())
+
+        await ex.execute_and_persist_async(
+            "SELECT COUNT(*) as valor WHERE foo IN (%(foo_0)s)",
+            {"foo_0": "bar"},
+            uuid.uuid4(),
+            date(2026, 1, 1),
+            date(2026, 1, 31),
+        )
+
+        assert calls == [
+            (
+                "SELECT COUNT(*) as valor WHERE foo IN (%(foo_0)s)",
+                {"foo_0": "bar"},
+            )
+        ]

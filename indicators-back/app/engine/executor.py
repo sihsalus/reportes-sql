@@ -9,8 +9,6 @@ indicators database.
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import text
-
 from app.database import get_async_session_factory, get_sync_engine
 from app.models.indicador import IndicadorResultado
 
@@ -42,7 +40,7 @@ def execute_and_persist(
 
     # ── 1. Execute on MySQL (read-only) ──
     with sync_engine.connect() as conn:
-        result = conn.execute(text(query_sql), params)
+        result = conn.exec_driver_sql(query_sql, params)
         rows = result.fetchall()
 
     # ── 2. Build ORM instances ──
@@ -85,7 +83,7 @@ async def execute_and_persist_async(
 
     # ── 1. Execute on MySQL (read-only, sync) ──
     with sync_engine.connect() as conn:
-        result = conn.execute(text(query_sql), params)
+        result = conn.exec_driver_sql(query_sql, params)
         rows = result.fetchall()
 
     # ── 2. Build ORM instances ──

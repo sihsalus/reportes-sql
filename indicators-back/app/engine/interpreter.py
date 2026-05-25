@@ -5,7 +5,7 @@ User-supplied values (dates, numbers, strings) use MySQL %(name)s
 parameterized syntax. No string interpolation.
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 from app.types.definicion import (
     DefinicionIndicador,
@@ -30,15 +30,18 @@ def build_query(
     Args:
         definicion: Fully validated indicator definition (Pydantic).
         periodo_inicio: Start date of the calculation period (inclusive).
-        periodo_fin: End date of the calculation period (inclusive).
+        periodo_fin: End date of the calculation period (user-inclusive;
+            internally converted to an exclusive upper bound for correctness
+            against datetime columns).
         concept_map: Resolved mapping from concepto string to OpenMRS concept_id.
 
     Returns:
         (sql_string, params_dict) — ready for PyMySQL `cursor.execute(sql, params)`.
     """
+    fin_excl = periodo_fin + timedelta(days=1)
     if definicion.tipo == "conteo_atenciones":
-        return _build_conteo_atenciones(definicion, periodo_inicio, periodo_fin, concept_map)
-    return _build_conteo_pacientes(definicion, periodo_inicio, periodo_fin, concept_map)
+        return _build_conteo_atenciones(definicion, periodo_inicio, fin_excl, concept_map)
+    return _build_conteo_pacientes(definicion, periodo_inicio, fin_excl, concept_map)
 
 
 # ── Internal builders ─────────────────────────────────────────────────
@@ -47,7 +50,7 @@ def build_query(
 def _build_conteo_atenciones(
     d: DefinicionIndicador,
     inicio: date,
-    fin: date,
+    fin_excl: date,
     concept_map: dict[str, int] | None = None,
 ) -> tuple[str, dict]:
     """Build a COUNT(*) query across encounters matching filters.
@@ -56,14 +59,14 @@ def _build_conteo_atenciones(
     """
     params: dict = {
         "inicio": inicio,
-        "fin": fin,
+        "fin_excl": fin_excl,
     }
 
     select_cols = ["COUNT(*) as valor"]
     tables = "encounter e"
     joins = ""
     conditions = [
-        "e.encounter_datetime BETWEEN %(inicio)s AND %(fin)s",
+        "e.encounter_datetime >= %(inicio)s AND e.encounter_datetime < %(fin_excl)s",
         "e.voided = 0",
     ]
 
@@ -157,7 +160,7 @@ def _build_conteo_atenciones(
 def _build_conteo_pacientes(
     d: DefinicionIndicador,
     inicio: date,
-    fin: date,
+    fin_excl: date,
     concept_map: dict[str, int] | None = None,
 ) -> tuple[str, dict]:
     """Build a COUNT(DISTINCT patient) query — no GROUP BY, scalar aggregate.
@@ -166,7 +169,7 @@ def _build_conteo_pacientes(
     """
     params: dict = {
         "inicio": inicio,
-        "fin": fin,
+        "fin_excl": fin_excl,
     }
 
     # ── Evento filter ──
@@ -214,7 +217,7 @@ def _build_conteo_pacientes(
     joins = "JOIN encounter e ON e.patient_id = p.person_id"
 
     conditions: list[str] = [
-        "e.encounter_datetime BETWEEN %(inicio)s AND %(fin)s",
+        "e.encounter_datetime >= %(inicio)s AND e.encounter_datetime < %(fin_excl)s",
         "e.voided = 0",
         "p.voided = 0",
     ]
@@ -288,7 +291,7 @@ def _build_minimo_ocurrencias_subquery(
         joins += "JOIN location l ON e.location_id = l.location_id"
 
     conditions: list[str] = [
-        "e.encounter_datetime BETWEEN %(inicio)s AND %(fin)s",
+        "e.encounter_datetime >= %(inicio)s AND e.encounter_datetime < %(fin_excl)s",
         "e.voided = 0",
     ]
 
@@ -479,9 +482,12 @@ def _build_diagnosticos_filter(
     item_clauses: list[str] = []
     for i, fd in enumerate(diagnosticos):
         if fd.concepto_uuids:
-            pk = f"diag_uuids_{i}"
-            params[pk] = tuple(fd.concepto_uuids)
-            item_clauses.append(f"c.uuid IN %({pk})s")
+            placeholders: list[str] = []
+            for j, uuid in enumerate(fd.concepto_uuids):
+                pk = f"diag_uuid_{i}_{j}"
+                params[pk] = uuid
+                placeholders.append(f"%({pk})s")
+            item_clauses.append(f"c.uuid IN ({', '.join(placeholders)})")
 
     if item_clauses:
         conditions.append("(" + " OR ".join(item_clauses) + ")")
