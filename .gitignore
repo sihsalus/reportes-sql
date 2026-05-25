@@ -45,6 +45,5 @@ node_modules/
 # Logs
 *.log
 
-# NOTE: .atl/, openspec/, and AGENTS.md are tracked project files per AGENTS.md
-# Do NOT ignore them. .engram/ is local-only and should remain ignored.
-.engram/
+# NOTE: .atl/, openspec/, .engram/, and AGENTS.md are tracked project files per team workflow
+# Do NOT ignore them.
