@@ -147,7 +147,7 @@ function EncounterTypeList({
                 onChange={() => onToggle(et.uuid)}
                 className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              <span className="truncate">{et.display}</span>
+              <span className="min-w-0 truncate">{et.display}</span>
             </label>
           );
         })}

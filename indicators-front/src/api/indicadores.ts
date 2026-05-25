@@ -14,6 +14,8 @@ import type {
   IndicadorVersion,
   EncounterTypeOption,
   DiagnosticoOption,
+  LocationOption,
+  OrdenOption,
   PaginatedResponse,
 } from './types';
 
@@ -117,4 +119,24 @@ export function searchDiagnosticos(q: string): Promise<DiagnosticoOption[]> {
  */
 export function deleteIndicador(id: string): Promise<void> {
   return apiDelete(`/indicadores/${id}`);
+}
+
+/**
+ * Search locations via OpenMRS proxy.
+ *
+ * Backend: `GET /conceptos/locations?q={q}`
+ * Returns a list of [{uuid, display}].
+ */
+export function searchLocations(q: string): Promise<LocationOption[]> {
+  return apiGet<LocationOption[]>('/conceptos/locations', { q });
+}
+
+/**
+ * Search concepts by query and class.
+ *
+ * Backend: `GET /conceptos/buscar?q={q}&clase={clase}`
+ * Returns a list of [{uuid, display}].
+ */
+export function searchConceptos(q: string, clase: string): Promise<OrdenOption[]> {
+  return apiGet<OrdenOption[]>('/conceptos/buscar', { q, clase });
 }

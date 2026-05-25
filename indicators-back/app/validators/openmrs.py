@@ -11,11 +11,11 @@ from sqlalchemy import text
 from app.database import get_sync_engine
 
 
-def validar_encounter_types(
+def validar_locations(
     uuids: set[str],
     sync_engine=None,
 ) -> None:
-    """Validate all UUID strings exist in OpenMRS encounter_type table.
+    """Validate all UUID strings exist in OpenMRS location table.
 
     Queries the sync MySQL database with a single parameterized SELECT ...
     WHERE uuid IN (...) to avoid N+1 queries.
@@ -27,7 +27,7 @@ def validar_encounter_types(
 
     Raises:
         HTTPException(422): One or more UUIDs not found in OpenMRS.
-            Body: {"detail": {"field": "encounter_type_uuids",
+            Body: {"detail": {"field": "location_uuids",
                               "unknown_uuids": ["uuid-1", ...]}}
         HTTPException(502): MySQL connection failure or query error.
             Body: {"detail": "OpenMRS no disponible"}
@@ -40,7 +40,7 @@ def validar_encounter_types(
     try:
         with engine.connect() as conn:
             result = conn.execute(
-                text("SELECT uuid FROM encounter_type WHERE uuid IN :uuids"),
+                text("SELECT uuid FROM location WHERE uuid IN :uuids"),
                 {"uuids": tuple(uuids)},
             )
             encontrados = {row[0] for row in result}
@@ -55,20 +55,20 @@ def validar_encounter_types(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
-                "field": "encounter_type_uuids",
+                "field": "location_uuids",
                 "unknown_uuids": sorted(desconocidos),
             },
         )
 
 
-def validar_definicion_encounter_uuids(
+def validar_definicion_location_uuids(
     definicion,
     sync_engine=None,
 ) -> None:
-    """Collect unique encounter_type_uuids from the singular evento and validate.
+    """Collect unique location_uuids from the singular evento and validate.
 
     Convenience helper that extracts UUIDs from the singular evento in a
-    definicion and passes them to validar_encounter_types() in a single call.
+    definicion and passes them to validar_locations() in a single call.
 
     Args:
         definicion: DefinicionIndicador instance (already Pydantic-validated).
@@ -79,6 +79,6 @@ def validar_definicion_encounter_uuids(
         HTTPException(502): OpenMRS unavailable.
     """
     all_uuids: set[str] = set()
-    if definicion.evento is not None and definicion.evento.encounter_type_uuids:
-        all_uuids.update(definicion.evento.encounter_type_uuids)
-    validar_encounter_types(all_uuids, sync_engine=sync_engine)
+    if definicion.evento is not None and definicion.evento.location_uuids:
+        all_uuids.update(definicion.evento.location_uuids)
+    validar_locations(all_uuids, sync_engine=sync_engine)

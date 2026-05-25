@@ -59,7 +59,7 @@ describe('IndicadorDetailPage', () => {
     // Current definition (latest version = v3)
     expect(screen.getByRole('heading', { name: /Definición actual/ })).toBeInTheDocument();
     expect(screen.getByText(/Conteo de atenciones/)).toBeInTheDocument();
-    expect(screen.getByText(/Semana actual/)).toBeInTheDocument();
+    expect(screen.getByText(/Año actual/)).toBeInTheDocument();
 
     // Version history table — compact, only version numbers and dates visible
     expect(screen.getByText('#1')).toBeInTheDocument();
@@ -80,9 +80,9 @@ describe('IndicadorDetailPage', () => {
     await userEvent.click(expandButtons[1]);
     await waitFor(() => {
       expect(screen.getByText(/Conteo de pacientes/)).toBeInTheDocument();
-      expect(screen.getByText(/Mes anterior/)).toBeInTheDocument();
+      expect(screen.getByText(/Semestre actual/)).toBeInTheDocument();
       expect(screen.getByText(/Masculino/)).toBeInTheDocument();
-      expect(screen.getByText('entre 18 años y 65 años')).toBeInTheDocument();
+      expect(screen.getByText('entre 18 años y 65 años (excl.)')).toBeInTheDocument();
     });
   });
 
@@ -141,8 +141,8 @@ describe('IndicadorDetailPage', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Nueva versión' }));
 
-    // Latest version (v3) has tipo=conteo_atenciones, periodo=semana_actual
+    // Latest version (v3) has tipo=conteo_atenciones, periodo=anual_actual
     expect(screen.getByLabelText('Tipo de indicador')).toHaveValue('conteo_atenciones');
-    expect(screen.getByLabelText('Período')).toHaveValue('semana_actual');
+    expect(screen.getByLabelText('Período')).toHaveValue('anual_actual');
   });
 });

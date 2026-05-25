@@ -14,12 +14,12 @@ export const filtroDiagnosticoSchema = z.object({
 });
 
 export const filtroOrdenSchema = z.object({
-  concepto_uuid: z.string().min(1, { message: 'El concepto es obligatorio' }),
+  concepto_uuids: z.array(z.string()),
 });
 
 export const eventoSchema = z
   .object({
-    encounter_type_uuids: z.array(z.string()).optional(),
+    location_uuids: z.array(z.string()).optional(),
     minimo_ocurrencias: z.number().int().min(1).optional(),
     diagnosticos: z.array(filtroDiagnosticoSchema).optional(),
     ordenes: z.array(filtroOrdenSchema).optional(),
@@ -40,25 +40,25 @@ function preprocessOptionalNumber() {
 }
 
 export const poblacionSchema = z.object({
-  edad_min_anios: preprocessOptionalNumber(),
-  edad_max_anios: preprocessOptionalNumber(),
-  edad_min_meses: preprocessOptionalNumber(),
-  edad_max_meses: preprocessOptionalNumber(),
-  edad_min_dias: preprocessOptionalNumber(),
-  edad_max_dias: preprocessOptionalNumber(),
-  sexo: z.preprocess(
-    (val) => (val === '' ? undefined : val),
-    z.enum(['M', 'F']).optional(),
-  ),
-});
+    min_anios: preprocessOptionalNumber(),
+    max_anios_excl: preprocessOptionalNumber(),
+    min_meses: preprocessOptionalNumber(),
+    max_meses_excl: preprocessOptionalNumber(),
+    min_dias: preprocessOptionalNumber(),
+    max_dias: preprocessOptionalNumber(),
+    sexo: z.preprocess(
+      (val) => (val === '' ? undefined : val),
+      z.enum(['M', 'F']).optional(),
+    ),
+  });
 
 export const indicadorFormSchema = z.object({
-  nombre: z.string().min(1, { message: 'El nombre es obligatorio' }).max(255),
-  descripcion: z.string().nullable().optional(),
-  tipo: z.enum(['conteo_atenciones', 'conteo_pacientes']),
-  periodo: z.enum(['mes_actual', 'mes_anterior', 'semana_actual', 'semana_anterior']),
-  evento: eventoSchema.optional().nullable(),
-  poblacion: poblacionSchema.optional(),
-});
+    nombre: z.string().min(1, { message: 'El nombre es obligatorio' }).max(255),
+    descripcion: z.string().nullable().optional(),
+    tipo: z.enum(['conteo_atenciones', 'conteo_pacientes']),
+    periodo: z.enum(['mes_actual', 'trimestre_actual', 'semestre_actual', 'anual_actual']),
+    evento: eventoSchema.optional().nullable(),
+    poblacion: poblacionSchema.optional(),
+  });
 
 export type IndicadorFormValues = z.infer<typeof indicadorFormSchema>;

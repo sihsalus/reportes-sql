@@ -24,9 +24,9 @@ _IRA_VERSION_ID = "e1a2b3c4-5501-4800-a000-000000000002"
 _IRA_DEFINICION = {
     "tipo": "conteo_atenciones",
     "periodo": "mes_actual",
-    "poblacion": {"edad_max_dias": 1825},
+    "poblacion": {"max_anios_excl": 5},
     "evento": {
-        "encounter_type_uuids": ["uuid-consulta-externa"],
+        "location_uuids": ["uuid-consulta-externa"],
         "diagnosticos": [
             {
                 "concepto_uuids": ["00000000-0000-0000-0000-000000000ira"],

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     indicadores_db_port: int = 5432
     indicadores_db_name: str = "indicators"
     indicadores_db_user: str = "postgres"
-    indicadores_db_password: str = "admin"
+    indicadores_db_password: str = "postgres"
 
     # ── MySQL: OpenMRS database (sync, read-only) ──
     openmrs_db_host: str = "localhost"
@@ -32,9 +32,9 @@ class Settings(BaseSettings):
     openmrs_db_password: str = "openmrs"
 
     # ── OpenMRS REST API ──
-    openmrs_api_url: str = "http://localhost:8080/openmrs"
+    openmrs_api_url: str = "http://localhost/openmrs"
     openmrs_api_user: str = "admin"
-    openmrs_api_password: str = "admin"
+    openmrs_api_password: str = "Admin123"
 
     # ── Application ──
     port: int = 8000

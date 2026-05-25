@@ -67,20 +67,20 @@ def _build_conteo_atenciones(
         "e.voided = 0",
     ]
 
-    # ── Evento filter (encounter_type_uuids) ──
+    # ── Evento filter (location_uuids) ──
     evento = d.evento
-    encounter_uuids: list[str] = []
-    if evento is not None and evento.encounter_type_uuids:
-        encounter_uuids = evento.encounter_type_uuids
+    location_uuids: list[str] = []
+    if evento is not None and evento.location_uuids:
+        location_uuids = evento.location_uuids
 
-    if encounter_uuids:
-        joins += "\nJOIN encounter_type et ON e.encounter_type = et.encounter_type_id"
-        et_placeholders = ", ".join(
-            f"%({_param_name('et', i)})s" for i in range(len(encounter_uuids))
+    if location_uuids:
+        joins += "\nJOIN location l ON e.location_id = l.location_id"
+        loc_placeholders = ", ".join(
+            f"%({_param_name('loc', i)})s" for i in range(len(location_uuids))
         )
-        conditions.append(f"et.uuid IN ({et_placeholders})")
-        for i, u in enumerate(encounter_uuids):
-            params[_param_name("et", i)] = u
+        conditions.append(f"l.uuid IN ({loc_placeholders})")
+        for i, u in enumerate(location_uuids):
+            params[_param_name("loc", i)] = u
 
     has_minimo = (
         evento is not None
@@ -139,7 +139,7 @@ def _build_conteo_atenciones(
     if has_minimo:
         params["min_oc"] = evento.minimo_ocurrencias  # type: ignore[union-attr]
         subquery = _build_minimo_ocurrencias_subquery(
-            encounter_uuids=encounter_uuids,
+            location_uuids=location_uuids,
             poblacion=d.poblacion,
             diagnosticos=diagnosticos,
             params=params,
@@ -171,9 +171,9 @@ def _build_conteo_pacientes(
 
     # ── Evento filter ──
     evento = d.evento
-    encounter_uuids: list[str] = []
-    if evento is not None and evento.encounter_type_uuids:
-        encounter_uuids = evento.encounter_type_uuids
+    location_uuids: list[str] = []
+    if evento is not None and evento.location_uuids:
+        location_uuids = evento.location_uuids
 
     has_minimo = (
         evento is not None
@@ -192,7 +192,7 @@ def _build_conteo_pacientes(
     if has_minimo:
         params["min_oc"] = evento.minimo_ocurrencias  # type: ignore[union-attr]
         subquery = _build_minimo_ocurrencias_subquery(
-            encounter_uuids=encounter_uuids,
+            location_uuids=location_uuids,
             poblacion=d.poblacion,
             diagnosticos=diagnosticos,
             params=params,
@@ -219,14 +219,14 @@ def _build_conteo_pacientes(
         "p.voided = 0",
     ]
 
-    if encounter_uuids:
-        joins += "\nJOIN encounter_type et ON e.encounter_type = et.encounter_type_id"
-        et_placeholders = ", ".join(
-            f"%({_param_name('et', i)})s" for i in range(len(encounter_uuids))
+    if location_uuids:
+        joins += "\nJOIN location l ON e.location_id = l.location_id"
+        loc_placeholders = ", ".join(
+            f"%({_param_name('loc', i)})s" for i in range(len(location_uuids))
         )
-        conditions.append(f"et.uuid IN ({et_placeholders})")
-        for i, u in enumerate(encounter_uuids):
-            params[_param_name("et", i)] = u
+        conditions.append(f"l.uuid IN ({loc_placeholders})")
+        for i, u in enumerate(location_uuids):
+            params[_param_name("loc", i)] = u
 
     # ── Diagnosticos filter ──
     diag_joins, diag_clause, diag_params = _build_diagnosticos_filter(diagnosticos)
@@ -266,7 +266,7 @@ def _build_conteo_pacientes(
 
 
 def _build_minimo_ocurrencias_subquery(
-    encounter_uuids: list[str],
+    location_uuids: list[str],
     poblacion: FiltrosPoblacion | None,
     diagnosticos: list[FiltroDiagnostico] | None,
     params: dict,
@@ -284,21 +284,21 @@ def _build_minimo_ocurrencias_subquery(
     tables = "encounter e"
     joins = ""
 
-    if encounter_uuids:
-        joins += "JOIN encounter_type et ON e.encounter_type = et.encounter_type_id"
+    if location_uuids:
+        joins += "JOIN location l ON e.location_id = l.location_id"
 
     conditions: list[str] = [
         "e.encounter_datetime BETWEEN %(inicio)s AND %(fin)s",
         "e.voided = 0",
     ]
 
-    if encounter_uuids:
-        et_placeholders = ", ".join(
-            f"%({_param_name('et', i)})s" for i in range(len(encounter_uuids))
+    if location_uuids:
+        loc_placeholders = ", ".join(
+            f"%({_param_name('loc', i)})s" for i in range(len(location_uuids))
         )
-        conditions.append(f"et.uuid IN ({et_placeholders})")
-        for i, u in enumerate(encounter_uuids):
-            params[_param_name("et", i)] = u
+        conditions.append(f"l.uuid IN ({loc_placeholders})")
+        for i, u in enumerate(location_uuids):
+            params[_param_name("loc", i)] = u
 
     # ── Person join for poblacion filters ──
     join_person = False
@@ -399,23 +399,56 @@ def _build_ordenes_filter(
 def _build_age_filter(
     poblacion: FiltrosPoblacion,
 ) -> tuple[str, dict]:
-    """Build a DATEDIFF-based age filter clause.
+    """Build unit-aware age filter clauses from canonical FiltrosPoblacion.
 
-    Uses the period start date as the reference point for age calculation.
-    Age bounds are computed from FiltrosPoblacion properties.
+    Day bounds use DATEDIFF (inclusive on both ends).
+    Month/year bounds use DATE_ADD ... INTERVAL for calendar-precise math.
+    Max-bounds are inclusive for days (<=), exclusive for months/years (>).
+
+    Returns (clause_fragment, params_dict). The caller wraps the fragment
+    in parentheses if needed.
     """
-    min_days = poblacion.edad_min_total_dias
-    max_days = poblacion.edad_max_total_dias
+    clauses: list[str] = []
+    params: dict = {}
 
-    clause = (
-        "DATEDIFF(%(inicio)s, p.birthdate) "
-        "BETWEEN %(edad_min)s AND %(edad_max)s"
-    )
-    age_params = {
-        "edad_min": min_days,
-        "edad_max": max_days,
-    }
-    return clause, age_params
+    # ── Minimum bounds ──
+    if poblacion.min_dias is not None:
+        params["min_dias"] = poblacion.min_dias
+        clauses.append(
+            "DATEDIFF(%(inicio)s, p.birthdate) >= %(min_dias)s"
+        )
+    elif poblacion.min_meses is not None:
+        params["min_meses"] = poblacion.min_meses
+        clauses.append(
+            "DATE_ADD(p.birthdate, INTERVAL %(min_meses)s MONTH) <= %(inicio)s"
+        )
+    elif poblacion.min_anios is not None:
+        params["min_anios"] = poblacion.min_anios
+        clauses.append(
+            "DATE_ADD(p.birthdate, INTERVAL %(min_anios)s YEAR) <= %(inicio)s"
+        )
+
+    # ── Maximum bounds ──
+    if poblacion.max_dias is not None:
+        params["max_dias"] = poblacion.max_dias
+        clauses.append(
+            "DATEDIFF(%(inicio)s, p.birthdate) <= %(max_dias)s"
+        )
+    elif poblacion.max_meses_excl is not None:
+        params["max_meses_excl"] = poblacion.max_meses_excl
+        clauses.append(
+            "DATE_ADD(p.birthdate, INTERVAL %(max_meses_excl)s MONTH) > %(inicio)s"
+        )
+    elif poblacion.max_anios_excl is not None:
+        params["max_anios_excl"] = poblacion.max_anios_excl
+        clauses.append(
+            "DATE_ADD(p.birthdate, INTERVAL %(max_anios_excl)s YEAR) > %(inicio)s"
+        )
+
+    if not clauses:
+        return "", {}
+
+    return " AND ".join(clauses), params
 
 
 def _build_diagnosticos_filter(

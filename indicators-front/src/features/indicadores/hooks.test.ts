@@ -262,7 +262,7 @@ describe('useCreateVersion', () => {
         tipo: 'conteo_atenciones',
         periodo: 'mes_actual',
         evento: {
-          encounter_type_uuids: ['550e8400-e29b-41d4-a716-446655440000'],
+          location_uuids: ['550e8400-e29b-41d4-a716-446655440000'],
           minimo_ocurrencias: 1,
           diagnosticos: [
             {

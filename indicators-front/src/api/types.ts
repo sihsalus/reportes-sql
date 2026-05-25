@@ -73,6 +73,12 @@ export interface EncounterTypeOption {
   display: string;
 }
 
+/** Location option returned by GET /conceptos/locations */
+export interface LocationOption {
+  uuid: string;
+  display: string;
+}
+
 /** Diagnosis concept option returned by GET /conceptos/diagnosticos/buscar */
 export interface DiagnosticoOption {
   uuid: string;
@@ -83,14 +89,14 @@ export interface DiagnosticoOption {
 /** Frontend representation of DefinicionIndicador for forms */
 export interface DefinicionIndicadorForm {
   tipo: 'conteo_atenciones' | 'conteo_pacientes';
-  periodo: 'mes_actual' | 'mes_anterior' | 'semana_actual' | 'semana_anterior';
+  periodo: 'mes_actual' | 'trimestre_actual' | 'semestre_actual' | 'anual_actual';
   evento: FiltrosEventoForm | null;
   poblacion?: PoblacionForm;
 }
 
 /** Single event definition for forms — diagnosticos/ordenes nested inside. */
 export interface FiltrosEventoForm {
-  encounter_type_uuids: string[];
+  location_uuids: string[];
   minimo_ocurrencias?: number;
   diagnosticos?: FiltroDiagnosticoForm[];
   ordenes?: FiltroOrdenForm[];
@@ -104,17 +110,23 @@ export interface FiltroDiagnosticoForm {
 
 /** Single order filter for forms — nested inside evento. */
 export interface FiltroOrdenForm {
-  concepto_uuid: string;
+  concepto_uuids: string[];
+}
+
+/** Concept option returned by GET /conceptos/buscar */
+export interface OrdenOption {
+  uuid: string;
+  display: string;
 }
 
 /** Optional population filter for forms */
 export interface PoblacionForm {
-  edad_min_anios?: number;
-  edad_max_anios?: number;
-  edad_min_meses?: number;
-  edad_max_meses?: number;
-  edad_min_dias?: number;
-  edad_max_dias?: number;
+  min_anios?: number;
+  max_anios_excl?: number;
+  min_meses?: number;
+  max_meses_excl?: number;
+  min_dias?: number;
+  max_dias?: number;
   sexo?: 'M' | 'F';
 }
 

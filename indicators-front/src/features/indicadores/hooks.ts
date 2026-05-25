@@ -21,6 +21,8 @@ import {
   updateIndicador,
   getEncounterTypes,
   searchDiagnosticos,
+  searchLocations,
+  searchConceptos,
 } from '@/api/indicadores';
 import type {
   Indicador,
@@ -30,6 +32,8 @@ import type {
   IndicadorVersion,
   EncounterTypeOption,
   DiagnosticoOption,
+  LocationOption,
+  OrdenOption,
   PaginatedResponse,
 } from '@/api/types';
 
@@ -330,6 +334,63 @@ export function useDiagnosticoSearch(query: string): UseDiagnosticoSearchResult 
   const { data, isLoading, isError, error } = useQuery<DiagnosticoOption[], Error>({
     queryKey: ['diagnosticos', query],
     queryFn: () => searchDiagnosticos(query),
+    enabled: query.trim().length >= 2,
+    staleTime: 60_000, // 1-minute cache for repeated searches
+  });
+
+  return { data, isLoading, isError, error };
+}
+
+// ── Concept search hook ──────────────────────────────────────────────
+
+/** Return type for useConceptoSearch query hook. */
+export interface UseConceptoSearchResult {
+  data: OrdenOption[] | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+}
+
+/**
+ * Search concepts by class and query via OpenMRS proxy with debounce control.
+ *
+ * Query is enabled only when the input has 2+ characters.
+ * The debounce should be applied OUTSIDE this hook — pass the
+ * already-debounced value as `query`.
+ */
+export function useConceptoSearch(query: string, clase: string): UseConceptoSearchResult {
+  const { data, isLoading, isError, error } = useQuery<OrdenOption[], Error>({
+    queryKey: ['conceptos', clase, query],
+    queryFn: () => searchConceptos(query, clase),
+    enabled: query.trim().length >= 2,
+    staleTime: 60_000,
+  });
+
+  return { data, isLoading, isError, error };
+}
+
+// ── Location search hook ─────────────────────────────────────────────
+
+/** Return type for useLocationSearch query hook. */
+export interface UseLocationSearchResult {
+  data: LocationOption[] | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+}
+
+/**
+ * Search locations via OpenMRS proxy with debounce control.
+ *
+ * Query is enabled only when the input has 2+ characters,
+ * preventing premature requests on short or empty inputs.
+ * The debounce should be applied OUTSIDE this hook — pass the
+ * already-debounced value as `query`.
+ */
+export function useLocationSearch(query: string): UseLocationSearchResult {
+  const { data, isLoading, isError, error } = useQuery<LocationOption[], Error>({
+    queryKey: ['locations', query],
+    queryFn: () => searchLocations(query),
     enabled: query.trim().length >= 2,
     staleTime: 60_000, // 1-minute cache for repeated searches
   });

@@ -1,5 +1,5 @@
 import { type ReactElement, useState, useRef, useEffect } from 'react';
-import { Controller, type Control, type FieldPath } from 'react-hook-form';
+import { useController, type Control, type FieldPath } from 'react-hook-form';
 import { useDiagnosticoSearch, useDebounce } from '@/features/indicadores/hooks';
 import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
@@ -7,7 +7,7 @@ import Input from '@/components/ui/Input';
 import type { DiagnosticoOption } from '@/api/types';
 
 // ══════════════════════════════════════════════════════════════════════════
-// Container component — wraps react-hook-form Controller
+// Container component — uses useController hook at component level
 // ══════════════════════════════════════════════════════════════════════════
 
 export interface DiagnosticoSelectorProps<
@@ -22,50 +22,46 @@ export interface DiagnosticoSelectorProps<
  *
  * Stores an array of concept UUIDs in the form field.
  * Selected concepts appear as removable chips below the search input.
+ *
+ * Uses `useController` at component level so hooks never run inside
+ * a render callback — compliant with the Rules of Hooks.
  */
 export default function DiagnosticoSelector<
   TFieldValues extends Record<string, unknown> = Record<string, unknown>,
 >({ control, name }: DiagnosticoSelectorProps<TFieldValues>): ReactElement {
+  const { field } = useController({ control, name });
+  const [selectedOptions, setSelectedOptions] = useState<
+    Map<string, DiagnosticoOption>
+  >(new Map());
+
+  const selectedUuids: string[] = Array.isArray(field.value) ? field.value : [];
+
+  const handleSelect = (option: DiagnosticoOption) => {
+    if (!selectedUuids.includes(option.uuid)) {
+      field.onChange([...selectedUuids, option.uuid]);
+      setSelectedOptions((prev) => {
+        const next = new Map(prev);
+        next.set(option.uuid, option);
+        return next;
+      });
+    }
+  };
+
+  const handleRemove = (uuid: string) => {
+    field.onChange(selectedUuids.filter((u) => u !== uuid));
+    setSelectedOptions((prev) => {
+      const next = new Map(prev);
+      next.delete(uuid);
+      return next;
+    });
+  };
+
   return (
-    <Controller
-      control={control}
-      name={name}
-      render={({ field }) => {
-        const [selectedOptions, setSelectedOptions] = useState<
-          Map<string, DiagnosticoOption>
-        >(new Map());
-
-        const selectedUuids: string[] = Array.isArray(field.value) ? field.value : [];
-
-        const handleSelect = (option: DiagnosticoOption) => {
-          if (!selectedUuids.includes(option.uuid)) {
-            field.onChange([...selectedUuids, option.uuid]);
-            setSelectedOptions((prev) => {
-              const next = new Map(prev);
-              next.set(option.uuid, option);
-              return next;
-            });
-          }
-        };
-
-        const handleRemove = (uuid: string) => {
-          field.onChange(selectedUuids.filter((u) => u !== uuid));
-          setSelectedOptions((prev) => {
-            const next = new Map(prev);
-            next.delete(uuid);
-            return next;
-          });
-        };
-
-        return (
-          <DiagnosticoDropdown
-            selectedUuids={selectedUuids}
-            selectedOptions={selectedOptions}
-            onSelect={handleSelect}
-            onRemove={handleRemove}
-          />
-        );
-      }}
+    <DiagnosticoDropdown
+      selectedUuids={selectedUuids}
+      selectedOptions={selectedOptions}
+      onSelect={handleSelect}
+      onRemove={handleRemove}
     />
   );
 }
@@ -121,7 +117,7 @@ function DiagnosticoDropdown({
     }
   };
 
-  const handleSelect = (option: DiagnosticoOption) => {
+  const handleDropdownSelect = (option: DiagnosticoOption) => {
     onSelect(option);
     setSearch('');
     setOpen(false);
@@ -186,7 +182,7 @@ function DiagnosticoDropdown({
                   role="option"
                   aria-selected={selectedUuids.includes(option.uuid)}
                   disabled={selectedUuids.includes(option.uuid)}
-                  onClick={() => handleSelect(option)}
+                  onClick={() => handleDropdownSelect(option)}
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 focus:bg-blue-50 focus:outline-none ${
                     selectedUuids.includes(option.uuid)
                       ? 'cursor-default bg-blue-50 text-gray-400'

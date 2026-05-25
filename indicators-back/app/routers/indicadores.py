@@ -28,7 +28,7 @@ from app.schemas.indicador import (
     IndicadorVersionResponse,
 )
 from app.types.definicion import DefinicionIndicador
-from app.validators.openmrs import validar_definicion_encounter_uuids
+from app.validators.openmrs import validar_definicion_location_uuids
 
 router = APIRouter()
 
@@ -61,9 +61,9 @@ async def create_indicador(
     The definicion field is validated as DefinicionIndicador and stored as JSONB
     in the new version row. Both rows are committed atomically.
     """
-    # Validate encounter_type_uuids exist in OpenMRS before DB write.
+    # Validate location_uuids exist in OpenMRS before DB write.
     # Raises 422 (unknown UUIDs) or 502 (OpenMRS unavailable).
-    validar_definicion_encounter_uuids(body.definicion)
+    validar_definicion_location_uuids(body.definicion)
 
     indicador = Indicador(
         nombre=body.nombre,
@@ -226,8 +226,8 @@ async def update_indicador(
         )
 
         if incoming != existing:
-            # Validate encounter UUIDs against OpenMRS
-            validar_definicion_encounter_uuids(body.definicion)
+            # Validate location UUIDs against OpenMRS
+            validar_definicion_location_uuids(body.definicion)
 
             # Compute next version number
             max_result = await db.execute(
@@ -300,9 +300,9 @@ async def create_version(
     constraint in the database catches race conditions — if two concurrent
     requests attempt the same version number, the second gets a 409 Conflict.
     """
-    # Validate encounter_type_uuids exist in OpenMRS before DB write.
+    # Validate location_uuids exist in OpenMRS before DB write.
     # Raises 422 (unknown UUIDs) or 502 (OpenMRS unavailable).
-    validar_definicion_encounter_uuids(body.definicion)
+    validar_definicion_location_uuids(body.definicion)
 
     # Verify the indicator exists
     result = await db.execute(

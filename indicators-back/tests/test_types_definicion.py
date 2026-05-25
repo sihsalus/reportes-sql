@@ -26,7 +26,7 @@ class TestDefinicionIndicador:
             periodo="mes_actual",
             poblacion=FiltrosPoblacion(edad_max_dias=1825),
             evento=FiltrosEvento(
-                encounter_type_uuids=["uuid-consulta-externa"],
+                location_uuids=["uuid-consulta-externa"],
                 diagnosticos=[
                     FiltroDiagnostico(
                         concepto_uuids=["uuid-diag-1"],
@@ -46,7 +46,7 @@ class TestDefinicionIndicador:
             tipo="conteo_pacientes",
             periodo="mes_actual",
             evento=FiltrosEvento(
-                encounter_type_uuids=["uuid-consulta-externa"],
+                location_uuids=["uuid-consulta-externa"],
                 ordenes=[
                     FiltroOrden(concepto_uuid="uuid-order-1"),
                     FiltroOrden(concepto_uuid="uuid-order-2"),
@@ -64,7 +64,7 @@ class TestDefinicionIndicador:
 
     def test_invalid_minimo_ocurrencias_rejected(self):
         with pytest.raises(ValidationError):
-            FiltrosEvento(encounter_type_uuids=["uuid-x"], minimo_ocurrencias=0)
+            FiltrosEvento(location_uuids=["uuid-x"], minimo_ocurrencias=0)
 
     def test_poblacion_has_age_filter(self):
         p = FiltrosPoblacion(edad_min_dias=1)
@@ -79,7 +79,7 @@ class TestMutualExclusivity:
 
     def test_only_diagnosticos_passes(self):
         ev = FiltrosEvento(
-            encounter_type_uuids=["uuid-x"],
+            location_uuids=["uuid-x"],
             diagnosticos=[FiltroDiagnostico(concepto_uuids=["uuid-d"])],
         )
         assert ev.diagnosticos is not None
@@ -87,21 +87,21 @@ class TestMutualExclusivity:
 
     def test_only_ordenes_passes(self):
         ev = FiltrosEvento(
-            encounter_type_uuids=["uuid-x"],
+            location_uuids=["uuid-x"],
             ordenes=[FiltroOrden(concepto_uuid="uuid-o")],
         )
         assert ev.ordenes is not None
         assert ev.diagnosticos is None
 
     def test_neither_passes(self):
-        ev = FiltrosEvento(encounter_type_uuids=["uuid-x"])
+        ev = FiltrosEvento(location_uuids=["uuid-x"])
         assert ev.diagnosticos is None
         assert ev.ordenes is None
 
     def test_both_set_fails(self):
         with pytest.raises(ValidationError, match="mutually exclusive"):
             FiltrosEvento(
-                encounter_type_uuids=["uuid-x"],
+                location_uuids=["uuid-x"],
                 diagnosticos=[FiltroDiagnostico(concepto_uuids=["uuid-d"])],
                 ordenes=[FiltroOrden(concepto_uuid="uuid-o")],
             )
@@ -112,7 +112,7 @@ class TestMutualExclusivity:
                 tipo="conteo_atenciones",
                 periodo="mes_actual",
                 evento=FiltrosEvento(
-                    encounter_type_uuids=["uuid-x"],
+                    location_uuids=["uuid-x"],
                     diagnosticos=[FiltroDiagnostico(concepto_uuids=["uuid-d"])],
                     ordenes=[FiltroOrden(concepto_uuid="uuid-o")],
                 ),
@@ -161,7 +161,7 @@ class TestBackwardCompatNormalizer:
         old = {
             "tipo": "conteo_atenciones",
             "periodo": "mes_actual",
-            "evento": {"encounter_type_uuids": ["uuid-x"]},
+            "evento": {"location_uuids": ["uuid-x"]},
             "diagnostico": {"tipo_diagnostico": "definitivo"},
             "observaciones": [{"concepto_uuid": "uuid-a"}],
         }
@@ -173,7 +173,7 @@ class TestBackwardCompatNormalizer:
             "tipo": "conteo_atenciones",
             "periodo": "mes_actual",
             "evento": {
-                "encounter_type_uuids": ["uuid-x"],
+                "location_uuids": ["uuid-x"],
                 "diagnosticos": [
                     {"concepto_uuids": ["uuid-d"], "tipo_diagnostico": "presuntivo"},
                 ],
@@ -210,7 +210,7 @@ class TestBackwardCompatNormalizer:
         }
         d = DefinicionIndicador.model_validate(old)
         assert d.evento is not None
-        assert d.evento.encounter_type_uuids == ["uuid-first"]
+        assert d.evento.location_uuids == ["uuid-first"]
 
     def test_old_diagnostico_no_tipo_skips(self):
         """Old diagnostico without tipo_diagnostico produces no diagnosticos."""
@@ -262,3 +262,279 @@ class TestFiltroOrdenValidation:
     def test_empty_concepto_uuid_rejected(self):
         with pytest.raises(ValidationError):
             FiltroOrden(concepto_uuid="")
+
+
+# ── Phase 1: Canonical six-field age filter ─────────────────────────────
+
+
+class TestFiltrosPoblacionCanonical:
+    """Canonical six-field age filter: new field names, exclusivity, ge=0."""
+
+    def test_canonical_min_dias_valid(self):
+        """min_dias=30 is accepted as a valid canonical field."""
+        p = FiltrosPoblacion(min_dias=30, sexo="F")
+        assert p.min_dias == 30
+        assert p.min_meses is None
+        assert p.min_anios is None
+        assert p.sexo == "F"
+
+    def test_canonical_max_anios_excl_valid(self):
+        """max_anios_excl=5 is a valid exclusive upper bound in years."""
+        p = FiltrosPoblacion(max_anios_excl=5)
+        assert p.max_anios_excl == 5
+        assert p.max_dias is None
+
+    def test_canonical_max_meses_excl_valid(self):
+        """max_meses_excl=6 is a valid exclusive upper bound in months."""
+        p = FiltrosPoblacion(max_meses_excl=6)
+        assert p.max_meses_excl == 6
+
+    def test_canonical_has_age_filter_true(self):
+        """has_age_filter is True when any canonical field is set."""
+        p = FiltrosPoblacion(min_anios=18)
+        assert p.has_age_filter is True
+
+    def test_canonical_has_age_filter_false(self):
+        """has_age_filter is False when no age fields are set."""
+        p = FiltrosPoblacion()
+        assert p.has_age_filter is False
+
+    def test_canonical_has_age_filter_sexo_only(self):
+        """sexo alone does NOT trigger has_age_filter."""
+        p = FiltrosPoblacion(sexo="F")
+        assert p.has_age_filter is False
+
+    def test_all_six_fields_default_none(self):
+        """All six canonical fields default to None."""
+        p = FiltrosPoblacion()
+        assert p.min_dias is None
+        assert p.min_meses is None
+        assert p.min_anios is None
+        assert p.max_dias is None
+        assert p.max_meses_excl is None
+        assert p.max_anios_excl is None
+
+    def test_ge_zero_min_dias_rejected(self):
+        """min_dias=-1 violates ge=0."""
+        with pytest.raises(ValidationError):
+            FiltrosPoblacion(min_dias=-1)
+
+    def test_ge_zero_max_anios_excl_rejected(self):
+        """max_anios_excl=-5 violates ge=0."""
+        with pytest.raises(ValidationError):
+            FiltrosPoblacion(max_anios_excl=-5)
+
+    def test_ge_zero_min_meses_rejected(self):
+        """min_meses=-1 violates ge=0."""
+        with pytest.raises(ValidationError):
+            FiltrosPoblacion(min_meses=-1)
+
+    def test_ge_zero_max_meses_excl_rejected(self):
+        """max_meses_excl=-1 violates ge=0."""
+        with pytest.raises(ValidationError):
+            FiltrosPoblacion(max_meses_excl=-1)
+
+    def test_ge_zero_max_dias_rejected(self):
+        """max_dias=-1 violates ge=0."""
+        with pytest.raises(ValidationError):
+            FiltrosPoblacion(max_dias=-1)
+
+    def test_same_group_min_exclusivity_two(self):
+        """min_dias=10 + min_meses=1 → same-group exclusivity violation."""
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            FiltrosPoblacion(min_dias=10, min_meses=1)
+
+    def test_same_group_min_exclusivity_all_three(self):
+        """min_dias=10 + min_meses=1 + min_anios=0 → exclusivity violation."""
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            FiltrosPoblacion(min_dias=10, min_meses=1, min_anios=0)
+
+    def test_same_group_min_exclusivity_dias_anios(self):
+        """min_dias=30 + min_anios=1 → exclusivity violation."""
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            FiltrosPoblacion(min_dias=30, min_anios=1)
+
+    def test_same_group_max_exclusivity(self):
+        """max_dias=100 + max_meses_excl=6 → same-group exclusivity violation."""
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            FiltrosPoblacion(max_dias=100, max_meses_excl=6)
+
+    def test_same_group_max_exclusivity_dias_anios(self):
+        """max_dias=365 + max_anios_excl=1 → exclusivity violation."""
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            FiltrosPoblacion(max_dias=365, max_anios_excl=1)
+
+    def test_same_group_max_exclusivity_meses_anios(self):
+        """max_meses_excl=6 + max_anios_excl=5 → exclusivity violation."""
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            FiltrosPoblacion(max_meses_excl=6, max_anios_excl=5)
+
+    def test_cross_group_allowed_min_anios_max_anios(self):
+        """One min and one max (different groups) is valid."""
+        p = FiltrosPoblacion(min_anios=18, max_anios_excl=65)
+        assert p.min_anios == 18
+        assert p.max_anios_excl == 65
+
+    def test_cross_group_allowed_min_dias_max_dias(self):
+        """min_dias + max_dias (different groups) is valid."""
+        p = FiltrosPoblacion(min_dias=30, max_dias=365)
+        assert p.min_dias == 30
+        assert p.max_dias == 365
+
+    def test_cross_group_allowed_min_meses_max_meses(self):
+        """min_meses + max_meses_excl (different groups) is valid."""
+        p = FiltrosPoblacion(min_meses=6, max_meses_excl=24)
+        assert p.min_meses == 6
+        assert p.max_meses_excl == 24
+
+    def test_model_dump_uses_canonical_names(self):
+        """model_dump() emits canonical field names, never legacy ones."""
+        p = FiltrosPoblacion(min_anios=5, max_dias=365, sexo="M")
+        dump = p.model_dump(exclude_none=True)
+        assert "min_anios" in dump
+        assert "max_dias" in dump
+        assert "edad_min_anios" not in dump
+        assert "edad_max_dias" not in dump
+
+    def test_exclusivity_error_from_definicion_context(self):
+        """Same-group exclusivity errors surface when nesting inside DefinicionIndicador."""
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            DefinicionIndicador(
+                tipo="conteo_atenciones",
+                periodo="mes_actual",
+                poblacion=FiltrosPoblacion(min_dias=10, min_meses=1),
+            )
+
+
+class TestFiltrosPoblacionLegacy:
+    """Legacy field name normalization: edad_* fields map to canonical names."""
+
+    def test_legacy_edad_min_anios_to_min_anios(self):
+        """edad_min_anios=10 → normalizes to min_anios=10."""
+        p = FiltrosPoblacion(edad_min_anios=10)
+        assert p.min_anios == 10
+        assert p.min_meses is None
+
+    def test_legacy_edad_max_anios_to_max_anios_excl(self):
+        """edad_max_anios=5 → normalizes to max_anios_excl=5 (exclusive bound)."""
+        p = FiltrosPoblacion(edad_max_anios=5)
+        assert p.max_anios_excl == 5
+
+    def test_legacy_edad_min_meses_to_min_meses(self):
+        """edad_min_meses=6 → normalizes to min_meses=6."""
+        p = FiltrosPoblacion(edad_min_meses=6)
+        assert p.min_meses == 6
+
+    def test_legacy_edad_max_meses_to_max_meses_excl(self):
+        """edad_max_meses=12 → normalizes to max_meses_excl=12 (exclusive bound)."""
+        p = FiltrosPoblacion(edad_max_meses=12)
+        assert p.max_meses_excl == 12
+
+    def test_legacy_edad_min_dias_to_min_dias(self):
+        """edad_min_dias=1 → normalizes to min_dias=1."""
+        p = FiltrosPoblacion(edad_min_dias=1)
+        assert p.min_dias == 1
+
+    def test_legacy_edad_max_dias_to_max_dias(self):
+        """edad_max_dias=1825 → normalizes to max_dias=1825 (still inclusive)."""
+        p = FiltrosPoblacion(edad_max_dias=1825)
+        assert p.max_dias == 1825
+
+    def test_mixed_legacy_and_canonical_rejected(self):
+        """Mixing old and new field names is rejected with a clear message."""
+        with pytest.raises(ValidationError, match="Cannot mix"):
+            FiltrosPoblacion(edad_min_anios=10, min_meses=6)
+
+    def test_mixed_legacy_max_and_canonical_max_rejected(self):
+        """Mixing old max and new max field names is rejected."""
+        with pytest.raises(ValidationError, match="Cannot mix"):
+            FiltrosPoblacion(edad_max_dias=100, max_anios_excl=5)
+
+    def test_legacy_model_dump_uses_canonical_names(self):
+        """After legacy normalization, model_dump() emits canonical names only."""
+        p = FiltrosPoblacion(edad_min_anios=10, edad_max_dias=365)
+        dump = p.model_dump(exclude_none=True)
+        assert "min_anios" in dump
+        assert "max_dias" in dump
+        assert "edad_min_anios" not in dump
+        assert "edad_max_dias" not in dump
+
+    def test_legacy_has_age_filter(self):
+        """has_age_filter works correctly after legacy normalization."""
+        p = FiltrosPoblacion(edad_min_dias=1)
+        assert p.has_age_filter is True
+
+    def test_legacy_normalized_through_definicion(self):
+        """Legacy payload normalizes correctly when nested inside DefinicionIndicador."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(edad_max_dias=1825),
+            evento=FiltrosEvento(location_uuids=["uuid-x"]),
+        )
+        assert d.poblacion is not None
+        assert d.poblacion.max_dias == 1825
+        assert d.poblacion.has_age_filter is True
+
+
+# ── Phase: location_uuids → FiltrosEvento (replaces encounter_type_uuids) ──
+
+
+class TestFiltrosEventoLocation:
+    """FiltrosEvento uses location_uuids instead of encounter_type_uuids."""
+
+    def test_location_uuids_accepted(self):
+        """location_uuids is accepted as a valid field in FiltrosEvento."""
+        ev = FiltrosEvento(location_uuids=["uuid-a", "uuid-b"])
+        assert ev.location_uuids == ["uuid-a", "uuid-b"]
+        assert ev.minimo_ocurrencias is None
+
+    def test_location_uuids_none_accepted(self):
+        """location_uuids can be None (no service filter)."""
+        ev = FiltrosEvento()
+        assert ev.location_uuids is None
+
+    def test_location_uuids_empty_list_accepted(self):
+        """location_uuids can be an empty list."""
+        ev = FiltrosEvento(location_uuids=[])
+        assert ev.location_uuids == []
+
+    def test_legacy_encounter_type_uuids_normalized_to_location_uuids(self):
+        """FiltrosEvento before-validator maps encounter_type_uuids → location_uuids."""
+        ev = FiltrosEvento(encounter_type_uuids=["uuid-legacy"])
+        assert ev.location_uuids == ["uuid-legacy"]
+
+    def test_legacy_normalization_not_in_model_dump(self):
+        """model_dump() excludes encounter_type_uuids, only shows location_uuids."""
+        ev = FiltrosEvento(encounter_type_uuids=["uuid-legacy"])
+        dump = ev.model_dump(exclude_none=True)
+        assert "location_uuids" in dump
+        assert "encounter_type_uuids" not in dump
+
+    def test_location_uuids_with_diagnosticos(self):
+        """location_uuids works alongside diagnosticos."""
+        ev = FiltrosEvento(
+            location_uuids=["uuid-x"],
+            diagnosticos=[FiltroDiagnostico(concepto_uuids=["uuid-d"])],
+        )
+        assert ev.location_uuids == ["uuid-x"]
+        assert ev.diagnosticos is not None
+
+    def test_location_uuids_with_minimo_ocurrencias(self):
+        """location_uuids works alongside minimo_ocurrencias."""
+        ev = FiltrosEvento(
+            location_uuids=["uuid-x"],
+            minimo_ocurrencias=3,
+        )
+        assert ev.location_uuids == ["uuid-x"]
+        assert ev.minimo_ocurrencias == 3
+
+    def test_location_uuids_in_definicion(self):
+        """location_uuids flows through DefinicionIndicador correctly."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            evento=FiltrosEvento(location_uuids=["uuid-consulta-externa"]),
+        )
+        assert d.evento is not None
+        assert d.evento.location_uuids == ["uuid-consulta-externa"]

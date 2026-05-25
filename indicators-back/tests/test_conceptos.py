@@ -382,3 +382,167 @@ class TestDiagnosticosBuscarEndpoint:
         assert params["class"] == "Diagnosis"
         assert params["limit"] == 10
         assert params["q"] == "ira"
+
+
+# ── Location endpoint tests ─────────────────────────────────────────────
+
+
+def _setup_location_mock(results: list[dict]) -> tuple[MagicMock, MagicMock]:
+    """Set up a mocked AsyncClient for GET /conceptos/locations."""
+    from unittest.mock import AsyncMock
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json = MagicMock(return_value={"results": results})
+    patcher = patch("app.routers.conceptos.AsyncClient", autospec=True)
+    mock_client_cls = patcher.start()
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_response
+    mock_client_cls.return_value.__aenter__.return_value = mock_client
+    return mock_client, patcher
+
+
+class TestLocationSearch:
+    """Tests for GET /conceptos/locations."""
+
+    def test_returns_locations(self, client: TestClient):
+        """Valid search returns only matching locations."""
+        mock_client, patcher = _setup_location_mock([
+            {"uuid": "aaaaaaaa-1111-2222-3333-444444444444", "display": "Consulta Externa"},
+            {"uuid": "bbbbbbbb-1111-2222-3333-444444444444", "display": "Hospitalización"},
+        ])
+        try:
+            response = client.get("/conceptos/locations", params={"q": "consulta"})
+        finally:
+            patcher.stop()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["uuid"] == "aaaaaaaa-1111-2222-3333-444444444444"
+        assert data[0]["display"] == "Consulta Externa"
+
+    def test_case_insensitive_contains_match(self, client: TestClient):
+        """Query should match regardless of casing and position in display."""
+        mock_client, patcher = _setup_location_mock([
+            {
+                "uuid": "aaaaaaaa-1111-2222-3333-444444444444",
+                "display": "UPSS CONSULTA EXTERNA",
+            },
+            {
+                "uuid": "bbbbbbbb-1111-2222-3333-444444444444",
+                "display": "Emergencia",
+            },
+        ])
+        try:
+            response = client.get("/conceptos/locations", params={"q": "consulta"})
+        finally:
+            patcher.stop()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["display"] == "UPSS CONSULTA EXTERNA"
+
+    def test_queries_openmrs_with_seed_search_then_filters_locally(
+        self,
+        client: TestClient,
+    ):
+        """Endpoint should query OpenMRS with a short seed and filter locally."""
+        mock_client, patcher = _setup_location_mock([
+            {
+                "uuid": "aaaaaaaa-1111-2222-3333-444444444444",
+                "display": "UPSS CONSULTA EXTERNA",
+            },
+        ])
+        try:
+            response = client.get("/conceptos/locations", params={"q": "CONSULTA"})
+        finally:
+            patcher.stop()
+
+        assert response.status_code == 200
+        call_kwargs = mock_client.get.call_args
+        params = call_kwargs.kwargs.get("params") or call_kwargs[1].get("params")
+        assert params["q"] == "con"
+        assert params["limit"] == 200
+
+    def test_falls_back_to_upss_seed_when_primary_seed_has_no_match(
+        self,
+        client: TestClient,
+    ):
+        """If primary seed yields no local match, endpoint retries with upss seed."""
+        from unittest.mock import AsyncMock
+
+        first_response = MagicMock()
+        first_response.raise_for_status = MagicMock()
+        first_response.json = MagicMock(return_value={"results": [
+            {"uuid": "x", "display": "Emergencia"},
+        ]})
+
+        second_response = MagicMock()
+        second_response.raise_for_status = MagicMock()
+        second_response.json = MagicMock(return_value={"results": [
+            {
+                "uuid": "aaaaaaaa-1111-2222-3333-444444444444",
+                "display": "UPSS CONSULTA EXTERNA",
+            }
+        ]})
+
+        patcher = patch("app.routers.conceptos.AsyncClient", autospec=True)
+        mock_client_cls = patcher.start()
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = [first_response, second_response]
+        mock_client_cls.return_value.__aenter__.return_value = mock_client
+
+        try:
+            response = client.get("/conceptos/locations", params={"q": "consulta"})
+        finally:
+            patcher.stop()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["display"] == "UPSS CONSULTA EXTERNA"
+
+        assert mock_client.get.call_count == 2
+        first_params = mock_client.get.call_args_list[0].kwargs["params"]
+        second_params = mock_client.get.call_args_list[1].kwargs["params"]
+        assert first_params["q"] == "con"
+        assert second_params["q"] == "upss"
+
+    def test_empty_q_returns_400(self, client: TestClient):
+        """Empty q parameter returns 400 Bad Request (no OpenMRS call needed)."""
+        response = client.get("/conceptos/locations", params={"q": ""})
+        assert response.status_code == 400
+
+    def test_missing_q_returns_400(self, client: TestClient):
+        """Missing q parameter returns 400 (default q="" triggers empty check)."""
+        response = client.get("/conceptos/locations")
+        assert response.status_code == 400
+
+    def test_openmrs_failure_returns_502(self, client: TestClient):
+        """OpenMRS HTTP error → 502 Bad Gateway."""
+        mock_client, patcher = _setup_openmrs_mock(
+            side_effect=HTTPStatusError(
+                "err",
+                request=MagicMock(),
+                response=MagicMock(status_code=500),
+            ),
+        )
+        try:
+            response = client.get("/conceptos/locations", params={"q": "consulta"})
+        finally:
+            patcher.stop()
+
+        assert response.status_code == 502
+
+    def test_request_error_returns_502(self, client: TestClient):
+        """OpenMRS connection error → 502 Bad Gateway."""
+        mock_client, patcher = _setup_openmrs_mock(
+            side_effect=RequestError("timeout", request=MagicMock()),
+        )
+        try:
+            response = client.get("/conceptos/locations", params={"q": "consulta"})
+        finally:
+            patcher.stop()
+
+        assert response.status_code == 502

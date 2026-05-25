@@ -25,7 +25,7 @@ export function parseDefinicion(def: unknown): DefinicionIndicadorForm {
     return {
       tipo: 'conteo_atenciones',
       periodo: 'mes_actual',
-      evento: { encounter_type_uuids: [], minimo_ocurrencias: 1 },
+      evento: { location_uuids: [], minimo_ocurrencias: 1 },
     };
   }
 
@@ -69,18 +69,27 @@ export function parseDefinicion(def: unknown): DefinicionIndicadorForm {
   if (Array.isArray(eventoRaw.ordenes)) {
     ordenes = (eventoRaw.ordenes as unknown[])
       .filter((o): o is Record<string, unknown> => o !== null && typeof o === 'object')
-      .map((o) => ({
-        concepto_uuid: typeof o.concepto_uuid === 'string' ? o.concepto_uuid : '',
-      }))
-      .filter((o) => o.concepto_uuid.length > 0);
+      .map((o) => {
+        if (Array.isArray(o.concepto_uuids)) {
+          return { concepto_uuids: o.concepto_uuids as string[] };
+        }
+        return {
+          concepto_uuids:
+            typeof o.concepto_uuid === 'string' && o.concepto_uuid.length > 0
+              ? [o.concepto_uuid]
+              : [],
+        };
+      })
+      .filter((o) => o.concepto_uuids.length > 0);
   } else if (Array.isArray(d.observaciones)) {
     // Backward compat: hoist old flat observaciones into evento.ordenes
-    ordenes = (d.observaciones as unknown[])
+    const allUuids: string[] = (d.observaciones as unknown[])
       .filter((o): o is Record<string, unknown> => o !== null && typeof o === 'object')
-      .map((o) => ({
-        concepto_uuid: typeof o.concepto_uuid === 'string' ? o.concepto_uuid : '',
-      }))
-      .filter((o) => o.concepto_uuid.length > 0);
+      .map((o) => (typeof o.concepto_uuid === 'string' ? o.concepto_uuid : ''))
+      .filter((uuid) => uuid.length > 0);
+    if (allUuids.length > 0) {
+      ordenes = [{ concepto_uuids: allUuids }];
+    }
   }
 
   if (ordenes && ordenes.length === 0) {
@@ -92,9 +101,11 @@ export function parseDefinicion(def: unknown): DefinicionIndicadorForm {
 
   // ── Build evento ──
   const evento = {
-    encounter_type_uuids: Array.isArray(eventoRaw.encounter_type_uuids)
-      ? (eventoRaw.encounter_type_uuids as string[])
-      : [],
+    location_uuids: Array.isArray(eventoRaw.location_uuids)
+      ? (eventoRaw.location_uuids as string[])
+      : Array.isArray(eventoRaw.encounter_type_uuids)
+        ? (eventoRaw.encounter_type_uuids as string[])
+        : [],
     minimo_ocurrencias:
       typeof eventoRaw.minimo_ocurrencias === 'number'
         ? eventoRaw.minimo_ocurrencias
@@ -107,30 +118,42 @@ export function parseDefinicion(def: unknown): DefinicionIndicadorForm {
   const poblacionRaw = d.poblacion as Record<string, unknown> | undefined;
   const poblacion = poblacionRaw
     ? {
-        edad_min_anios:
-          typeof poblacionRaw.edad_min_anios === 'number'
-            ? poblacionRaw.edad_min_anios
-            : undefined,
-        edad_max_anios:
-          typeof poblacionRaw.edad_max_anios === 'number'
-            ? poblacionRaw.edad_max_anios
-            : undefined,
-        edad_min_meses:
-          typeof poblacionRaw.edad_min_meses === 'number'
-            ? poblacionRaw.edad_min_meses
-            : undefined,
-        edad_max_meses:
-          typeof poblacionRaw.edad_max_meses === 'number'
-            ? poblacionRaw.edad_max_meses
-            : undefined,
-        edad_min_dias:
-          typeof poblacionRaw.edad_min_dias === 'number'
-            ? poblacionRaw.edad_min_dias
-            : undefined,
-        edad_max_dias:
-          typeof poblacionRaw.edad_max_dias === 'number'
-            ? poblacionRaw.edad_max_dias
-            : undefined,
+        min_anios:
+          typeof poblacionRaw.min_anios === 'number'
+            ? poblacionRaw.min_anios
+            : typeof poblacionRaw.edad_min_anios === 'number'
+              ? poblacionRaw.edad_min_anios
+              : undefined,
+        max_anios_excl:
+          typeof poblacionRaw.max_anios_excl === 'number'
+            ? poblacionRaw.max_anios_excl
+            : typeof poblacionRaw.edad_max_anios === 'number'
+              ? poblacionRaw.edad_max_anios
+              : undefined,
+        min_meses:
+          typeof poblacionRaw.min_meses === 'number'
+            ? poblacionRaw.min_meses
+            : typeof poblacionRaw.edad_min_meses === 'number'
+              ? poblacionRaw.edad_min_meses
+              : undefined,
+        max_meses_excl:
+          typeof poblacionRaw.max_meses_excl === 'number'
+            ? poblacionRaw.max_meses_excl
+            : typeof poblacionRaw.edad_max_meses === 'number'
+              ? poblacionRaw.edad_max_meses
+              : undefined,
+        min_dias:
+          typeof poblacionRaw.min_dias === 'number'
+            ? poblacionRaw.min_dias
+            : typeof poblacionRaw.edad_min_dias === 'number'
+              ? poblacionRaw.edad_min_dias
+              : undefined,
+        max_dias:
+          typeof poblacionRaw.max_dias === 'number'
+            ? poblacionRaw.max_dias
+            : typeof poblacionRaw.edad_max_dias === 'number'
+              ? poblacionRaw.edad_max_dias
+              : undefined,
         sexo:
           (poblacionRaw.sexo as 'M' | 'F' | undefined) ?? undefined,
       }
@@ -139,7 +162,7 @@ export function parseDefinicion(def: unknown): DefinicionIndicadorForm {
   return {
     tipo: (d.tipo as 'conteo_atenciones' | 'conteo_pacientes') ?? 'conteo_atenciones',
     periodo:
-      (d.periodo as 'mes_actual' | 'mes_anterior' | 'semana_actual' | 'semana_anterior') ??
+      (d.periodo as 'mes_actual' | 'trimestre_actual' | 'semestre_actual' | 'anual_actual') ??
       'mes_actual',
     evento,
     poblacion,

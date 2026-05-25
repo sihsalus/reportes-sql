@@ -6,7 +6,7 @@
  */
 
 import { http, HttpResponse } from 'msw';
-import type { Indicador, IndicadorDetail, IndicadorVersion, PaginatedResponse, IndicadorResultado, BatchCalcularNowResponse, DiagnosticoOption } from '@/api/types';
+import type { Indicador, IndicadorDetail, IndicadorVersion, PaginatedResponse, IndicadorResultado, BatchCalcularNowResponse, DiagnosticoOption, LocationOption, OrdenOption } from '@/api/types';
 
 /** In-memory fixture store — shared across handlers. */
 const fixtureIndicadores: Indicador[] = [
@@ -49,7 +49,7 @@ let fixtureDetail: IndicadorDetail = {
         tipo: 'conteo_atenciones',
         periodo: 'mes_actual',
         evento: {
-          encounter_type_uuids: ['550e8400-e29b-41d4-a716-446655440000'],
+          location_uuids: ['550e8400-e29b-41d4-a716-446655440000'],
           minimo_ocurrencias: 1,
           diagnosticos: [
             {
@@ -67,9 +67,9 @@ let fixtureDetail: IndicadorDetail = {
       version: 2,
       definicion: {
         tipo: 'conteo_pacientes',
-        periodo: 'mes_anterior',
+        periodo: 'trimestre_actual',
         evento: {
-          encounter_type_uuids: ['550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440001'],
+          location_uuids: ['550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440001'],
           minimo_ocurrencias: 2,
           ordenes: [
             { concepto_uuid: '550e8400-e29b-41d4-a716-446655440002' },
@@ -77,8 +77,8 @@ let fixtureDetail: IndicadorDetail = {
           ],
         },
         poblacion: {
-          edad_min_anios: 18,
-          edad_max_anios: 65,
+          min_anios: 18,
+          max_anios_excl: 65,
           sexo: 'M',
         },
       },
@@ -90,14 +90,14 @@ let fixtureDetail: IndicadorDetail = {
       version: 3,
       definicion: {
         tipo: 'conteo_atenciones',
-        periodo: 'semana_actual',
+        periodo: 'anual_actual',
         evento: {
-          encounter_type_uuids: [],
+          location_uuids: [],
           minimo_ocurrencias: 1,
         },
         poblacion: {
-          edad_min_anios: 0,
-          edad_max_meses: 12,
+          min_anios: 0,
+          max_meses_excl: 12,
         },
       },
       creado_en: '2026-03-05T11:15:00Z',
@@ -150,7 +150,7 @@ export function resetFixtures(): void {
           tipo: 'conteo_atenciones',
           periodo: 'mes_actual',
           evento: {
-            encounter_type_uuids: ['550e8400-e29b-41d4-a716-446655440000'],
+            location_uuids: ['550e8400-e29b-41d4-a716-446655440000'],
             minimo_ocurrencias: 1,
             diagnosticos: [
               {
@@ -168,20 +168,20 @@ export function resetFixtures(): void {
         version: 2,
         definicion: {
           tipo: 'conteo_pacientes',
-          periodo: 'mes_anterior',
+          periodo: 'semestre_actual',
           evento: {
-            encounter_type_uuids: ['550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440001'],
+            location_uuids: ['550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440001'],
             minimo_ocurrencias: 2,
             ordenes: [
               { concepto_uuid: '550e8400-e29b-41d4-a716-446655440002' },
               { concepto_uuid: '550e8400-e29b-41d4-a716-446655440003' },
             ],
           },
-          poblacion: {
-            edad_min_anios: 18,
-            edad_max_anios: 65,
-            sexo: 'M',
-          },
+            poblacion: {
+              min_anios: 18,
+              max_anios_excl: 65,
+              sexo: 'M',
+            },
         },
         creado_en: '2026-02-01T09:00:00Z',
       },
@@ -191,9 +191,9 @@ export function resetFixtures(): void {
         version: 3,
         definicion: {
           tipo: 'conteo_atenciones',
-          periodo: 'semana_actual',
+          periodo: 'anual_actual',
           evento: {
-            encounter_type_uuids: [],
+            location_uuids: [],
             minimo_ocurrencias: 1,
           },
           poblacion: {
@@ -521,6 +521,74 @@ export const handlers = [
       (r) =>
         r.nombre.toLowerCase().includes(lowerQ) ||
         r.codigo?.toLowerCase().includes(lowerQ),
+    );
+
+    return HttpResponse.json(filtered);
+  }),
+
+  /**
+   * GET /conceptos/locations — returns location search results.
+   *
+   * Returns matching locations filtered by query.
+   * Returns empty results when q is empty or matches "zzz_no_existe".
+   */
+  http.get('/conceptos/locations', ({ request }) => {
+    const url = new URL(request.url);
+    const q = url.searchParams.get('q') || '';
+
+    if (!q || q.trim().length === 0) {
+      return HttpResponse.json(
+        { detail: "El parámetro 'q' es obligatorio y no puede estar vacío" },
+        { status: 400 },
+      );
+    }
+
+    if (q === 'zzz_no_existe') {
+      return HttpResponse.json([]);
+    }
+
+    const allLocations: LocationOption[] = [
+      { uuid: '550e8400-e29b-41d4-a716-446655440000', display: 'Consulta Externa' },
+      { uuid: '550e8400-e29b-41d4-a716-446655440001', display: 'Hospitalización' },
+      { uuid: '660e8400-e29b-41d4-a716-446655440002', display: 'Emergencia' },
+    ];
+
+    const lowerQ = q.toLowerCase();
+    const filtered = allLocations.filter((loc) =>
+      loc.display.toLowerCase().includes(lowerQ),
+    );
+
+    return HttpResponse.json(filtered);
+  }),
+
+  /**
+   * GET /conceptos/buscar — returns concept search results by class.
+   *
+   * Accepts `?q={query}&clase={clase}` params.
+   * Returns empty results when q matches "zzz_no_existe".
+   */
+  http.get('/conceptos/buscar', ({ request }) => {
+    const url = new URL(request.url);
+    const q = url.searchParams.get('q') || '';
+    const clase = url.searchParams.get('clase') || '';
+
+    if (!q || q.trim().length === 0) {
+      return HttpResponse.json([]);
+    }
+
+    if (q === 'zzz_no_existe') {
+      return HttpResponse.json([]);
+    }
+
+    const results: OrdenOption[] = [
+      { uuid: 'ord-1111-2222-3333-444444444444', display: 'Hemoglobina' },
+      { uuid: 'ord-5555-6666-7777-888888888888', display: 'Urocultivo' },
+      { uuid: 'ord-9999-aaaa-bbbb-cccccccccccc', display: 'Glucosa' },
+    ];
+
+    const lowerQ = q.toLowerCase();
+    const filtered = results.filter(
+      (r) => r.display.toLowerCase().includes(lowerQ),
     );
 
     return HttpResponse.json(filtered);

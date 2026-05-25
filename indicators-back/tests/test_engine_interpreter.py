@@ -10,7 +10,7 @@ from app.types.definicion import (
     FiltroOrden,
 )
 
-UUID_ENC = "12345678-1234-1234-1234-123456789abc"
+UUID_LOC = "12345678-1234-1234-1234-123456789abc"
 UUID_DIAG = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 UUID_DIAG2 = "11111111-2222-3333-4444-555555555555"
 UUID_ORD = "ffffffff-gggg-hhhh-iiii-jjjjjjjjjjjj"
@@ -26,17 +26,17 @@ class TestBuildQuery:
         definicion = DefinicionIndicador(
             tipo="conteo_atenciones",
             periodo="mes_actual",
-            evento=FiltrosEvento(encounter_type_uuids=[UUID_ENC]),
+            evento=FiltrosEvento(location_uuids=[UUID_LOC]),
         )
         sql, params = build_query(definicion, INICIO, FIN)
         assert "COUNT(*)" in sql
-        assert "encounter_type" in sql
+        assert "location" in sql
 
     def test_conteo_pacientes(self):
         definicion = DefinicionIndicador(
             tipo="conteo_pacientes",
             periodo="mes_actual",
-            evento=FiltrosEvento(encounter_type_uuids=[UUID_ENC]),
+            evento=FiltrosEvento(location_uuids=[UUID_LOC]),
         )
         sql, params = build_query(definicion, INICIO, FIN)
         assert "COUNT(DISTINCT" in sql
@@ -46,7 +46,7 @@ class TestBuildQuery:
             tipo="conteo_atenciones",
             periodo="mes_actual",
             evento=FiltrosEvento(
-                encounter_type_uuids=[UUID_ENC],
+                location_uuids=[UUID_LOC],
                 minimo_ocurrencias=3,
             ),
         )
@@ -60,7 +60,7 @@ class TestBuildQuery:
             tipo="conteo_atenciones",
             periodo="mes_actual",
             evento=FiltrosEvento(
-                encounter_type_uuids=[UUID_ENC],
+                location_uuids=[UUID_LOC],
                 diagnosticos=[
                     FiltroDiagnostico(
                         concepto_uuids=[UUID_DIAG],
@@ -82,7 +82,7 @@ class TestBuildQuery:
             tipo="conteo_atenciones",
             periodo="mes_actual",
             evento=FiltrosEvento(
-                encounter_type_uuids=[UUID_ENC],
+                location_uuids=[UUID_LOC],
                 diagnosticos=[
                     FiltroDiagnostico(
                         concepto_uuids=[UUID_DIAG],
@@ -101,7 +101,7 @@ class TestBuildQuery:
             tipo="conteo_atenciones",
             periodo="mes_actual",
             evento=FiltrosEvento(
-                encounter_type_uuids=[UUID_ENC],
+                location_uuids=[UUID_LOC],
                 diagnosticos=[
                     FiltroDiagnostico(
                         concepto_uuids=[],
@@ -122,7 +122,7 @@ class TestBuildQuery:
             tipo="conteo_atenciones",
             periodo="mes_actual",
             evento=FiltrosEvento(
-                encounter_type_uuids=[UUID_ENC],
+                location_uuids=[UUID_LOC],
                 diagnosticos=[
                     FiltroDiagnostico(
                         concepto_uuids=[UUID_DIAG, UUID_DIAG2],
@@ -145,7 +145,7 @@ class TestBuildQuery:
             tipo="conteo_atenciones",
             periodo="mes_actual",
             evento=FiltrosEvento(
-                encounter_type_uuids=[UUID_ENC],
+                location_uuids=[UUID_LOC],
                 diagnosticos=[
                     FiltroDiagnostico(concepto_uuids=[]),
                 ],
@@ -160,7 +160,7 @@ class TestBuildQuery:
             tipo="conteo_atenciones",
             periodo="mes_actual",
             evento=FiltrosEvento(
-                encounter_type_uuids=[UUID_ENC],
+                location_uuids=[UUID_LOC],
                 ordenes=[FiltroOrden(concepto_uuid=UUID_ORD)],
             ),
         )
@@ -175,7 +175,7 @@ class TestBuildQuery:
             tipo="conteo_atenciones",
             periodo="mes_actual",
             evento=FiltrosEvento(
-                encounter_type_uuids=[UUID_ENC],
+                location_uuids=[UUID_LOC],
                 ordenes=[
                     FiltroOrden(concepto_uuid=UUID_ORD),
                     FiltroOrden(concepto_uuid="uuid-2"),
@@ -195,7 +195,7 @@ class TestBuildQuery:
             tipo="conteo_atenciones",
             periodo="mes_actual",
             evento=FiltrosEvento(
-                encounter_type_uuids=[UUID_ENC],
+                location_uuids=[UUID_LOC],
                 ordenes=[FiltroOrden(concepto_uuid=UUID_ORD)],
             ),
         )
@@ -208,7 +208,7 @@ class TestBuildQuery:
             tipo="conteo_atenciones",
             periodo="mes_actual",
             evento=FiltrosEvento(
-                encounter_type_uuids=[UUID_ENC],
+                location_uuids=[UUID_LOC],
                 ordenes=[FiltroOrden(concepto_uuid=UUID_ORD)],
             ),
         )
@@ -220,7 +220,7 @@ class TestBuildQuery:
         definicion = DefinicionIndicador(
             tipo="conteo_atenciones",
             periodo="mes_actual",
-            evento=FiltrosEvento(encounter_type_uuids=[UUID_ENC]),
+            evento=FiltrosEvento(location_uuids=[UUID_LOC]),
             poblacion=FiltrosPoblacion(edad_min_dias=1),
         )
         sql, params = build_query(definicion, INICIO, FIN)
@@ -243,7 +243,7 @@ class TestBuildQuery:
             tipo="conteo_atenciones",
             periodo="mes_actual",
             evento=FiltrosEvento(
-                encounter_type_uuids=[UUID_ENC],
+                location_uuids=[UUID_LOC],
                 minimo_ocurrencias=3,
                 diagnosticos=[
                     FiltroDiagnostico(
@@ -263,7 +263,7 @@ class TestBuildQuery:
             tipo="conteo_atenciones",
             periodo="mes_actual",
             evento=FiltrosEvento(
-                encounter_type_uuids=[UUID_ENC],
+                location_uuids=[UUID_LOC],
                 minimo_ocurrencias=3,
                 ordenes=[FiltroOrden(concepto_uuid=UUID_ORD)],
             ),
@@ -272,3 +272,233 @@ class TestBuildQuery:
         sql, params = build_query(definicion, INICIO, FIN, concept_map=concept_map)
         assert "HAVING" in sql
         assert "orders" in sql
+
+    def test_no_location_join_when_empty(self):
+        """When location_uuids is None/empty, no location JOIN emitted."""
+        definicion = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            evento=FiltrosEvento(),
+        )
+        sql, params = build_query(definicion, INICIO, FIN)
+        assert "JOIN location" not in sql
+
+    def test_location_join_and_where_with_two_uuids(self):
+        """Two location UUIDs → JOIN location + l.uuid IN (loc_0, loc_1)."""
+        definicion = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            evento=FiltrosEvento(
+                location_uuids=[UUID_LOC, "uuid-loc-2"],
+            ),
+        )
+        sql, params = build_query(definicion, INICIO, FIN)
+        assert "JOIN location l ON e.location_id = l.location_id" in sql
+        assert "l.uuid IN" in sql
+        assert any(k.startswith("loc_") for k in params)
+
+
+# ── Phase 2: Age filter SQL generation (canonical six-field) ─────────────
+
+
+class TestAgeFilterSQL:
+    """Unit-aware age filter SQL generation with DATEDIFF / DATE_ADD."""
+
+    # ── min_dias (days, inclusive) ──
+
+    def test_min_dias_generates_datediff_ge(self):
+        """min_dias=1 → DATEDIFF >= %(min_dias)s."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(min_dias=1),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "DATEDIFF" in sql
+        assert "p.birthdate" in sql
+        assert "DATEDIFF(%(inicio)s, p.birthdate) >= %(min_dias)s" in sql
+        assert "min_dias" in params
+        assert params["min_dias"] == 1
+
+    def test_min_dias_sql_contains_ge_operator(self):
+        """min_dias=30 produces DATEDIFF >= ... clause."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(min_dias=30),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "DATEDIFF(%(inicio)s, p.birthdate) >= %(min_dias)s" in sql
+
+    # ── max_dias (days, inclusive) ──
+
+    def test_max_dias_generates_datediff_le(self):
+        """max_dias=365 → DATEDIFF <= %(max_dias)s."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(max_dias=365),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "DATEDIFF(%(inicio)s, p.birthdate) <= %(max_dias)s" in sql
+        assert params["max_dias"] == 365
+
+    # ── min_meses (months, DATE_ADD) ──
+
+    def test_min_meses_uses_date_add_month(self):
+        """min_meses=6 → DATE_ADD(p.birthdate, INTERVAL 6 MONTH) <= inicio."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(min_meses=6),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "DATE_ADD(p.birthdate, INTERVAL %(min_meses)s MONTH)" in sql
+        assert params["min_meses"] == 6
+
+    def test_min_meses_compare_le_inicio(self):
+        """DATE_ADD(...) <= inicio for minimum age in months."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(min_meses=12),
+        )
+        sql, _ = build_query(d, INICIO, FIN)
+        assert "DATE_ADD(p.birthdate, INTERVAL %(min_meses)s MONTH) <= %(inicio)s" in sql
+
+    # ── min_anios (years, DATE_ADD) ──
+
+    def test_min_anios_uses_date_add_year(self):
+        """min_anios=18 → DATE_ADD(p.birthdate, INTERVAL 18 YEAR) <= inicio."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(min_anios=18),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "DATE_ADD(p.birthdate, INTERVAL %(min_anios)s YEAR)" in sql
+        assert params["min_anios"] == 18
+
+    # ── max_meses_excl (exclusive, DATE_ADD >) ──
+
+    def test_max_meses_excl_uses_date_add_gt(self):
+        """max_meses_excl=6 → DATE_ADD(...) > inicio (exclusive bound)."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(max_meses_excl=6),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "DATE_ADD(p.birthdate, INTERVAL %(max_meses_excl)s MONTH)" in sql
+        assert "> %(inicio)s" in sql
+        assert params["max_meses_excl"] == 6
+
+    def test_max_meses_excl_is_exclusive(self):
+        """max_meses_excl uses > not >=."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(max_meses_excl=12),
+        )
+        sql, _ = build_query(d, INICIO, FIN)
+        assert "DATE_ADD(p.birthdate, INTERVAL %(max_meses_excl)s MONTH) > %(inicio)s" in sql
+
+    # ── max_anios_excl (exclusive, DATE_ADD >) ──
+
+    def test_max_anios_excl_uses_date_add_year_gt(self):
+        """max_anios_excl=5 → DATE_ADD(...) > inicio (exclusive bound)."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(max_anios_excl=5),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "DATE_ADD(p.birthdate, INTERVAL %(max_anios_excl)s YEAR)" in sql
+        assert "> %(inicio)s" in sql
+        assert params["max_anios_excl"] == 5
+
+    def test_max_anios_excl_is_exclusive(self):
+        """max_anios_excl uses > not >=."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(max_anios_excl=18),
+        )
+        sql, _ = build_query(d, INICIO, FIN)
+        assert "DATE_ADD(p.birthdate, INTERVAL %(max_anios_excl)s YEAR) > %(inicio)s" in sql
+
+    # ── Both bounds (min + max) ──
+
+    def test_both_bounds_min_dias_max_anios_excl(self):
+        """min_dias=30 + max_anios_excl=5 → both clauses in SQL."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(min_dias=30, max_anios_excl=5),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "DATEDIFF" in sql
+        assert "DATE_ADD" in sql
+        assert params["min_dias"] == 30
+        assert params["max_anios_excl"] == 5
+
+    def test_both_bounds_min_anios_max_dias(self):
+        """min_anios=18 + max_dias=25550 → both clauses in SQL."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(min_anios=18, max_dias=25550),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "DATE_ADD" in sql
+        assert "DATEDIFF" in sql
+        assert params["min_anios"] == 18
+        assert params["max_dias"] == 25550
+
+    # ── No age filter ──
+
+    def test_no_age_filter_no_person_join_for_age(self):
+        """Without age filter, no person join added for age clause."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            evento=FiltrosEvento(location_uuids=[UUID_LOC]),
+        )
+        sql, _ = build_query(d, INICIO, FIN)
+        assert "JOIN person" not in sql
+
+    def test_sexo_only_still_adds_person_join_in_conteo_pacientes(self):
+        """sexo-only filter in conteo_pacientes adds person join for gender."""
+        d = DefinicionIndicador(
+            tipo="conteo_pacientes",
+            periodo="mes_actual",
+            evento=FiltrosEvento(location_uuids=[UUID_LOC]),
+            poblacion=FiltrosPoblacion(sexo="F"),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "p.gender" in sql
+        assert params["sexo"] == "F"
+
+    # ── Legacy normalization through interpreter ──
+
+    def test_legacy_edad_min_dias_through_interpreter(self):
+        """Legacy edad_min_dias=1 → generates min_dias DATEDIFF >= clause."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(edad_min_dias=1),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "DATEDIFF(%(inicio)s, p.birthdate) >= %(min_dias)s" in sql
+        assert params["min_dias"] == 1
+
+    def test_legacy_edad_max_anios_through_interpreter(self):
+        """Legacy edad_max_anios=5 → generates max_anios_excl DATE_ADD > clause."""
+        d = DefinicionIndicador(
+            tipo="conteo_atenciones",
+            periodo="mes_actual",
+            poblacion=FiltrosPoblacion(edad_max_anios=5),
+        )
+        sql, params = build_query(d, INICIO, FIN)
+        assert "DATE_ADD(p.birthdate, INTERVAL %(max_anios_excl)s YEAR) > %(inicio)s" in sql
+        assert params["max_anios_excl"] == 5

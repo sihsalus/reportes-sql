@@ -57,24 +57,20 @@ def calcular_periodo(periodo: str) -> tuple[date, date]:
         inicio = hoy.replace(day=1)
         return inicio, hoy
 
-    if periodo == "mes_anterior":
-        if hoy.month == 1:
-            inicio = hoy.replace(year=hoy.year - 1, month=12, day=1)
-        else:
-            inicio = hoy.replace(month=hoy.month - 1, day=1)
-        fin = inicio.replace(day=monthrange(inicio.year, inicio.month)[1])
-        return inicio, fin
-
-    if periodo == "semana_actual":
-        # Monday of the current week
-        inicio = hoy - timedelta(days=hoy.weekday())
+    if periodo == "trimestre_actual":
+        trimestre = (hoy.month - 1) // 3
+        inicio_mes = trimestre * 3 + 1
+        inicio = hoy.replace(month=inicio_mes, day=1)
         return inicio, hoy
 
-    if periodo == "semana_anterior":
-        lunes_actual = hoy - timedelta(days=hoy.weekday())
-        inicio = lunes_actual - timedelta(days=7)
-        fin = inicio + timedelta(days=6)
-        return inicio, fin
+    if periodo == "semestre_actual":
+        inicio_mes = 1 if hoy.month <= 6 else 7
+        inicio = hoy.replace(month=inicio_mes, day=1)
+        return inicio, hoy
+
+    if periodo == "anual_actual":
+        inicio = hoy.replace(month=1, day=1)
+        return inicio, hoy
 
     raise ValueError(f"Periodo desconocido: {periodo}")
 

@@ -9,8 +9,10 @@ Task 4.5:
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.routers import conceptos, indicadores, resultados
 
@@ -38,6 +40,43 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+# ── Exception Handlers ──────────────────────────────────────────────────
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    _request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Return Pydantic validation errors in the project {detail: {...}} shape.
+
+    Unlike the default FastAPI handler (which returns a list), this
+    projects a single dict with ``field``, ``message``, and the first
+    error's location so the frontend can display a structured message.
+    """
+    errors = exc.errors()
+    if not errors:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "Validation error"},
+        )
+
+    first = errors[0]
+    # loc is a tuple like ('body', 'definicion', 'poblacion')
+    # Use the deepest path component as the field identifier.
+    loc = list(first.get("loc", []))
+    field = loc[-1] if loc else "unknown"
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": {
+                "field": field,
+                "message": str(first.get("msg", "Validation error")),
+            }
+        },
+    )
 
 # ── CORS ────────────────────────────────────────────────────────────────
 # Allow the Vite dev server to communicate with the API.

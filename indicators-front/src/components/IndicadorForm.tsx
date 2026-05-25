@@ -1,17 +1,20 @@
-import type { ReactElement } from 'react';
-import { useForm, useFieldArray, type Resolver } from 'react-hook-form';
+import { useState, useEffect, type ReactElement } from 'react';
+import { useForm, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Label from '@/components/ui/Label';
 import Textarea from '@/components/ui/Textarea';
 import Select from '@/components/ui/Select';
-import EncounterTypeSelector from '@/components/EncounterTypeSelector';
+import LocationSelector from '@/components/LocationSelector';
 import DiagnosticoSelector from '@/components/DiagnosticoSelector';
+import OrdenSelector from '@/components/OrdenSelector';
+import AgeInputRow from '@/components/AgeInputRow';
 import {
   indicadorFormSchema,
   type IndicadorFormValues,
 } from '@/features/indicadores/schema';
+import type { PoblacionForm } from '@/api/types';
 
 export interface IndicadorFormProps {
   mode: 'create' | 'edit' | 'version';
@@ -29,12 +32,85 @@ const DEFAULT_VALUES: IndicadorFormValues = {
   tipo: 'conteo_atenciones',
   periodo: 'mes_actual',
   evento: {
-    encounter_type_uuids: [],
+    location_uuids: [],
     minimo_ocurrencias: 1,
     diagnosticos: undefined,
     ordenes: undefined,
   },
 };
+
+// ── Helpers ────────────────────────────────────────────────────────────
+
+function extractAgeFormState(poblacion?: PoblacionForm) {
+  let minAnios = '', minMeses = '', minDias = '';
+  let maxAnios = '', maxMeses = '', maxDias = '';
+
+  if (!poblacion) return { minAnios, minMeses, minDias, maxAnios, maxMeses, maxDias };
+
+  if (poblacion.min_dias !== undefined) {
+    minDias = String(poblacion.min_dias);
+  } else if (poblacion.min_meses !== undefined) {
+    minAnios = String(Math.floor(poblacion.min_meses / 12));
+    minMeses = String(poblacion.min_meses % 12);
+  } else if (poblacion.min_anios !== undefined) {
+    minAnios = String(poblacion.min_anios);
+  }
+
+  if (poblacion.max_dias !== undefined) {
+    maxDias = String(poblacion.max_dias);
+  } else if (poblacion.max_meses_excl !== undefined) {
+    maxAnios = String(Math.floor(poblacion.max_meses_excl / 12));
+    maxMeses = String(poblacion.max_meses_excl % 12);
+  } else if (poblacion.max_anios_excl !== undefined) {
+    maxAnios = String(poblacion.max_anios_excl);
+  }
+
+  return { minAnios, minMeses, minDias, maxAnios, maxMeses, maxDias };
+}
+
+function parseNum(value: string): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function buildPoblacion(
+  minAnios: string,
+  minMeses: string,
+  minDias: string,
+  maxAnios: string,
+  maxMeses: string,
+  maxDias: string,
+  sexo?: 'M' | 'F',
+): PoblacionForm | undefined {
+  const result: Record<string, number | string | undefined> = {};
+
+  const totalMesesMin = parseNum(minAnios) * 12 + parseNum(minMeses);
+  const minD = parseNum(minDias);
+
+  if (totalMesesMin === 0) {
+    if (minD > 0) result.min_dias = minD;
+  } else {
+    result.min_meses = totalMesesMin;
+  }
+
+  const totalMesesMax = parseNum(maxAnios) * 12 + parseNum(maxMeses);
+  const maxD = parseNum(maxDias);
+
+  if (totalMesesMax === 0) {
+    if (maxD > 0) result.max_dias = maxD;
+  } else {
+    result.max_meses_excl = maxD > 0 ? totalMesesMax + 1 : totalMesesMax;
+  }
+
+  if (sexo) result.sexo = sexo;
+
+  const keys = Object.keys(result);
+  if (keys.length === 0 || (keys.length === 1 && keys[0] === 'sexo')) return undefined;
+
+  return result as unknown as PoblacionForm;
+}
+
+// ── Component ─────────────────────────────────────────────────────────
 
 export default function IndicadorForm({
   mode,
@@ -55,6 +131,25 @@ export default function IndicadorForm({
     defaultValues: defaultValues ?? DEFAULT_VALUES,
   });
 
+  // ── Age UI state (3 inputs per bound, transformed on submit) ──
+  const init = extractAgeFormState(defaultValues?.poblacion);
+  const [minAnios, setMinAnios] = useState(init.minAnios);
+  const [minMeses, setMinMeses] = useState(init.minMeses);
+  const [minDias, setMinDias] = useState(init.minDias);
+  const [maxAnios, setMaxAnios] = useState(init.maxAnios);
+  const [maxMeses, setMaxMeses] = useState(init.maxMeses);
+  const [maxDias, setMaxDias] = useState(init.maxDias);
+
+  useEffect(() => {
+    const s = extractAgeFormState(defaultValues?.poblacion);
+    setMinAnios(s.minAnios);
+    setMinMeses(s.minMeses);
+    setMinDias(s.minDias);
+    setMaxAnios(s.maxAnios);
+    setMaxMeses(s.maxMeses);
+    setMaxDias(s.maxDias);
+  }, [defaultValues?.poblacion]);
+
   // ── Determine current filtro mode from watched values ──
   const watchedDiag = watch('evento.diagnosticos');
   const watchedOrdenes = watch('evento.ordenes');
@@ -66,39 +161,31 @@ export default function IndicadorForm({
         ? 'ordenes'
         : 'ninguno';
 
-  // ── useFieldArray for ordenes ──
-  const {
-    fields: ordFields,
-    append: appendOrd,
-    remove: removeOrd,
-  } = useFieldArray({
-    control,
-    name: 'evento.ordenes',
-  });
-
   const handleFiltroToggle = (mode: FiltroMode) => {
     if (mode === 'diagnosticos') {
-      // Clear ordenes, set one empty diagnostico
       setValue('evento.ordenes', undefined);
       setValue('evento.diagnosticos', [{ concepto_uuids: [], tipo_diagnostico: undefined }]);
     } else if (mode === 'ordenes') {
-      // Clear diagnosticos, set one empty orden
       setValue('evento.diagnosticos', undefined);
-      setValue('evento.ordenes', [{ concepto_uuid: '' }]);
+      setValue('evento.ordenes', [{ concepto_uuids: [] }]);
     } else {
-      // Clear both
       setValue('evento.diagnosticos', undefined);
       setValue('evento.ordenes', undefined);
     }
   };
 
   const submitHandler = handleSubmit((data) => {
-    onSubmit(data);
+    const sexo = data.poblacion?.sexo as 'M' | 'F' | undefined;
+    const canonicalPoblacion = buildPoblacion(
+      minAnios, minMeses, minDias,
+      maxAnios, maxMeses, maxDias,
+      sexo,
+    );
+    onSubmit({ ...data, poblacion: canonicalPoblacion });
   });
 
   return (
     <form onSubmit={submitHandler} className="space-y-8">
-      {/* Server error banner */}
       {serverError && (
         <div
           className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700"
@@ -108,7 +195,6 @@ export default function IndicadorForm({
         </div>
       )}
 
-      {/* Edit mode info banner */}
       {mode === 'edit' && (
         <div className="rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
           <p className="font-medium">Solo puedes editar el nombre y la descripción.</p>
@@ -119,7 +205,6 @@ export default function IndicadorForm({
         </div>
       )}
 
-      {/* Metadata (hidden in version mode) */}
       {mode !== 'version' && (
         <section className="space-y-4">
           <h2 className="text-lg font-semibold text-gray-900">
@@ -153,10 +238,8 @@ export default function IndicadorForm({
         </section>
       )}
 
-      {/* Definition fields (hidden in edit mode) */}
       {mode !== 'edit' && (
         <>
-          {/* Tipo y Periodo */}
           <section className="space-y-4">
             <h2 className="text-lg font-semibold text-gray-900">
               Tipo y período
@@ -180,9 +263,9 @@ export default function IndicadorForm({
                 <Label htmlFor="periodo">Período</Label>
                 <Select id="periodo" {...register('periodo')}>
                   <option value="mes_actual">Mes actual</option>
-                  <option value="mes_anterior">Mes anterior</option>
-                  <option value="semana_actual">Semana actual</option>
-                  <option value="semana_anterior">Semana anterior</option>
+                  <option value="trimestre_actual">Este trimestre</option>
+                  <option value="semestre_actual">Este semestre</option>
+                  <option value="anual_actual">Este año</option>
                 </Select>
                 {errors.periodo && (
                   <p className="mt-1 text-sm text-red-600" role="alert">
@@ -193,49 +276,26 @@ export default function IndicadorForm({
             </div>
           </section>
 
-          {/* Evento (singular) — with nested diagnosticos/ordenes */}
           <section className="space-y-4">
-            <h2 className="text-lg font-semibold text-gray-900">Evento</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Atención</h2>
 
             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
               <div className="space-y-4">
-                {/* Encounter types */}
                 <div>
-                  <Label>Tipos de encuentro</Label>
-                  <EncounterTypeSelector
+                  <Label>Servicio</Label>
+                  <LocationSelector
                     control={control}
-                    name="evento.encounter_type_uuids"
+                    name="evento.location_uuids"
                   />
-                  {errors.evento?.encounter_type_uuids && (
+                  {errors.evento?.location_uuids && (
                     <p className="mt-1 text-sm text-red-600" role="alert">
-                      {errors.evento.encounter_type_uuids.message}
+                      {errors.evento.location_uuids.message}
                     </p>
                   )}
                 </div>
 
-                {/* Minimo ocurrencias */}
                 <div>
-                  <Label htmlFor="evento.minimo_ocurrencias">
-                    Mínimo de ocurrencias
-                  </Label>
-                  <Input
-                    id="evento.minimo_ocurrencias"
-                    type="number"
-                    min={1}
-                    {...register('evento.minimo_ocurrencias', {
-                      valueAsNumber: true,
-                    })}
-                  />
-                  {errors.evento?.minimo_ocurrencias && (
-                    <p className="mt-1 text-sm text-red-600" role="alert">
-                      {errors.evento.minimo_ocurrencias.message}
-                    </p>
-                  )}
-                </div>
-
-                {/* ── Filtro toggle: Ninguno / Diagnósticos / Órdenes ── */}
-                <div>
-                  <Label>Filtro adicional</Label>
+                  <Label>Filtro clínico</Label>
                   <div className="mt-2 flex gap-2">
                     <Button
                       type="button"
@@ -269,7 +329,6 @@ export default function IndicadorForm({
                   )}
                 </div>
 
-                {/* ── Diagnosticos fields ── */}
                 {currentMode === 'diagnosticos' && (
                   <div className="space-y-4 border-t border-gray-100 pt-4">
                     <h3 className="text-sm font-medium text-gray-700">
@@ -301,128 +360,108 @@ export default function IndicadorForm({
                         </Select>
                       </div>
                     </div>
+
+                    <div className="border-t border-gray-100 pt-4">
+                      <Label htmlFor="evento.minimo_ocurrencias">
+                        Mínimo de atenciones
+                      </Label>
+                      <Input
+                        id="evento.minimo_ocurrencias"
+                        type="number"
+                        min={1}
+                        {...register('evento.minimo_ocurrencias', {
+                          valueAsNumber: true,
+                        })}
+                      />
+                      {errors.evento?.minimo_ocurrencias && (
+                        <p className="mt-1 text-sm text-red-600" role="alert">
+                          {errors.evento.minimo_ocurrencias.message}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 )}
 
-                {/* ── Ordenes fields ── */}
                 {currentMode === 'ordenes' && (
                   <div className="space-y-4 border-t border-gray-100 pt-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-medium text-gray-700">
-                        Órdenes
-                      </h3>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => appendOrd({ concepto_uuid: '' })}
-                      >
-                        Agregar concepto
-                      </Button>
+                    <h3 className="text-sm font-medium text-gray-700">
+                      Órdenes / Pruebas
+                    </h3>
+
+                    <div>
+                      <Label>Conceptos de orden</Label>
+                      <OrdenSelector
+                        control={control}
+                        name={'evento.ordenes.0.concepto_uuids' as `evento.ordenes.${number}.concepto_uuids`}
+                      />
                     </div>
 
-                    {ordFields.length === 0 && (
-                      <p className="text-sm text-gray-500">
-                        Sin filtros de orden — todos los encuentros cuentan.
-                      </p>
-                    )}
-
-                    {ordFields.map((field, index) => (
-                      <div
-                        key={field.id}
-                        className="rounded-lg border border-gray-200 bg-gray-50 p-4"
-                      >
-                        <div className="mb-4 flex items-center justify-between">
-                          <h4 className="text-sm font-medium text-gray-600">
-                            Concepto #{index + 1}
-                          </h4>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeOrd(index)}
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            Quitar concepto
-                          </Button>
-                        </div>
-
-                        <div>
-                          <Label
-                            htmlFor={`evento.ordenes.${index}.concepto_uuid`}
-                          >
-                            Concepto
-                          </Label>
-                          <Input
-                            id={`evento.ordenes.${index}.concepto_uuid`}
-                            type="text"
-                            placeholder="UUID o identificador del concepto"
-                            {...register(
-                              `evento.ordenes.${index}.concepto_uuid`,
-                            )}
-                            aria-invalid={
-                              errors.evento?.ordenes?.[index]?.concepto_uuid
-                                ? 'true'
-                                : 'false'
-                            }
-                          />
-                          {errors.evento?.ordenes?.[index]?.concepto_uuid && (
-                            <p className="mt-1 text-sm text-red-600" role="alert">
-                              {
-                                errors.evento.ordenes[index]?.concepto_uuid
-                                  ?.message
-                              }
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                    <div className="border-t border-gray-100 pt-4">
+                      <Label htmlFor="evento.minimo_ocurrencias">
+                        Mínimo de atenciones
+                      </Label>
+                      <Input
+                        id="evento.minimo_ocurrencias"
+                        type="number"
+                        min={1}
+                        {...register('evento.minimo_ocurrencias', {
+                          valueAsNumber: true,
+                        })}
+                      />
+                      {errors.evento?.minimo_ocurrencias && (
+                        <p className="mt-1 text-sm text-red-600" role="alert">
+                          {errors.evento.minimo_ocurrencias.message}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
             </div>
           </section>
 
-          {/* Población */}
           <section className="space-y-4">
             <h2 className="text-lg font-semibold text-gray-900">
               Filtros de población (opcional)
             </h2>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div>
-                <Label htmlFor="poblacion.edad_min_anios">Edad mínima (años)</Label>
-                <Input
-                  id="poblacion.edad_min_anios"
-                  type="number"
-                  min={0}
-                  {...register('poblacion.edad_min_anios', {
-                    valueAsNumber: true,
-                  })}
-                />
-                {errors.poblacion?.edad_min_anios && (
-                  <p className="mt-1 text-sm text-red-600" role="alert">
-                    {errors.poblacion.edad_min_anios.message}
-                  </p>
-                )}
-              </div>
+            {(() => {
+              const pob = errors.poblacion as Record<string, {message?: string} | undefined> | undefined;
+              if (!pob) return null;
+              if (typeof (pob as Record<string, unknown>).message === 'string') {
+                return <p className="text-sm text-red-600" role="alert">{(pob as Record<string, string>).message}</p>;
+              }
+              if (pob.root && typeof (pob.root as Record<string, unknown>).message === 'string') {
+                return <p className="text-sm text-red-600" role="alert">{(pob.root as Record<string, string>).message}</p>;
+              }
+              if (pob.poblacion?.message) {
+                return <p className="text-sm text-red-600" role="alert">{pob.poblacion.message}</p>;
+              }
+              return null;
+            })()}
 
-              <div>
-                <Label htmlFor="poblacion.edad_max_anios">Edad máxima (años)</Label>
-                <Input
-                  id="poblacion.edad_max_anios"
-                  type="number"
-                  min={0}
-                  {...register('poblacion.edad_max_anios', {
-                    valueAsNumber: true,
-                  })}
-                />
-                {errors.poblacion?.edad_max_anios && (
-                  <p className="mt-1 text-sm text-red-600" role="alert">
-                    {errors.poblacion.edad_max_anios.message}
-                  </p>
-                )}
-              </div>
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <AgeInputRow
+                label="Edad mínima"
+                anios={minAnios}
+                meses={minMeses}
+                dias={minDias}
+                onAniosChange={setMinAnios}
+                onMesesChange={setMinMeses}
+                onDiasChange={setMinDias}
+                error={errors.poblacion?.message ?? errors.poblacion?.root?.message}
+              />
+
+              <AgeInputRow
+                label="Edad máxima"
+                anios={maxAnios}
+                meses={maxMeses}
+                dias={maxDias}
+                onAniosChange={setMaxAnios}
+                onMesesChange={setMaxMeses}
+                onDiasChange={setMaxDias}
+                error={errors.poblacion?.message ?? errors.poblacion?.root?.message}
+              />
 
               <div>
                 <Label htmlFor="poblacion.sexo">Sexo</Label>
@@ -433,83 +472,10 @@ export default function IndicadorForm({
                 </Select>
               </div>
             </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div>
-                <Label htmlFor="poblacion.edad_min_meses">Edad mínima (meses)</Label>
-                <Input
-                  id="poblacion.edad_min_meses"
-                  type="number"
-                  min={0}
-                  {...register('poblacion.edad_min_meses', {
-                    valueAsNumber: true,
-                  })}
-                />
-                {errors.poblacion?.edad_min_meses && (
-                  <p className="mt-1 text-sm text-red-600" role="alert">
-                    {errors.poblacion.edad_min_meses.message}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <Label htmlFor="poblacion.edad_max_meses">Edad máxima (meses)</Label>
-                <Input
-                  id="poblacion.edad_max_meses"
-                  type="number"
-                  min={0}
-                  {...register('poblacion.edad_max_meses', {
-                    valueAsNumber: true,
-                  })}
-                />
-                {errors.poblacion?.edad_max_meses && (
-                  <p className="mt-1 text-sm text-red-600" role="alert">
-                    {errors.poblacion.edad_max_meses.message}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div>
-                <Label htmlFor="poblacion.edad_min_dias">Edad mínima (días)</Label>
-                <Input
-                  id="poblacion.edad_min_dias"
-                  type="number"
-                  min={0}
-                  {...register('poblacion.edad_min_dias', {
-                    valueAsNumber: true,
-                  })}
-                />
-                {errors.poblacion?.edad_min_dias && (
-                  <p className="mt-1 text-sm text-red-600" role="alert">
-                    {errors.poblacion.edad_min_dias.message}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <Label htmlFor="poblacion.edad_max_dias">Edad máxima (días)</Label>
-                <Input
-                  id="poblacion.edad_max_dias"
-                  type="number"
-                  min={0}
-                  {...register('poblacion.edad_max_dias', {
-                    valueAsNumber: true,
-                  })}
-                />
-                {errors.poblacion?.edad_max_dias && (
-                  <p className="mt-1 text-sm text-red-600" role="alert">
-                    {errors.poblacion.edad_max_dias.message}
-                  </p>
-                )}
-              </div>
-            </div>
           </section>
         </>
       )}
 
-      {/* Actions */}
       <div className="flex items-center gap-3 pt-4">
         <Button type="submit" disabled={isPending}>
           {isPending

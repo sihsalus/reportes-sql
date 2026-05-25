@@ -77,6 +77,7 @@ def test_all_routers_mounted(client: TestClient):
     assert "/conceptos/encounter-types" in paths  # GET
     assert "/conceptos/buscar" in paths  # GET
     assert "/conceptos/diagnosticos/buscar" in paths  # GET
+    assert "/conceptos/locations" in paths  # GET
 
 
 # ── Schema validation ───────────────────────────────────────────────────
@@ -109,7 +110,7 @@ def test_indicadores_create_schema_validates_definicion():
             "tipo": "conteo_atenciones",
             "periodo": "mes_actual",
             "evento": {
-                "encounter_type_uuids": ["123e4567-e89b-12d3-a456-426614174000"],
+                "location_uuids": ["123e4567-e89b-12d3-a456-426614174000"],
             },
         },
     )
@@ -126,7 +127,7 @@ def test_indicadores_create_schema_validates_definicion():
                 "tipo": "tipo_invalido",
                 "periodo": "mes_actual",
                 "evento": {
-                    "encounter_type_uuids": ["123e4567-e89b-12d3-a456-426614174000"],
+                    "location_uuids": ["123e4567-e89b-12d3-a456-426614174000"],
                 },
             },
         )
@@ -148,7 +149,7 @@ def test_indicador_update_schema_rejects_invalid_definicion():
             "tipo": "conteo_atenciones",
             "periodo": "mes_actual",
             "evento": {
-                "encounter_type_uuids": [
+                "location_uuids": [
                     "123e4567-e89b-12d3-a456-426614174000"
                 ],
             },
@@ -179,7 +180,7 @@ def test_indicador_update_schema_rejects_invalid_definicion():
                 "tipo": "tipo_invalido",
                 "periodo": "mes_actual",
                 "evento": {
-                    "encounter_type_uuids": [
+                    "location_uuids": [
                         "123e4567-e89b-12d3-a456-426614174000"
                     ],
                 },
@@ -220,7 +221,7 @@ def _make_valid_payload(*, uuid_val: str = _VALID_UUID) -> dict:
         "definicion": {
             "tipo": "conteo_atenciones",
             "periodo": "mes_actual",
-            "evento": {"encounter_type_uuids": [uuid_val]},
+            "evento": {"location_uuids": [uuid_val]},
         },
     }
 
@@ -240,7 +241,7 @@ def test_create_indicador_nonexistent_uuid(client: TestClient) -> None:
 
     assert response.status_code == 422
     detail = response.json()["detail"]
-    assert detail["field"] == "encounter_type_uuids"
+    assert detail["field"] == "location_uuids"
     assert _UNKNOWN_UUID in detail["unknown_uuids"]
 
 
@@ -259,8 +260,83 @@ def test_create_version_nonexistent_uuid(client: TestClient) -> None:
 
     assert response.status_code == 422
     detail = response.json()["detail"]
-    assert detail["field"] == "encounter_type_uuids"
+    assert detail["field"] == "location_uuids"
     assert _UNKNOWN_UUID in detail["unknown_uuids"]
+
+
+def test_create_indicador_success(client: TestClient) -> None:
+    """POST /indicadores with valid location_uuids → 201.
+
+    Spec scenario: "Valid location UUIDs exist — creation succeeds."
+    Mocks both the OpenMRS location validator (returns matching UUID row)
+    and the async DB session so we avoid touching a real database.
+
+    SQLAlchemy column defaults (default=uuid.uuid4, default=True, etc.) are
+    only applied at INSERT/UPDATE time.  Because flush() is mocked, those
+    defaults never fire.  We wire the refresh mock to populate them on the
+    returned Indicador so FastAPI response serialization succeeds.
+    """
+    from app.routers.indicadores import get_db
+    from app.main import app
+
+    # Mock OpenMRS: return the valid UUID row so validation passes
+    mock_engine = MagicMock()
+    mock_conn = MagicMock()
+    mock_engine.connect.return_value.__enter__.return_value = mock_conn
+    mock_row = MagicMock()
+    mock_row.__getitem__.return_value = _VALID_UUID
+    mock_conn.execute.return_value = [mock_row]
+
+    # Mock DB session
+    class _MockSession:
+        """Ad-hoc async session mock — add/flush/commit/refresh.
+
+        refresh() populates Indicador defaults so the response model
+        serializes correctly.
+        """
+        def add(self, obj: object) -> None:
+            self._added = getattr(self, "_added", [])
+            self._added.append(obj)
+
+        async def flush(self) -> None:
+            pass
+
+        async def commit(self) -> None:
+            pass
+
+        async def refresh(self, obj: object) -> None:
+            from datetime import datetime, timezone
+
+            if getattr(obj, "id", None) is None:
+                object.__setattr__(obj, "id", uuid.uuid4())
+            if getattr(obj, "activo", None) is None:
+                object.__setattr__(obj, "activo", True)
+            if getattr(obj, "creado_en", None) is None:
+                object.__setattr__(obj, "creado_en", datetime.now(timezone.utc))
+
+    mock_session = _MockSession()
+    app.dependency_overrides[get_db] = lambda: mock_session
+
+    try:
+        with patch(
+            "app.validators.openmrs.get_sync_engine", return_value=mock_engine
+        ):
+            response = client.post(
+                "/indicadores/",
+                json=_make_valid_payload(),
+            )
+
+        assert response.status_code == 201, (
+            f"Expected 201, got {response.status_code}: {response.json()}"
+        )
+        data = response.json()
+        assert data["nombre"] == "Indicador de prueba"
+        assert "id" in data
+        assert data["activo"] is True
+        # At least two adds were called (indicador + version)
+        assert len(getattr(mock_session, "_added", [])) >= 2
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 def test_create_indicador_openmrs_unreachable(client: TestClient) -> None:
@@ -363,14 +439,14 @@ def test_put_indicador_empty_nombre(client: TestClient) -> None:
 
 _DEF_DIFF = {
     "tipo": "conteo_pacientes",
-    "periodo": "mes_anterior",
-    "evento": {"encounter_type_uuids": ["550e8400-e29b-41d4-a716-446655440000"]},
+    "periodo": "trimestre_actual",
+    "evento": {"location_uuids": ["550e8400-e29b-41d4-a716-446655440000"]},
 }
 
 _DEF_SAME = {
     "tipo": "conteo_atenciones",
     "periodo": "mes_actual",
-    "evento": {"encounter_type_uuids": ["123e4567-e89b-12d3-a456-426614174000"]},
+    "evento": {"location_uuids": ["123e4567-e89b-12d3-a456-426614174000"]},
 }
 
 _INDICADOR_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
@@ -426,7 +502,7 @@ def test_put_indicador_no_definicion_metadata_only(
         app, indicador=mock_indicador, latest_version=None
     )
     # Patch the validator so we can prove it was NOT called
-    with patch("app.routers.indicadores.validar_definicion_encounter_uuids") as mock_val:
+    with patch("app.routers.indicadores.validar_definicion_location_uuids") as mock_val:
         response = client.put(
             f"/indicadores/{mock_indicador.id}",
             json={"nombre": "Nuevo", "descripcion": "Nueva desc"},
@@ -458,7 +534,7 @@ def test_put_indicador_definicion_identical_no_version(
         app, indicador=mock_indicador, latest_version=latest
     )
 
-    with patch("app.routers.indicadores.validar_definicion_encounter_uuids") as mock_val:
+    with patch("app.routers.indicadores.validar_definicion_location_uuids") as mock_val:
         response = client.put(
             f"/indicadores/{mock_indicador.id}",
             json={
@@ -492,7 +568,7 @@ def test_put_indicador_with_definicion_auto_versions(
     )
 
     with patch(
-        "app.routers.indicadores.validar_definicion_encounter_uuids"
+        "app.routers.indicadores.validar_definicion_location_uuids"
     ) as mock_val:
         response = client.put(
             f"/indicadores/{mock_indicador.id}",
@@ -541,7 +617,7 @@ def test_put_indicador_definicion_invalid_uuids_422(
                     "tipo": "conteo_atenciones",
                     "periodo": "mes_actual",
                     "evento": {
-                        "encounter_type_uuids": ["660e8400-e29b-41d4-a716-446655440001"],
+                        "location_uuids": ["660e8400-e29b-41d4-a716-446655440001"],
                     },
                 },
             },
@@ -549,7 +625,7 @@ def test_put_indicador_definicion_invalid_uuids_422(
 
     assert response.status_code == 422
     detail = response.json()["detail"]
-    assert detail["field"] == "encounter_type_uuids"
+    assert detail["field"] == "location_uuids"
 
     mock_session_cleanup(app)
 
@@ -581,3 +657,93 @@ def test_put_indicador_definicion_openmrs_unreachable_502(
     assert response.json()["detail"] == "OpenMRS no disponible"
 
     mock_session_cleanup(app)
+
+
+# ── Phase 3: Age filter validation error envelope ──────────────────────
+
+
+def test_post_indicador_invalid_age_combination_returns_422(
+    client: TestClient,
+) -> None:
+    """POST with conflicting age fields (2 min values) → 422 with project detail shape."""
+    payload = {
+        "nombre": "Test",
+        "definicion": {
+            "tipo": "conteo_atenciones",
+            "periodo": "mes_actual",
+            "evento": {
+                "location_uuids": ["550e8400-e29b-41d4-a716-446655440000"],
+            },
+            "poblacion": {
+                "min_dias": 10,
+                "min_meses": 1,
+            },
+        },
+    }
+    mock_engine = MagicMock()
+    mock_conn = MagicMock()
+    mock_engine.connect.return_value.__enter__.return_value = mock_conn
+    mock_row = MagicMock()
+    mock_row._mapping = {"uuid": "550e8400-e29b-41d4-a716-446655440000"}
+    mock_conn.execute.return_value = [mock_row]
+
+    with patch("app.validators.openmrs.get_sync_engine", return_value=mock_engine):
+        response = client.post("/indicadores/", json=payload)
+
+    assert response.status_code == 422
+    body = response.json()
+    detail = body.get("detail")
+    # Project convention: detail is a dict, not a list
+    assert isinstance(detail, dict), (
+        f"Expected detail to be a dict, got {type(detail).__name__}"
+    )
+    # Must identify the field
+    assert "field" in detail, "detail must include 'field' key"
+    assert "message" in detail, "detail must include 'message' key"
+    # Must identify conflicting age fields
+    assert "poblacion" in detail["field"], (
+        f"Expected poblacion in field, got {detail['field']}"
+    )
+    assert "mutually exclusive" in detail["message"].lower(), (
+        f"Expected exclusivity message, got {detail['message']}"
+    )
+
+
+def test_post_indicador_invalid_max_age_combination_returns_422(
+    client: TestClient,
+) -> None:
+    """POST with conflicting max age fields → 422 with project detail."""
+    payload = {
+        "nombre": "Test",
+        "definicion": {
+            "tipo": "conteo_atenciones",
+            "periodo": "mes_actual",
+            "evento": {
+                "location_uuids": ["550e8400-e29b-41d4-a716-446655440000"],
+            },
+            "poblacion": {
+                "max_dias": 100,
+                "max_meses_excl": 6,
+            },
+        },
+    }
+    mock_engine = MagicMock()
+    mock_conn = MagicMock()
+    mock_engine.connect.return_value.__enter__.return_value = mock_conn
+    mock_row = MagicMock()
+    mock_row._mapping = {"uuid": "550e8400-e29b-41d4-a716-446655440000"}
+    mock_conn.execute.return_value = [mock_row]
+
+    with patch("app.validators.openmrs.get_sync_engine", return_value=mock_engine):
+        response = client.post("/indicadores/", json=payload)
+
+    assert response.status_code == 422
+    body = response.json()
+    detail = body.get("detail")
+    assert isinstance(detail, dict), (
+        f"Expected detail to be a dict, got {type(detail).__name__}"
+    )
+    assert "field" in detail
+    assert "message" in detail
+    assert "poblacion" in detail["field"]
+    assert "mutually exclusive" in detail["message"].lower()

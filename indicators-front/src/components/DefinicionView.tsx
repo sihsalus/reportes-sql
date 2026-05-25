@@ -19,9 +19,9 @@ const TIPO_LABELS: Record<string, string> = {
 
 const PERIODO_LABELS: Record<string, string> = {
   mes_actual: 'Mes actual',
-  mes_anterior: 'Mes anterior',
-  semana_actual: 'Semana actual',
-  semana_anterior: 'Semana anterior',
+  trimestre_actual: 'Trimestre actual',
+  semestre_actual: 'Semestre actual',
+  anual_actual: 'Año actual',
 };
 
 const SEXO_LABELS: Record<string, string> = {
@@ -36,18 +36,19 @@ const TIPO_DIAG_LABELS: Record<string, string> = {
 
 // ── Helper: Age Range ───────────────────────────────────────────────────
 
-interface AgeRangeParts {
-  min?: number;
-  max?: number;
-  label: string; // e.g. "años", "meses", "días"
-}
-
-function formatAgeDimension(parts: AgeRangeParts): string | null {
-  const { min, max, label } = parts;
+function formatAgeDimension(
+  min: number | undefined,
+  max: number | undefined,
+  unit: string,
+  maxExclusive: boolean = false,
+): string | null {
+  const maxUnit = maxExclusive ? `${unit} (excl.)` : unit;
   if (min === undefined && max === undefined) return null;
-  if (min !== undefined && max !== undefined) return `entre ${min} ${label} y ${max} ${label}`;
-  if (min !== undefined) return `desde ${min} ${label}`;
-  return `hasta ${max} ${label}`;
+  if (min !== undefined && max !== undefined) {
+    return `entre ${min} ${unit} y ${max} ${maxUnit}`;
+  }
+  if (min !== undefined) return `desde ${min} ${unit}`;
+  return `hasta ${max} ${maxUnit}`;
 }
 
 // ── Main Component ──────────────────────────────────────────────────────
@@ -65,9 +66,9 @@ export default function DefinicionView({ definicion }: DefinicionViewProps): Rea
   const ageLines: string[] = [];
 
   if (pop) {
-    const anios = formatAgeDimension({ min: pop.edad_min_anios, max: pop.edad_max_anios, label: 'años' });
-    const meses = formatAgeDimension({ min: pop.edad_min_meses, max: pop.edad_max_meses, label: 'meses' });
-    const dias = formatAgeDimension({ min: pop.edad_min_dias, max: pop.edad_max_dias, label: 'días' });
+    const anios = formatAgeDimension(pop.min_anios, pop.max_anios_excl, 'años', true);
+    const meses = formatAgeDimension(pop.min_meses, pop.max_meses_excl, 'meses', true);
+    const dias = formatAgeDimension(pop.min_dias, pop.max_dias, 'días', false);
 
     if (anios) ageLines.push(anios);
     if (meses) ageLines.push(meses);
@@ -91,21 +92,21 @@ export default function DefinicionView({ definicion }: DefinicionViewProps): Rea
 
       {/* Evento (singular) */}
       <div>
-        <p className="font-medium text-gray-900">🏥 Tipo de encuentro:</p>
-        {ev && ev.encounter_type_uuids && ev.encounter_type_uuids.length > 0 ? (
+        <p className="font-medium text-gray-900">🏥 Servicio:</p>
+        {ev && ev.location_uuids && ev.location_uuids.length > 0 ? (
           <ul className="ml-4 list-disc pl-4 text-gray-600">
-            {ev.encounter_type_uuids.map((uuid) => (
+            {ev.location_uuids.map((uuid) => (
               <li key={uuid} className="font-mono text-xs">
                 {uuid.length > 8 ? `${uuid.slice(0, 8)}…` : uuid}
               </li>
             ))}
           </ul>
         ) : (
-          <p className="ml-4 text-gray-600">Todos los tipos de encuentro</p>
+          <p className="ml-4 text-gray-600">Todos los servicios</p>
         )}
         {ev && ev.minimo_ocurrencias && ev.minimo_ocurrencias > 1 && (
           <p className="ml-4 text-gray-600">
-            Mínimo de ocurrencias: {ev.minimo_ocurrencias}
+            Mínimo de atenciones: {ev.minimo_ocurrencias}
           </p>
         )}
       </div>
@@ -143,10 +144,16 @@ export default function DefinicionView({ definicion }: DefinicionViewProps): Rea
           <p className="font-medium text-gray-900">🔬 Órdenes requeridas:</p>
           <ul className="ml-4 list-disc pl-4 text-gray-600">
             {ev.ordenes.map((ord, idx) => (
-              <li key={idx} className="font-mono text-xs">
-                {ord.concepto_uuid.length > 8
-                  ? `${ord.concepto_uuid.slice(0, 8)}…`
-                  : ord.concepto_uuid}
+              <li key={idx}>
+                {ord.concepto_uuids && ord.concepto_uuids.length > 0 ? (
+                  <span className="font-mono text-xs">
+                    {ord.concepto_uuids
+                      .map((u) => (u.length > 8 ? `${u.slice(0, 8)}…` : u))
+                      .join(', ')}
+                  </span>
+                ) : (
+                  <span className="text-gray-400">Sin concepto</span>
+                )}
               </li>
             ))}
           </ul>

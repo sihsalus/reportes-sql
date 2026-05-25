@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, model_validator
 TipoIndicador = Literal["conteo_atenciones", "conteo_pacientes"]
 
 PeriodoIndicador = Literal[
-    "mes_actual", "mes_anterior", "semana_actual", "semana_anterior"
+    "mes_actual", "trimestre_actual", "semestre_actual", "anual_actual"
 ]
 
 
@@ -28,56 +28,126 @@ PeriodoIndicador = Literal[
 class FiltrosPoblacion(BaseModel):
     """Population-level filters applied to the indicator query.
 
-    All age fields are optional; if none are set, no age filter is applied.
-    Age bounds can be expressed in years, months, and/or days — they are
-    combined into a single day value internally (365 d/yr, 30 d/mo approx).
+    Six canonical age fields with mutual exclusivity per bound group:
+    - Min group (at most one): min_dias, min_meses, min_anios
+    - Max group (at most one): max_dias, max_meses_excl, max_anios_excl
+
     sexo restricts the population to a single gender; None means both.
+    Legacy ``edad_min_*`` / ``edad_max_*`` fields are accepted and
+    normalized to canonical names via model_validator(mode='before').
     """
 
-    edad_min_anios: int | None = None
-    edad_max_anios: int | None = None
-    edad_min_meses: int | None = None
-    edad_max_meses: int | None = None
-    edad_min_dias: int | None = None
-    edad_max_dias: int | None = None
+    min_dias: int | None = Field(default=None, ge=0)
+    min_meses: int | None = Field(default=None, ge=0)
+    min_anios: int | None = Field(default=None, ge=0)
+    max_dias: int | None = Field(default=None, ge=0)
+    max_meses_excl: int | None = Field(default=None, ge=0)
+    max_anios_excl: int | None = Field(default=None, ge=0)
     sexo: Literal["M", "F"] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_age_fields(cls, data: object) -> object:
+        """Map legacy edad_* field names to canonical names.
+
+        Accepted legacy names and their canonical equivalents:
+          edad_min_anios → min_anios         edad_max_anios → max_anios_excl
+          edad_min_meses → min_meses         edad_max_meses → max_meses_excl
+          edad_min_dias  → min_dias          edad_max_dias  → max_dias
+
+        Mixed legacy + canonical payloads are rejected outright to
+        prevent silent ambiguity during the transition window.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        legacy_keys = {
+            "edad_min_anios",
+            "edad_min_meses",
+            "edad_min_dias",
+            "edad_max_anios",
+            "edad_max_meses",
+            "edad_max_dias",
+        }
+        canonical_keys = {
+            "min_anios",
+            "min_meses",
+            "min_dias",
+            "max_anios_excl",
+            "max_meses_excl",
+            "max_dias",
+        }
+
+        has_legacy = any(k in data for k in legacy_keys)
+        has_canonical = any(k in data for k in canonical_keys)
+
+        if has_legacy and has_canonical:
+            raise ValueError(
+                "Cannot mix legacy age fields (edad_*) with canonical "
+                "age fields (min_*/max_*). Use one naming convention only."
+            )
+
+        if not has_legacy:
+            return data
+
+        mapping = {
+            "edad_min_anios": "min_anios",
+            "edad_min_meses": "min_meses",
+            "edad_min_dias": "min_dias",
+            "edad_max_anios": "max_anios_excl",
+            "edad_max_meses": "max_meses_excl",
+            "edad_max_dias": "max_dias",
+        }
+
+        result: dict = {}
+        for key, value in data.items():
+            if key in mapping:
+                result[mapping[key]] = value
+            elif key not in legacy_keys:
+                result[key] = value
+        return result
+
+    @model_validator(mode="after")
+    def _check_same_group_exclusivity(self) -> "FiltrosPoblacion":
+        """Enforce mutual exclusivity within each bound group.
+
+        At most one min_* field and at most one max_* field may be set.
+        Cross-group (one min + one max) is allowed.
+        """
+        min_count = sum(
+            1 for v in (self.min_dias, self.min_meses, self.min_anios)
+            if v is not None
+        )
+        max_count = sum(
+            1 for v in (self.max_dias, self.max_meses_excl, self.max_anios_excl)
+            if v is not None
+        )
+        if min_count > 1:
+            raise ValueError(
+                "min_dias, min_meses, and min_anios are mutually "
+                "exclusive — at most one may be set"
+            )
+        if max_count > 1:
+            raise ValueError(
+                "max_dias, max_meses_excl, and max_anios_excl are "
+                "mutually exclusive — at most one may be set"
+            )
+        return self
 
     @property
     def has_age_filter(self) -> bool:
-        """True when at least one age field is explicitly set."""
+        """True when at least one canonical age field is explicitly set."""
         return any(
             v is not None
             for v in (
-                self.edad_min_anios,
-                self.edad_max_anios,
-                self.edad_min_meses,
-                self.edad_max_meses,
-                self.edad_min_dias,
-                self.edad_max_dias,
+                self.min_dias,
+                self.min_meses,
+                self.min_anios,
+                self.max_dias,
+                self.max_meses_excl,
+                self.max_anios_excl,
             )
         )
-
-    @property
-    def edad_min_total_dias(self) -> int:
-        """Combined minimum age in days (años*365 + meses*30 + días)."""
-        anios = (self.edad_min_anios or 0) * 365
-        meses = (self.edad_min_meses or 0) * 30
-        dias = self.edad_min_dias or 0
-        return anios + meses + dias
-
-    @property
-    def edad_max_total_dias(self) -> int:
-        """Combined maximum age in days, or a large fallback if unset."""
-        if (
-            self.edad_max_anios is None
-            and self.edad_max_meses is None
-            and self.edad_max_dias is None
-        ):
-            return 365 * 150  # ~150 years — effectively no upper bound
-        anios = (self.edad_max_anios or 0) * 365
-        meses = (self.edad_max_meses or 0) * 30
-        dias = self.edad_max_dias or 0
-        return anios + meses + dias
 
 
 class FiltroDiagnostico(BaseModel):
@@ -114,15 +184,43 @@ class FiltroOrden(BaseModel):
 class FiltrosEvento(BaseModel):
     """Definition of the clinical event that an indicator measures.
 
-    encounter_type_uuids identifies which OpenMRS encounter types to count.
+    location_uuids identifies which OpenMRS service locations (clinics, wards,
+    etc.) to filter encounters by, via JOIN location ON e.location_id.
     minimo_ocurrencias enforces a minimum encounter-count threshold per patient.
     diagnosticos and ordenes are mutually exclusive — only one may be set.
+
+    Legacy encounter_type_uuids in stored JSONB are normalized to location_uuids
+    by the before-validator for read compatibility.
     """
 
-    encounter_type_uuids: list[str] | None = None
+    location_uuids: list[str] | None = None
     minimo_ocurrencias: int | None = Field(default=None, ge=1)
     diagnosticos: list[FiltroDiagnostico] | None = None
     ordenes: list[FiltroOrden] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_encounter_types(cls, data: object) -> object:
+        """Map legacy encounter_type_uuids → location_uuids on read.
+
+        Stored JSONB may still contain encounter_type_uuids. This validator
+        handles three shapes:
+        - FiltrosEvento dict with encounter_type_uuids key
+        - Raw JSONB dict passed through DefinicionIndicador's before-validator
+        - Already-normalized dict (location_uuids present, pass through)
+        """
+        if not isinstance(data, dict):
+            return data
+
+        if "location_uuids" in data:
+            # Already has new field — pop legacy key if present
+            data.pop("encounter_type_uuids", None)
+            return data
+
+        if "encounter_type_uuids" in data:
+            data["location_uuids"] = data.pop("encounter_type_uuids")
+
+        return data
 
     @model_validator(mode="after")
     def _mutual_exclusivity(self) -> "FiltrosEvento":

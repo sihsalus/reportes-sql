@@ -82,6 +82,16 @@ class DiagnosticoConceptoOut(BaseModel):
     nombre: str
 
 
+class LocationOptionOut(BaseModel):
+    """Location option returned by the locations search endpoint.
+
+    Mirrors OpenMRS location with uuid and display name.
+    """
+
+    uuid: _uuid.UUID
+    display: str
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────
 
 
@@ -229,6 +239,87 @@ async def buscar_diagnosticos(
                 )
             return results
 
+    except (RequestError, TimeoutException) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error conectando a OpenMRS: {exc}",
+        )
+    except HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"OpenMRS respondió con error: {exc.response.status_code}",
+        )
+
+
+@router.get(
+    "/locations",
+    summary="Proxy OpenMRS location search",
+    response_model=list[LocationOptionOut],
+)
+async def buscar_locations(
+    q: str = Query(
+        "",
+        min_length=0,
+        description="Search text for location names",
+    ),
+):
+    """Search OpenMRS locations by name.
+
+    Proxies: GET {OPENMRS_API_URL}/ws/rest/v1/location
+             ?q={seed}&v=custom:(uuid,display)&limit=200
+
+    Returns a case-insensitive, contains-based match list (local filter)
+    with uuid and display name.
+    Returns 400 when q is empty or whitespace-only.
+    Returns 502 on any OpenMRS connection or HTTP error.
+    """
+    query = q.strip()
+    if not query:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El parámetro 'q' es obligatorio y no puede estar vacío",
+        )
+
+    normalized_query = query.casefold()
+    query_seed = normalized_query[:3]
+
+    url = _openmrs_url("location")
+    base_params = {
+        "v": "custom:(uuid,display)",
+        "limit": 200,
+    }
+
+    try:
+        async with AsyncClient(timeout=10.0) as client:
+            def _filter_locations(raw: dict) -> list[LocationOptionOut]:
+                results: list[LocationOptionOut] = []
+                for item in raw.get("results", []):
+                    display = item.get("display", "")
+                    if normalized_query in display.casefold():
+                        results.append(
+                            LocationOptionOut(uuid=item["uuid"], display=display)
+                        )
+                return results
+
+            # First pass: query-derived seed.
+            response = await client.get(
+                url,
+                params={**base_params, "q": query_seed},
+                auth=_auth(),
+            )
+            response.raise_for_status()
+            primary_results = _filter_locations(response.json())
+            if primary_results:
+                return primary_results
+
+            # Fallback pass: broad seed used in this domain (UPSS* names).
+            fallback_response = await client.get(
+                url,
+                params={**base_params, "q": "upss"},
+                auth=_auth(),
+            )
+            fallback_response.raise_for_status()
+            return _filter_locations(fallback_response.json())
     except (RequestError, TimeoutException) as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
