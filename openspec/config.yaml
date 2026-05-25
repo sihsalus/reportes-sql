@@ -1,0 +1,56 @@
+schema: spec-driven
+
+context: |
+  Monorepo: indicators-back (Python/FastAPI/SQLAlchemy) + indicators-front (React/TS/Vite/Tailwind)
+  Backend: dual DB — PostgreSQL (async, read/write) + MySQL OpenMRS (sync, read-only)
+  Frontend: feature-based structure, MSW for API mocking, colocated tests
+  Package manager: pnpm (backend has no lockfile; venv-based)
+
+strict_tdd: false
+
+testing:
+  backend:
+    runner: pytest
+    framework: pytest + pytest-asyncio
+    command: cd indicators-back && python -m pytest tests/
+    coverage:
+      available: true
+      command: cd indicators-back && python -m pytest --cov=app tests/
+  frontend:
+    runner: vitest
+    framework: vitest + @testing-library/react + jsdom
+    command: cd indicators-front && pnpm test
+    coverage:
+      available: true
+      command: cd indicators-front && pnpm test:coverage
+  quality:
+    backend:
+      linter: null
+      type_checker: null
+      formatter: null
+    frontend:
+      linter: eslint (flat config, typescript-eslint)
+      type_checker: tsc --noEmit
+      formatter: null
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    - Follow existing code patterns
+    tdd: false
+    test_command: cd indicators-back && python -m pytest tests/ && cd ../indicators-front && pnpm test
+  verify:
+    test_command: cd indicators-back && python -m pytest tests/ && cd ../indicators-front && pnpm test
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
