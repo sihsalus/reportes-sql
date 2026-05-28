@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
-    # ── PostgreSQL: Indicators database (async, read/write) ──
+    # ── PostgreSQL: Indicators database (async read/write + sync helper) ──
     indicadores_db_host: str = "localhost"
     indicadores_db_port: int = 5432
     indicadores_db_name: str = "indicators"
@@ -52,7 +52,7 @@ class Settings(BaseSettings):
 
     @property
     def indicadores_database_sync_url(self) -> str:
-        """Sync PostgreSQL connection URL (psycopg2) for Alembic migrations."""
+        """Sync PostgreSQL URL (psycopg2) for sync persistence helpers."""
         return (
             f"postgresql+psycopg2://{self.indicadores_db_user}:"
             f"{self.indicadores_db_password}@{self.indicadores_db_host}:"

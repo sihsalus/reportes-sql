@@ -45,5 +45,5 @@ node_modules/
 # Logs
 *.log
 
-# NOTE: .atl/, openspec/, .engram/, and AGENTS.md are tracked project files per team workflow
-# Do NOT ignore them.
+# Local project artifacts
+.atl/
