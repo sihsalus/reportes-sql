@@ -1,23 +1,28 @@
-FROM python:3.12-slim
+# ── Build stage ──────────────────────────────────────────────────────────
+FROM node:22-alpine AS builder
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
+WORKDIR /build
+
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+# ── Production stage ─────────────────────────────────────────────────────
+FROM node:22-alpine
+
+ENV NODE_ENV=production \
     PORT=8000
 
 WORKDIR /app
 
-RUN addgroup --system app \
-    && adduser --system --ingroup app app
+RUN addgroup -S app && adduser -S app -G app
 
-COPY requirements.txt ./
-
-RUN pip install --upgrade pip \
-    && pip install -r requirements.txt
-
-COPY alembic.ini ./
-COPY alembic ./alembic
-COPY app ./app
+COPY --from=builder /build/dist ./dist
+COPY --from=builder /build/node_modules ./node_modules
+COPY --from=builder /build/package.json ./
 
 RUN chown -R app:app /app
 
@@ -25,4 +30,4 @@ USER app
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["node", "dist/main.js"]

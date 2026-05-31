@@ -9,32 +9,29 @@ services:
         condition: service_healthy
     environment:
       PORT: 8000
-      indicadores_db_host: indicators-postgres
-      indicadores_db_port: 5432
-      indicadores_db_name: ${INDICATORS_DB_NAME:-indicators}
-      indicadores_db_user: ${INDICATORS_DB_USER:-postgres}
-      indicadores_db_password: ${INDICATORS_DB_PASSWORD:-postgres}
-      openmrs_db_host: ${OPENMRS_DB_HOST:-host.docker.internal}
-      openmrs_db_port: ${OPENMRS_DB_PORT:-3306}
-      openmrs_db_name: ${OPENMRS_DB_NAME:-openmrs}
-      openmrs_db_user: ${OPENMRS_DB_USER:-openmrs}
-      openmrs_db_password: ${OPENMRS_DB_PASSWORD:-openmrs}
-      openmrs_api_url: ${OPENMRS_API_URL:-http://host.docker.internal/openmrs}
-      openmrs_api_user: ${OPENMRS_API_USER:-admin}
-      openmrs_api_password: ${OPENMRS_API_PASSWORD:-Admin123}
+      INDICADORES_DB_HOST: indicators-postgres
+      INDICADORES_DB_PORT: 5432
+      INDICADORES_DB_NAME: ${INDICATORS_DB_NAME:-indicators}
+      INDICADORES_DB_USER: ${INDICATORS_DB_USER:-postgres}
+      INDICADORES_DB_PASSWORD: ${INDICATORS_DB_PASSWORD:-postgres}
+      OPENMRS_DB_HOST: ${OPENMRS_DB_HOST:-host.docker.internal}
+      OPENMRS_DB_PORT: ${OPENMRS_DB_PORT:-3306}
+      OPENMRS_DB_NAME: ${OPENMRS_DB_NAME:-openmrs}
+      OPENMRS_DB_USER: ${OPENMRS_DB_USER:-openmrs}
+      OPENMRS_DB_PASSWORD: ${OPENMRS_DB_PASSWORD:-openmrs}
+      OPENMRS_API_URL: ${OPENMRS_API_URL:-http://host.docker.internal/openmrs}
+      OPENMRS_API_USER: ${OPENMRS_API_USER:-admin}
+      OPENMRS_API_PASSWORD: ${OPENMRS_API_PASSWORD:-Admin123}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     volumes:
-      - ./app:/app/app
-      - ./alembic:/app/alembic
-      - ./alembic.ini:/app/alembic.ini:ro
-      - ./requirements.txt:/app/requirements.txt:ro
+      - ./src:/app/src:ro
     command: >
-      sh -c "python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c "npx tsx watch src/main.ts"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
       interval: 30s
       timeout: 5s
       retries: 5

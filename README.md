@@ -4,7 +4,7 @@ Microservicio para definición, versionado y cálculo de indicadores clínicos. 
 
 ## Requisitos
 
-- Python 3.9+
+- Node.js 22+
 - PostgreSQL 12+
 - MySQL 5.7+ (OpenMRS)
 
@@ -16,15 +16,14 @@ Microservicio para definición, versionado y cálculo de indicadores clínicos. 
    cd reportes-sql
    ```
 
-2. **Crear entorno virtual:**
+2. **Instalar dependencias:**
    ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # En Windows: venv\Scripts\activate
+   npm ci
    ```
 
-3. **Instalar dependencias:**
+3. **Compilar TypeScript:**
    ```bash
-   pip install -r requirements.txt
+   npm run build
    ```
 
 ## Configuración
@@ -45,49 +44,71 @@ OPENMRS_DB_PORT=3306
 OPENMRS_DB_NAME=openmrs
 OPENMRS_DB_USER=root
 OPENMRS_DB_PASSWORD=your_password
+
+# Application
+PORT=8000
 ```
 
 ## Ejecutar la aplicación
 
+### Desarrollo (con hot reload)
 ```bash
-uvicorn app.main:app --reload
+npm run dev
 ```
 
-La API estará disponible en `http://localhost:8000`
+### Producción
+```bash
+npm run build && npm start
+```
 
-Acceder a la documentación interactiva en `http://localhost:8000/docs`
+La API estará disponible en `http://localhost:8000`.
+
+Endpoints principales:
+- `GET /health` — health check
+- `GET /indicadores` — listar indicadores
+- `GET /resultados` — consultar resultados
+- `GET /conceptos` — buscar conceptos
 
 ## Estructura del proyecto
 
 ```
 .
-├── alembic/                 # Migraciones de base de datos
-│   └── versions/           # Scripts de migración
-├── app/                    # Aplicación FastAPI
-│   ├── routers/           # Endpoints de API
-│   │   ├── indicadores.py
-│   │   ├── resultados.py
-│   │   └── conceptos.py
-│   ├── models/            # Modelos SQLAlchemy
-│   ├── schemas/           # Schemas Pydantic
-│   ├── engine/            # Lógica de cálculo
-│   ├── types/             # Tipos y definiciones
-│   ├── validators/        # Validadores
-│   ├── config.py          # Configuración
-│   ├── database.py        # Conexiones DB
-│   └── main.py            # Punto de entrada
-└── tests/                 # Tests unitarios
+├── src/                     # Aplicación Express TypeScript
+│   ├── config/             # Configuración y variables de entorno
+│   ├── database/           # Conexiones PostgreSQL (Sequelize) y MySQL
+│   ├── engine/             # Lógica de cálculo de indicadores
+│   ├── models/             # Modelos Sequelize
+│   ├── routers/            # Endpoints de API (Express routers)
+│   │   ├── indicadores.ts
+│   │   ├── resultados.ts
+│   │   └── conceptos.ts
+│   ├── types/              # Tipos y definiciones Zod
+│   ├── validators/         # Validadores Zod
+│   └── main.ts             # Punto de entrada Express
+├── dist/                   # Código compilado (tsc output)
+├── tests/                  # Tests unitarios e integración (Jest)
+├── docker-compose.yml      # Stack Docker: app + PostgreSQL
+├── Dockerfile              # Imagen Node.js multi-stage
+└── package.json            # Dependencias y scripts
 ```
 
-## Migraciones de base de datos
+## Tests
 
-Crear migración:
 ```bash
-alembic revision --autogenerate -m "descripción"
+# Ejecutar todos los tests
+npm test
+
+# Modo watch
+npm run test:watch
+
+# Con cobertura
+npm run test:coverage
 ```
 
-Aplicar migraciones:
+## Docker
+
 ```bash
-alembic upgrade head
+docker compose up -d
 ```
 
+La API corre en `http://localhost:8000`, PostgreSQL en `localhost:5433`.
