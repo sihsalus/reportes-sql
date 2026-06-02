@@ -1,8 +1,10 @@
 ## Exploration: migrate-indicator-engine-to-typescript
 
-### Current State
+Historical exploration retained as migration background. It describes the legacy Python service that was migrated; that source tree is no longer in this repository.
 
-The project is a single Python/FastAPI backend microservice (Motor de Indicadores SIH.SALUS) with the following layered architecture:
+### Legacy Baseline
+
+Before the migration, the project was a single Python/FastAPI backend microservice (Motor de Indicadores SIH.SALUS) with the following layered architecture:
 
 ```
 app/
@@ -42,7 +44,7 @@ app/
 - `tests/test_engine_executor.py` — 160 lines: Structure/import tests, execution path mock tests
 - `tests/test_resultados.py` and `tests/test_conceptos.py` also exist
 
-### Affected Areas
+### Affected Areas During Migration
 
 - **`app/types/definicion.py`** — The entire Pydantic metamodel. 321 lines of type definitions, validators, and legacy normalizers. This is the CANONICAL representation — every consumer depends on it. Must be translated to Zod with identical validation and normalization behavior.
 - **`app/engine/interpreter.py`** — The SQL builder. 517 lines of pure MySQL SQL generation. All parameterized with `%(name)s` syntax. Must be rewritten to use `?` positional or `:name` named params for Node MySQL driver (mysql2). Critical: date-bound correctness (`fin_excl = fin + 1day`), age filter unit logic, subquery generation.
@@ -65,7 +67,7 @@ app/
 
 ### Approaches
 
-1. **Incremental Module Replacement (recommended)**
+1. **Incremental Module Replacement (recommended at the time)**
    — Build the TypeScript backend module by module, running alongside Python during transition. Start with project scaffold and config, then Zod types (the foundation), then models, then engine, then routers. Each module is independently testable.
    - Pros: Lowest risk — each module verified in isolation before integration; allows gradual rollout; can run Python and Node side-by-side during migration; preserves existing Python deployment as fallback.
    - Cons: Temporary dual-stack complexity; need to ensure both backends don't corrupt PostgreSQL; longer calendar time.
@@ -83,7 +85,7 @@ app/
    - Cons: Highest risk — no gradual validation; long development window before any value; if tests miss edge cases, production breaks with no fallback; requires complete test parity before confidence.
    - Effort: **High** (same rewrite) with higher integration risk.
 
-### Recommendation
+### Historical Recommendation
 
 **Approach 1: Incremental Module Replacement** with the following module ordering:
 
@@ -119,4 +121,4 @@ app/
 
 ### Ready for Proposal
 
-**Yes**. All major unknowns are identified. The scope is clear: a full-stack migration of ~3000 lines of backend Python to TypeScript/Node using Express + Sequelize + Zod + Jest, aligned with the Generador-de-FUA reference architecture. The recommended approach is incremental module replacement with the engine/interpreter as the critical path. The next phase (sdd-propose) can define the change scope, invariants, and rollout plan.
+**Yes**. At the time of writing, all major unknowns were identified and this exploration was sufficient to proceed with the proposal. It is kept as historical context for how the current TypeScript codebase was planned.

@@ -21,7 +21,7 @@ import { executeAndPersist } from "../engine/executor.js";
 import { calcularPeriodo } from "../engine/periodo.js";
 import { resolveConceptMap } from "../validators/openmrs.js";
 
-export const resultadosRouter = Router();
+export const resultadosRouter: Router = Router();
 
 // ── Helper: async handler wrapper ──────────────────────────────────────
 

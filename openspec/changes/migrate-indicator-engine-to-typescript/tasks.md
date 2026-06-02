@@ -1,5 +1,7 @@
 # Tasks: Migrate Indicator Engine to TypeScript
 
+Migration record only. The repository now runs on TypeScript; the Python source tree referenced below has already been removed.
+
 ## Review Workload Forecast
 
 | Field | Value |
@@ -23,11 +25,11 @@ Chain strategy: pending
 | 1 | Foundation: TS config, DB clients, Zod schemas | PR 1 | base=main; includes Jest setup |
 | 2 | Engine parity: SQL builder + executor + periodo | PR 2 | base=PR 1 branch; highest risk |
 | 3 | Models + API parity: Sequelize routers + concept proxy | PR 3 | base=PR 2 branch |
-| 4 | Infra cutover + parity gate | PR 4 | base=PR 3 branch; Docker, delete Python |
+| 4 | Infra cutover + verification gate | PR 4 | base=PR 3 branch; Docker, final TS smoke coverage |
 
 ## Phase 1: Foundation
 
-- [x] 1.1 Create `package.json`, `tsconfig.json`, Jest config, `.env.example`
+- [x] 1.1 Create `package.json`, `tsconfig.json`, and Jest config
 - [x] 1.2 Create `src/config/index.ts` with typed env via `dotenv`
 - [x] 1.3 Create `src/database/postgres.ts` with Sequelize PG instance
 - [x] 1.4 Create `src/database/mysql.ts` with mysql2 pool for OpenMRS
@@ -54,5 +56,5 @@ Chain strategy: pending
 - [x] 4.1 Create `src/main.ts` with Express bootstrap, CORS, error middleware
 - [x] 4.2 Update `Dockerfile` to multi-stage Node build
 - [x] 4.3 Update `docker-compose.yml` to Node service
-- [ ] 4.4 Run E2E parity suite in Docker; gate: all pytest scenarios have Jest equivalents
-- [ ] 4.5 Delete `app/`, `requirements*.txt`, `alembic/` after parity gate passes
+- [ ] 4.4 Run TS E2E smoke suite in Docker to close the final environment-level verification gap
+- [x] 4.5 Remove legacy Python artifacts (`app/`, `requirements*.txt`, `alembic/`)

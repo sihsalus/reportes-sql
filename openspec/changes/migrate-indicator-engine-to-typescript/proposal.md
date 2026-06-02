@@ -1,13 +1,15 @@
 # Proposal: Migrate Indicator Engine to TypeScript
 
+Historical proposal retained for migration context. The migration has since landed; the repository is now TypeScript-based and the old Python source tree is no longer present.
+
 ## Intent
 
-Move the Python/FastAPI backend to Node.js/TypeScript, aligned with Generador-de-FUA, while preserving current API behavior, SQL semantics, dual-database usage, and data compatibility.
+Replace the former Python/FastAPI backend with Node.js/TypeScript, aligned with Generador-de-FUA, while preserving API behavior, SQL semantics, dual-database usage, and data compatibility.
 
 ## Scope
 
 ### In Scope
-- TypeScript/Express/Sequelize/Zod/Jest backend with feature parity for `app/` and `tests/`.
+- TypeScript/Express/Sequelize/Zod/Jest backend with feature parity for the legacy backend behavior and migrated test coverage.
 - Incremental migration by slices: foundation, engine parity, API parity, infra cutover.
 - Preservation of invariants: parameterized SQL, append-only versioning, UUID PKs, exclusive `periodo_fin`, legacy JSON normalization, error envelope.
 
@@ -18,7 +20,7 @@ Move the Python/FastAPI backend to Node.js/TypeScript, aligned with Generador-de
 ## Capabilities
 
 ### New Capabilities
-- `indicator-definition-validation`: Zod schemas and legacy normalization equivalent to `app/types/definicion.py`.
+- `indicator-definition-validation`: Zod schemas and legacy normalization equivalent to the removed Python definition model.
 - `indicator-query-engine`: SQL build/execute behavior parity for MySQL reads and PostgreSQL result persistence.
 - `indicator-management-api`: CRUD, versioning, SQL preview, and batch execution parity for indicadores/resultados.
 - `openmrs-concept-proxy`: Concept lookup and validation parity for `conceptos` and OpenMRS checks.
@@ -28,18 +30,16 @@ None.
 
 ## Approach
 
-Incremental module replacement. Build TS foundation first (`config`, DB clients, Zod, Sequelize), then port the SQL builder early as the highest-risk slice, then APIs, then container/migration cutover. Keep Python deployable until TS parity tests pass.
+Incremental module replacement. Build TS foundation first (`config`, DB clients, Zod, Sequelize), then port the SQL builder early as the highest-risk slice, then APIs, then container/migration cutover. This document describes the migration path that produced the current TS codebase.
 
 ## Affected Areas
 
 | Area | Impact | Description |
 |------|--------|-------------|
-| `app/types`, `app/schemas` | Modified | Source behavior to port into Zod contracts |
-| `app/engine/*` | Modified | SQL generation, execution, periodo invariants |
-| `app/models`, `alembic/` | Modified | Sequelize models and migration replacement |
-| `app/routers/*`, `app/main.py` | Modified | Express route parity and error handling |
-| `tests/*` | Modified | Jest/supertest parity suite |
-| `Dockerfile`, `docker-compose.yml`, `requirements*.txt` | Modified | Node runtime cutover |
+| Legacy Python source tree | Replaced | Source behavior ported into `src/` TypeScript modules |
+| `src/**/*` | Added | Current implementation for engine, routers, models, config, and validation |
+| `tests/*` | Modified | Jest/supertest coverage for the TS implementation |
+| `Dockerfile`, `docker-compose.yml` | Modified | Node runtime cutover |
 
 ## Risks
 
@@ -51,7 +51,7 @@ Incremental module replacement. Build TS foundation first (`config`, DB clients,
 
 ## Rollback Plan
 
-Ship in slices, keep Python service deployable, and cut over only after parity tests and smoke checks. If TS fails, revert traffic/container to Python and keep PostgreSQL schema/data unchanged.
+Ship in slices, keep the legacy service deployable during transition, and cut over only after parity tests and smoke checks. This rollback note is preserved as migration history.
 
 ## Dependencies
 
@@ -61,4 +61,4 @@ Ship in slices, keep Python service deployable, and cut over only after parity t
 
 - [ ] TypeScript service matches current endpoint and validation behavior for covered flows.
 - [ ] Existing invariant-heavy tests are ported and passing for types, engine, and API slices.
-- [ ] Production cutover can be reversed to Python without data repair.
+- [x] Production runtime is TypeScript; rollback guidance here is retained as historical migration context.

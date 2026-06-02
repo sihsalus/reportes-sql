@@ -1,15 +1,6 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
+# Build output
 dist/
 build/
-.eggs/
-
-# Virtual environments
-venv/
-.venv/
-env/
 
 # Environment
 .env
@@ -24,15 +15,10 @@ env/
 Thumbs.db
 
 # Coverage
-htmlcov/
-frontend/coverage/
-.coverage
-.coverage.*
-coverage.xml
+coverage/
 
-# Testing & type checking
-.pytest_cache/
-.mypy_cache/
+# TypeScript build info
+*.tsbuildinfo
 
 # Node
 node_modules/

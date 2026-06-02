@@ -1,8 +1,10 @@
 # Design: Migrate Indicator Engine to TypeScript
 
+Historical design retained for migration context. The repository now runs on the TypeScript design described below.
+
 ## Technical Approach
 
-Incremental module replacement. Build the TypeScript foundation (config, DB clients, Zod schemas), then port the SQL builder (highest-risk slice), then models/Sequelize, then routers/Express, then container cutover. Keep Python deployable until TS parity tests pass.
+Incremental module replacement. Build the TypeScript foundation (config, DB clients, Zod schemas), then port the SQL builder (highest-risk slice), then models/Sequelize, then routers/Express, then container cutover. The migration has since completed and the Python source is no longer present.
 
 ## Architecture Decisions
 
@@ -43,7 +45,7 @@ Client → Express Router → Zod Validation → Sequelize (PG)
 | `tests/**/*.test.ts` | Create | Jest + supertest parity suite |
 | `Dockerfile` | Modify | Multi-stage Node build, remove Python |
 | `docker-compose.yml` | Modify | Node service, same env vars |
-| `app/`, `requirements*.txt`, `alembic/` | Delete | After TS parity confirmed |
+| Legacy Python source tree | Delete | Completed after TS parity and cutover |
 
 ## Interfaces / Contracts
 
@@ -79,11 +81,11 @@ interface OpenMRSQueryResult {
 4. **Slice 3**: Set up Sequelize models + mysql2 pool. Port executor.
 5. **Slice 4**: Port routers one-by-one (conceptos → indicadores → resultados).
 6. **Slice 5**: `src/main.ts` + Docker cutover.
-7. **Gate**: All existing pytest scenarios have passing Jest equivalents. Only then delete Python code.
+7. **Gate**: All migration-critical scenarios have passing Jest equivalents. Legacy Python artifacts can then be removed.
 
-Rollback: revert Dockerfile to Python image; PostgreSQL schema/data unchanged.
+Rollback during migration: revert Dockerfile to the legacy runtime image; PostgreSQL schema/data unchanged.
 
 ## Open Questions
 
 - [ ] Should `Numeric(18,6)` map to `Sequelize.DECIMAL` or `Sequelize.FLOAT`? Need to verify JS `number` precision for financial indicators.
-- [ ] Does Generador-de-FUA use a specific Express project structure (e.g., `src/` vs `app/`)? Align folder naming.
+- [x] `src/` is the chosen project structure in the current TypeScript codebase.

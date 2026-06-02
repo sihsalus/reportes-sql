@@ -15,7 +15,7 @@
 import { Router, type Request, type Response } from "express";
 import { settings } from "../config/index.js";
 
-export const conceptosRouter = Router();
+export const conceptosRouter: Router = Router();
 
 // ── Auth helpers ───────────────────────────────────────────────────────
 

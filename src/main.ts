@@ -8,6 +8,7 @@
  */
 
 import express, {
+  type Express,
   type Request,
   type Response,
   type NextFunction,
@@ -22,7 +23,7 @@ import { resultadosRouter } from "./routers/resultados.js";
 import { conceptosRouter } from "./routers/conceptos.js";
 import { openapiSpec } from "./docs/openapi.js";
 
-const app = express();
+const app: Express = express();
 
 // ── Middleware ──────────────────────────────────────────────────────────
 

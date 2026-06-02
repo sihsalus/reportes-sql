@@ -1,7 +1,7 @@
 /**
- * Parity tests for SQL generation — mirrors tests/test_engine_interpreter.py.
+ * SQL generation coverage for the current TypeScript engine.
  *
- * Key difference: mysql2 uses :name placeholders instead of %(name)s.
+ * Legacy note: the old Python engine used %(name)s placeholders; mysql2 uses :name.
  */
 import { buildQuery } from "../src/engine/interpreter";
 import {

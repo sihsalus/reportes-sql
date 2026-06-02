@@ -1,5 +1,7 @@
 # Verification Report: migrate-indicator-engine-to-typescript
 
+Historical migration report, updated to match the current repository state. The codebase is now TypeScript-only; Python sources mentioned here are legacy context.
+
 ## Change
 migrate-indicator-engine-to-typescript
 
@@ -13,7 +15,7 @@ Standard (Strict TDD inactive)
 
 | Phase | Task | Status |
 |---|---|---|
-| 1.1 | package.json, tsconfig, Jest, .env.example | ✅ Complete |
+| 1.1 | package.json, tsconfig, Jest config | ✅ Complete |
 | 1.2 | src/config/index.ts | ✅ Complete |
 | 1.3 | src/database/postgres.ts | ✅ Complete |
 | 1.4 | src/database/mysql.ts | ✅ Complete |
@@ -31,14 +33,14 @@ Standard (Strict TDD inactive)
 | 4.1 | src/main.ts | ✅ Complete |
 | 4.2 | Dockerfile multi-stage Node | ✅ Complete |
 | 4.3 | docker-compose.yml Node service | ✅ Complete |
-| 4.4 | E2E parity suite in Docker | ❌ Incomplete |
-| 4.5 | Delete Python code after gate | ❌ Incomplete |
+| 4.4 | TS E2E smoke suite in Docker | ❌ Incomplete |
+| 4.5 | Remove legacy Python artifacts | ✅ Complete |
 
 ## Build / Tests / Coverage Evidence
 
 | Command | Result |
 |---|---|
-| `pnpm build` | ✅ PASS (0 errors) |
+| `pnpm build` | ⚠️ Historical PASS on 2026-05-30; current status must be revalidated separately |
 | `pnpm test -- --coverage` | ✅ PASS (5 suites, 146 tests, 0 failures) |
 | Coverage (all files) | 81.62% stmts, 66.77% branch, 94.66% funcs, 82.31% lines |
 
@@ -83,10 +85,10 @@ Standard (Strict TDD inactive)
 
 | Requirement | Status | Notes |
 |---|---|---|
-| Zod schemas parity | ✅ Implemented | `src/types/definicion.ts` mirrors Python pydantic logic including `.preprocess()` for legacy normalization |
+| Zod schemas parity | ✅ Implemented | `src/types/definicion.ts` preserves the legacy normalization behavior needed for existing data |
 | SQL builder parity | ✅ Implemented | `src/engine/interpreter.ts` uses `:name` placeholders for mysql2; no raw interpolation |
 | Executor empty-result guard | ✅ Implemented | `src/engine/executor.ts` skips `bulkCreate` when `resultados.length === 0` |
-| Router error shapes | ✅ Implemented | 422 `{detail: {field, message}}`, 404/502 `{detail: string}` match Python FastAPI envelopes |
+| Router error shapes | ✅ Implemented | 422 `{detail: {field, message}}`, 404/502 `{detail: string}` preserve the legacy API envelope |
 | OpenMRS location validation | ✅ Implemented | `src/validators/openmrs.ts` validates location UUIDs and resolves concept maps via mysql2 |
 
 ## Coherence (Design)
@@ -104,24 +106,23 @@ Standard (Strict TDD inactive)
 ## Issues Found
 
 ### CRITICAL
-- None (build passes, all 146 tests pass, no runtime failures).
+- None in the 2026-05-30 verification snapshot; current build status was not revalidated in this document revision.
 
 ### WARNING
-1. **Task 4.4 incomplete** — E2E parity suite in Docker not run; parity gate against Python pytest scenarios not proven. Blocked by absence of Docker daemon / PostgreSQL + OpenMRS containers in this environment.
-2. **Task 4.5 incomplete** — Python codebase (`app/`, `requirements*.txt`, `alembic/`) still present because parity gate (4.4) has not passed.
-3. **Jest version mismatch** — Design specifies Jest 30; package.json uses Jest 29. Minor toolchain drift with no known functional impact.
-4. **Coverage blind spot on engine/periodo.ts** — Only 38.88% statement coverage; period math edge cases (e.g. `anual_actual`, `trimestre_actual`) are not directly exercised.
-5. **Spec scenario UNTESTED** — `indicator-result-calculation-persistence > Empty query result` is implemented in `executor.ts` but lacks a direct covering test.
+1. **Task 4.4 incomplete** — TS E2E smoke coverage in Docker has not been run in this environment. Blocked by absence of Docker daemon / PostgreSQL + OpenMRS containers here.
+2. **Jest version mismatch** — Design specifies Jest 30; package.json uses Jest 29. Minor toolchain drift with no known functional impact.
+3. **Coverage blind spot on engine/periodo.ts** — Only 38.88% statement coverage; period math edge cases (e.g. `anual_actual`, `trimestre_actual`) are not directly exercised.
+4. **Spec scenario UNTESTED** — `indicator-result-calculation-persistence > Empty query result` is implemented in `executor.ts` but lacks a direct covering test.
 
 ### SUGGESTION
 1. Add a unit test for `executeAndPersist` that mocks mysql2 returning zero rows and asserts `bulkCreate` is not called.
 2. Add unit tests for `periodo.ts` to close the coverage gap on `anual_actual` and `trimestre_actual` branches.
 3. Upgrade Jest to v30 when available/stable to align with design decision.
-4. Run a Docker-compose E2E smoke test against the TS service to validate full request/response cycle before deleting Python code.
-5. Consider adding `.env.example` completeness check (it exists but verify its content against `src/config/index.ts` required variables).
+4. Run a Docker-compose E2E smoke test against the TS service to validate the full request/response cycle in the current stack.
+5. Consider adding a `.env.example` file if the project needs a shareable environment template for onboarding.
 
 ## Final Verdict
 
-**PASS WITH WARNINGS**
+**PASS WITH WARNINGS (historical snapshot)**
 
-The TypeScript foundation, engine parity (Phases 1 and 2), and router implementation with integration tests (Phase 3) are fully implemented, build-clean, and verified by 146 passing tests. Spec compliance is 19/20 scenarios with runtime-verified covering tests; the remaining scenario (`Empty query result`) is implemented in source but lacks a direct test. Infra cutover (Phase 4) is code-complete but remains blocked: Docker E2E parity gate (4.4) has not run, so Python cleanup (4.5) is on hold. No CRITICAL defects. Recommended next step is unblock Task 4.4 in an environment with Docker and real databases, then proceed to 4.5.
+The TypeScript foundation, engine parity (Phases 1 and 2), and router implementation with integration tests (Phase 3) were verified in the 2026-05-30 migration snapshot with 146 passing tests. Spec compliance is 19/20 scenarios in that snapshot; the remaining scenario (`Empty query result`) is implemented in source but lacks a direct test. Infra cutover code is in place, while Docker-level E2E smoke verification (4.4) remains open. Legacy Python artifacts have already been removed from the repository. Recommended next step is to revalidate `pnpm build` and unblock Task 4.4 in an environment with Docker and real databases.

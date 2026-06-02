@@ -29,7 +29,7 @@ import {
   resolveConceptMap,
 } from "../validators/openmrs.js";
 
-export const indicadoresRouter = Router();
+export const indicadoresRouter: Router = Router();
 
 // ── Helper: async handler wrapper ──────────────────────────────────────
 

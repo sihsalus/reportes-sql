@@ -1,5 +1,7 @@
 /**
- * Parity tests for Zod validation — mirrors tests/test_types_definicion.py.
+ * Zod validation coverage for the current TypeScript schemas.
+ *
+ * Legacy note: these cases preserve behavior from the removed Python implementation.
  */
 import {
   DefinicionIndicadorSchema,
