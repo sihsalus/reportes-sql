@@ -38,8 +38,8 @@ Standard (Strict TDD inactive)
 
 | Command | Result |
 |---|---|
-| `npm run build` | ✅ PASS (0 errors) |
-| `npm test -- --coverage` | ✅ PASS (5 suites, 146 tests, 0 failures) |
+| `pnpm build` | ✅ PASS (0 errors) |
+| `pnpm test -- --coverage` | ✅ PASS (5 suites, 146 tests, 0 failures) |
 | Coverage (all files) | 81.62% stmts, 66.77% branch, 94.66% funcs, 82.31% lines |
 
 **Coverage breakdown:**

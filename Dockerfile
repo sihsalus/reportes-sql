@@ -3,12 +3,14 @@ FROM node:22-alpine AS builder
 
 WORKDIR /build
 
-COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+RUN npm install -g pnpm@11.2.2
+
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 COPY tsconfig.json ./
 COPY src ./src
-RUN npm run build
+RUN pnpm build
 
 # ── Production stage ─────────────────────────────────────────────────────
 FROM node:22-alpine

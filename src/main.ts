@@ -13,12 +13,14 @@ import express, {
   type NextFunction,
 } from "express";
 import cors from "cors";
+import swaggerUi from "swagger-ui-express";
 import { settings } from "./config/index.js";
 import { sequelize } from "./database/postgres.js";
 import { disposeMysql } from "./database/mysql.js";
 import { indicadoresRouter } from "./routers/indicadores.js";
 import { resultadosRouter } from "./routers/resultados.js";
 import { conceptosRouter } from "./routers/conceptos.js";
+import { openapiSpec } from "./docs/openapi.js";
 
 const app = express();
 
@@ -45,6 +47,14 @@ app.use(express.json());
 app.use("/indicadores", indicadoresRouter);
 app.use("/resultados", resultadosRouter);
 app.use("/conceptos", conceptosRouter);
+
+// ── API Documentation ───────────────────────────────────────────────────
+
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));
+
+app.get("/docs/openapi.json", (_req: Request, res: Response) => {
+  res.json(openapiSpec);
+});
 
 // ── Health ──────────────────────────────────────────────────────────────
 

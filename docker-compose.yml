@@ -29,7 +29,7 @@ services:
     volumes:
       - ./src:/app/src:ro
     command: >
-      sh -c "npx tsx watch src/main.ts"
+      sh -c "pnpm exec tsx watch src/main.ts"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
       interval: 30s

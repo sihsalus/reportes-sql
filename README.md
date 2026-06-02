@@ -18,12 +18,12 @@ Microservicio para definición, versionado y cálculo de indicadores clínicos. 
 
 2. **Instalar dependencias:**
    ```bash
-   npm ci
+   pnpm install --frozen-lockfile
    ```
 
 3. **Compilar TypeScript:**
    ```bash
-   npm run build
+   pnpm build
    ```
 
 ## Configuración
@@ -53,12 +53,12 @@ PORT=8000
 
 ### Desarrollo (con hot reload)
 ```bash
-npm run dev
+pnpm dev
 ```
 
 ### Producción
 ```bash
-npm run build && npm start
+pnpm build && pnpm start
 ```
 
 La API estará disponible en `http://localhost:8000`.
@@ -96,13 +96,13 @@ Endpoints principales:
 
 ```bash
 # Ejecutar todos los tests
-npm test
+pnpm test
 
 # Modo watch
-npm run test:watch
+pnpm test:watch
 
 # Con cobertura
-npm run test:coverage
+pnpm test:coverage
 ```
 
 ## Docker

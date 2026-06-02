@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Microservicio para definición, versionado y cálculo de indicadores clínicos (TypeScript)",
   "private": true,
+  "packageManager": "pnpm@11.2.2",
   "type": "module",
   "scripts": {
     "build": "tsc",
@@ -20,8 +21,10 @@
     "pg": "^8.13.0",
     "pg-hstore": "^2.3.4",
     "sequelize": "^6.37.3",
+    "swagger-ui-express": "^5.0.1",
     "uuid": "^10.0.0",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
