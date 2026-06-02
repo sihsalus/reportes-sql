@@ -22,6 +22,7 @@ import { indicadoresRouter } from "./routers/indicadores.js";
 import { resultadosRouter } from "./routers/resultados.js";
 import { conceptosRouter } from "./routers/conceptos.js";
 import { openapiSpec } from "./docs/openapi.js";
+import { seedDefaultIndicador } from "./seed/default-indicador.js";
 
 const app: Express = express();
 
@@ -96,6 +97,14 @@ async function start(): Promise<void> {
   // Sync Sequelize models with PostgreSQL (safe — does not drop data)
   await sequelize.sync();
   console.log("PostgreSQL models synced.");
+
+  if (settings.auto_seed_default_indicator) {
+    const seeded = await seedDefaultIndicador();
+    console.log(
+      "Default indicator seeding finished:",
+      JSON.stringify(seeded),
+    );
+  }
 
   const server = app.listen(settings.port, () => {
     console.log(

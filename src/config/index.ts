@@ -32,6 +32,7 @@ export interface Settings {
 
   // Application
   port: number;
+  auto_seed_default_indicator: boolean;
 }
 
 function parsePort(value: string | undefined, fallback: number): number {
@@ -40,13 +41,20 @@ function parsePort(value: string | undefined, fallback: number): number {
   return isNaN(parsed) ? fallback : parsed;
 }
 
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value === "") return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
 export const settings: Settings = {
   indicadores_db_host: process.env["INDICADORES_DB_HOST"] ?? "localhost",
   indicadores_db_port: parsePort(process.env["INDICADORES_DB_PORT"], 5432),
   indicadores_db_name: process.env["INDICADORES_DB_NAME"] ?? "indicators",
   indicadores_db_user: process.env["INDICADORES_DB_USER"] ?? "postgres",
-  indicadores_db_password:
-    process.env["INDICADORES_DB_PASSWORD"] ?? "postgres",
+  indicadores_db_password: process.env["INDICADORES_DB_PASSWORD"] ?? "postgres",
 
   openmrs_db_host: process.env["OPENMRS_DB_HOST"] ?? "localhost",
   openmrs_db_port: parsePort(process.env["OPENMRS_DB_PORT"], 3306),
@@ -59,6 +67,10 @@ export const settings: Settings = {
   openmrs_api_password: process.env["OPENMRS_API_PASSWORD"] ?? "Admin123",
 
   port: parsePort(process.env["PORT"], 8000),
+  auto_seed_default_indicator: parseBoolean(
+    process.env["AUTO_SEED_DEFAULT_INDICATOR"],
+    true,
+  ),
 };
 
 /** PostgreSQL connection URL for Sequelize */
