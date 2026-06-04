@@ -7,6 +7,7 @@
  * - GET /conceptos/locations?q= → proxy OpenMRS location search
  * - GET /conceptos/locations/resolve?uuids=... → batch resolve location UUIDs
  * - GET /conceptos/diagnosticos/resolve?uuids=... → batch resolve diagnosis UUIDs
+ * - GET /conceptos/buscar/resolve?uuids=... → batch resolve concept UUID -> display label
  *
  * All communication uses fetch with Basic Auth. Connection errors
  * return 502 Bad Gateway with a descriptive message.
@@ -110,6 +111,61 @@ conceptosRouter.get(
           display: item.display,
         })),
       );
+    });
+  },
+);
+
+// GET /conceptos/buscar/resolve?uuids=...
+// Must be registered before /buscar to avoid route ambiguity.
+conceptosRouter.get(
+  "/buscar/resolve",
+  async (req: Request, res: Response) => {
+    await proxyWithErrorHandling(res, async () => {
+      const uuidParam = (req.query["uuids"] as string) ?? "";
+      const uuidList = parseUuidList(uuidParam);
+
+      if (uuidList.length === 0) {
+        res.status(400).json({
+          detail:
+            "El parámetro 'uuids' debe contener al menos un UUID válido",
+        });
+        return;
+      }
+
+      const result: Record<string, string> = {};
+
+      const fetches = uuidList.map(async (uid) => {
+        const url = openmrsUrl(`concept/${uid}`);
+        try {
+          const resp = await fetch(
+            `${url}?v=custom:(uuid,display)`,
+            {
+              headers: { Authorization: authHeader() },
+              signal: AbortSignal.timeout(10_000),
+            },
+          );
+          if (resp.status === 404) return null;
+          if (!resp.ok) {
+            throw new Error(`OpenMRS respondió con error: ${resp.status}`);
+          }
+          const data = (await resp.json()) as {
+            uuid: string;
+            display: string;
+          };
+          return { uuid: data.uuid, display: data.display };
+        } catch {
+          throw new Error("Error conectando a OpenMRS");
+        }
+      });
+
+      const fetched = await Promise.all(fetches);
+      for (const item of fetched) {
+        if (item !== null) {
+          result[item.uuid] = item.display;
+        }
+      }
+
+      res.json(result);
     });
   },
 );

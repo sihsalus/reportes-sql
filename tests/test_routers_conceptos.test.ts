@@ -306,4 +306,77 @@ describe("Conceptos Router", () => {
       expect(res.status).toBe(400);
     });
   });
+
+  describe("GET /conceptos/buscar/resolve", () => {
+    test("resolves concept UUIDs to display labels as a map", async () => {
+      (globalThis.fetch as jest.Mock)
+        .mockResolvedValueOnce(
+          mockFetchRes(200, { uuid: "c1", display: "Malaria" }),
+        )
+        .mockResolvedValueOnce(
+          mockFetchRes(200, { uuid: "c2", display: "Cefalea" }),
+        );
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/buscar/resolve?uuids=c1,c2",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ c1: "Malaria", c2: "Cefalea" });
+    });
+
+    test("returns empty object when no uuids found (silent skip)", async () => {
+      (globalThis.fetch as jest.Mock)
+        .mockResolvedValueOnce(mockFetchRes(404, {}))
+        .mockResolvedValueOnce(mockFetchRes(404, {}));
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/buscar/resolve?uuids=unknown1,unknown2",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({});
+    });
+
+    test("silently omits not-found UUIDs from result map", async () => {
+      (globalThis.fetch as jest.Mock)
+        .mockResolvedValueOnce(mockFetchRes(404, {}))
+        .mockResolvedValueOnce(
+          mockFetchRes(200, { uuid: "c2", display: "Found" }),
+        );
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/buscar/resolve?uuids=unknown,c2",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ c2: "Found" });
+      expect(res.body).not.toHaveProperty("unknown");
+    });
+
+    test("returns 400 for empty uuids", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/buscar/resolve?uuids=",
+      );
+
+      expect(res.status).toBe(400);
+    });
+
+    test("returns 502 on OpenMRS connection failure", async () => {
+      (globalThis.fetch as jest.Mock).mockRejectedValue(
+        new Error("Connection refused"),
+      );
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/buscar/resolve?uuids=c1",
+      );
+
+      expect(res.status).toBe(502);
+    });
+  });
 });

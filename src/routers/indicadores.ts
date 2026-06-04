@@ -7,7 +7,7 @@
  * - PUT    /indicadores/:id               → update metadata (auto-versioning)
  * - DELETE /indicadores/:id               → soft-delete (activo=false)
  * - POST   /indicadores/:id/versiones     → create new immutable version
- * - GET    /indicadores/:id/preview-sql   → SQL preview for a version
+ * - GET    /indicadores/:id/preview-sql   → SQL preview (accepts version_id or versionId)
  */
 
 import { Router, type Request, type Response } from "express";
@@ -412,7 +412,9 @@ indicadoresRouter.get(
     }
 
     // Fetch version (specific or latest)
-    const versionId = req.query["version_id"] as string | undefined;
+    // Accept both camelCase (versionId) and snake_case (version_id).
+    // If both are present, versionId takes precedence as the canonical JS name.
+    const versionId = (req.query["versionId"] ?? req.query["version_id"]) as string | undefined;
 
     let version: IndicadorVersion | null;
     if (versionId) {

@@ -361,7 +361,14 @@ export const openapiSpec = {
             in: "query",
             schema: { type: "string", format: "uuid" },
             description:
-              "UUID de versión específica (opcional; default: última versión)",
+              "UUID de versión específica (opcional; default: última versión). También acepta versionId (camelCase).",
+          },
+          {
+            name: "versionId",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description:
+              "Alias camelCase de version_id. Si ambos están presentes, versionId tiene precedencia.",
           },
         ],
         responses: {
@@ -549,6 +556,45 @@ export const openapiSpec = {
           "400": {
             description: "Parámetro 'q' faltante",
           },
+          "502": {
+            description: "Error conectando a OpenMRS",
+            content: { "application/json": { schema: Error502 } },
+          },
+        },
+      },
+    },
+
+    "/conceptos/buscar/resolve": {
+      get: {
+        tags: ["Conceptos"],
+        summary: "Resolver UUIDs de conceptos genéricos en batch",
+        operationId: "resolveConceptos",
+        parameters: [
+          {
+            name: "uuids",
+            in: "query",
+            required: true,
+            schema: { type: "string" },
+            description: "UUIDs separados por coma",
+          },
+        ],
+        responses: {
+          "200": {
+            description:
+              "Mapa UUID → display label (excluye UUIDs no encontrados)",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                  example: {
+                    "a1b2c3d4-e5f6-7890-abcd-ef1234567890": "Malaria",
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "Parámetro 'uuids' faltante o inválido" },
           "502": {
             description: "Error conectando a OpenMRS",
             content: { "application/json": { schema: Error502 } },

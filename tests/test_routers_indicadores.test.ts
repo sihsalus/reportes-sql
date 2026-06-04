@@ -341,7 +341,7 @@ describe("Indicadores Router", () => {
   });
 
   describe("GET /indicadores/:id/preview-sql — SQL preview", () => {
-    test("returns SQL preview for latest version", async () => {
+    test("returns SQL preview for latest version (no version param)", async () => {
       mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
       mockVersionFindOne.mockResolvedValue(makeVersionRow());
 
@@ -354,6 +354,52 @@ describe("Indicadores Router", () => {
       expect(res.body).toHaveProperty("sql");
       expect(res.body).toHaveProperty("params");
       expect(res.body.sql).toContain(":");
+    });
+
+    test("accepts version_id (snake_case) and returns preview", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      mockVersionFindOne.mockResolvedValue(makeVersionRow());
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        `/indicadores/${UUID}/preview-sql?version_id=${VERSION_UUID}`,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.version_id).toBe(VERSION_UUID);
+    });
+
+    test("accepts versionId (camelCase) and returns preview", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      mockVersionFindOne.mockResolvedValue(makeVersionRow());
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        `/indicadores/${UUID}/preview-sql?versionId=${VERSION_UUID}`,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.version_id).toBe(VERSION_UUID);
+    });
+
+    test("versionId takes precedence when both params are present", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      // versionFindOne is called with the resolved versionId;
+      // verify it received the camelCase value (UUID2), not the snake_case (VERSION_UUID)
+      mockVersionFindOne.mockImplementation(async ({ where }: any) => {
+        return where.id === UUID2
+          ? makeVersionRow({ id: UUID2, version: 2 })
+          : null;
+      });
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        `/indicadores/${UUID}/preview-sql?versionId=${UUID2}&version_id=${VERSION_UUID}`,
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.version_id).toBe(UUID2);
+      expect(res.body.version_num).toBe(2);
     });
 
     test("returns 404 when version not found", async () => {
