@@ -12,7 +12,23 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN pnpm build
 
+# ── Dev stage (docker compose target) ────────────────────────────────────
+# Includes dev dependencies so `tsx watch` and other dev tooling work.
+FROM builder AS dev
+
+WORKDIR /app
+COPY --from=builder /build/node_modules ./node_modules
+COPY --from=builder /build/dist ./dist
+COPY --from=builder /build/package.json ./
+
+EXPOSE 8000
+CMD ["pnpm", "exec", "tsx", "watch", "src/main.ts"]
+
 # ── Production stage ─────────────────────────────────────────────────────
+# Prune dev dependencies after build so the production image is lean.
+FROM builder AS prod-builder
+RUN pnpm prune --prod --ignore-scripts
+
 FROM node:22-alpine
 
 ENV NODE_ENV=production \
@@ -22,14 +38,17 @@ WORKDIR /app
 
 RUN addgroup -S app && adduser -S app -G app
 
-COPY --from=builder /build/dist ./dist
-COPY --from=builder /build/node_modules ./node_modules
-COPY --from=builder /build/package.json ./
+COPY --from=prod-builder /build/dist ./dist
+COPY --from=prod-builder /build/node_modules ./node_modules
+COPY --from=prod-builder /build/package.json ./
 
 RUN chown -R app:app /app
 
 USER app
 
 EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8000/health || exit 1
 
 CMD ["node", "dist/main.js"]

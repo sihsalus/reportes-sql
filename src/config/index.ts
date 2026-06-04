@@ -33,6 +33,10 @@ export interface Settings {
   // Application
   port: number;
   auto_seed_default_indicator: boolean;
+  cors_origins: string[];
+
+  // Routing
+  base_path: string;
 }
 
 function parsePort(value: string | undefined, fallback: number): number {
@@ -47,6 +51,48 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   if (["1", "true", "yes", "on"].includes(normalized)) return true;
   if (["0", "false", "no", "off"].includes(normalized)) return false;
   return fallback;
+}
+
+/**
+ * Parse CORS_ORIGINS from a comma-separated environment variable.
+ *
+ * Defaults to the localhost origins used during development (Vite dev server
+ * on 5173 and common gateway/SPA ports on 8080). In production, set this to
+ * the production-facing origin(s) of the gateway or SPA.
+ */
+export function parseCorsOrigins(
+  value: string | undefined,
+): string[] {
+  const DEFAULT_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+  ];
+  if (!value || value.trim() === "") return DEFAULT_ORIGINS;
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Normalize BASE_PATH to a safe mount prefix.
+ *
+ * - Empty or undefined → "" (no prefix)
+ * - Non-empty → ensure leading "/", strip trailing "/"
+ */
+export function normalizeBasePath(value: string | undefined): string {
+  if (!value) return "";
+  const trimmed = value.trim();
+  if (trimmed === "") return "";
+  // Ensure leading slash
+  let path = trimmed.startsWith("/") ? trimmed : "/" + trimmed;
+  // Strip trailing slash (preserve "/" as-is)
+  if (path.length > 1 && path.endsWith("/")) {
+    path = path.slice(0, -1);
+  }
+  return path;
 }
 
 export const settings: Settings = {
@@ -71,6 +117,10 @@ export const settings: Settings = {
     process.env["AUTO_SEED_DEFAULT_INDICATOR"],
     true,
   ),
+
+  cors_origins: parseCorsOrigins(process.env["CORS_ORIGINS"]),
+
+  base_path: normalizeBasePath(process.env["BASE_PATH"]),
 };
 
 /** PostgreSQL connection URL for Sequelize */

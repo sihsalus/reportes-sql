@@ -1,7 +1,20 @@
+# ── Development stack ────────────────────────────────────────────────────
+# Usage: docker compose up -d
+#
+# This compose file is for local development only. It:
+#   - builds from the `dev` Dockerfile stage (includes tsx watch + dev deps)
+#   - bind-mounts ./src for hot reload
+#   - starts a PostgreSQL container for indicator storage
+#   - expects OpenMRS to be reachable (defaults to host.docker.internal)
+#
+# For production deployment, use the Dockerfile directly (default stage)
+# and provide environment variables for your production databases.
+
 services:
   indicators-back:
     build:
       context: .
+      target: dev
     container_name: indicators-back
     restart: unless-stopped
     depends_on:
@@ -9,6 +22,7 @@ services:
         condition: service_healthy
     environment:
       PORT: 8000
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080
       INDICADORES_DB_HOST: indicators-postgres
       INDICADORES_DB_PORT: 5432
       INDICADORES_DB_NAME: ${INDICATORS_DB_NAME:-indicators}
@@ -28,8 +42,6 @@ services:
       - "8000:8000"
     volumes:
       - ./src:/app/src:ro
-    command: >
-      sh -c "pnpm exec tsx watch src/main.ts"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
       interval: 30s

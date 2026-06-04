@@ -4,6 +4,7 @@
  * - Creates the Express app with CORS and error middleware.
  * - Includes all three routers: indicadores, resultados, conceptos.
  * - Exposes a /health endpoint for monitoring.
+ * - Supports BASE_PATH env var for gateway-friendly path prefixing.
  * - Lifecycle: Sequelize sync on startup, pool disposal on SIGTERM.
  */
 
@@ -12,6 +13,7 @@ import express, {
   type Request,
   type Response,
   type NextFunction,
+  Router,
 } from "express";
 import cors from "cors";
 import swaggerUi from "swagger-ui-express";
@@ -21,75 +23,95 @@ import { disposeMysql } from "./database/mysql.js";
 import { indicadoresRouter } from "./routers/indicadores.js";
 import { resultadosRouter } from "./routers/resultados.js";
 import { conceptosRouter } from "./routers/conceptos.js";
-import { openapiSpec } from "./docs/openapi.js";
+import { buildOpenapiSpec } from "./docs/openapi.js";
 import { seedDefaultIndicador } from "./seed/default-indicador.js";
 
-const app: Express = express();
+/**
+ * Create and configure the Express application.
+ *
+ * Routes are composed into a public sub-router and mounted at `basePath`
+ * (or "/" when empty). When a non-empty `basePath` is provided, an
+ * additional root-level `/health` endpoint is registered for gateway probes.
+ */
+export function createApp(basePath: string): Express {
+  const app: Express = express();
 
-// ── Middleware ──────────────────────────────────────────────────────────
+  // ── Middleware ────────────────────────────────────────────────────────
 
-app.use(
-  cors({
-    origin: [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-      "http://localhost:8080",
-      "http://127.0.0.1:8080",
-    ],
-    credentials: true,
-    methods: ["*"],
-    allowedHeaders: ["*"],
-  }),
-);
+  app.use(
+    cors({
+      origin: settings.cors_origins,
+      credentials: true,
+      methods: ["*"],
+      allowedHeaders: ["*"],
+    }),
+  );
 
-app.use(express.json());
+  app.use(express.json());
 
-// ── Routers ─────────────────────────────────────────────────────────────
+  // ── Compose public router ─────────────────────────────────────────────
 
-app.use("/indicadores", indicadoresRouter);
-app.use("/resultados", resultadosRouter);
-app.use("/conceptos", conceptosRouter);
+  const spec = buildOpenapiSpec(basePath || undefined);
 
-// ── API Documentation ───────────────────────────────────────────────────
+  const publicRouter = Router();
+  publicRouter.use("/indicadores", indicadoresRouter);
+  publicRouter.use("/resultados", resultadosRouter);
+  publicRouter.use("/conceptos", conceptosRouter);
+  // Explicit GET route MUST precede swaggerUi.serve middleware, which
+  // otherwise intercepts all /docs/* requests including /docs/openapi.json.
+  publicRouter.get("/docs/openapi.json", (_req: Request, res: Response) => {
+    res.json(spec);
+  });
+  publicRouter.use("/docs", swaggerUi.serve, swaggerUi.setup(spec));
+  publicRouter.get("/health", (_req: Request, res: Response) => {
+    res.json({ status: "ok" });
+  });
 
-app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));
+  // ── Mount public router ───────────────────────────────────────────────
 
-app.get("/docs/openapi.json", (_req: Request, res: Response) => {
-  res.json(openapiSpec);
-});
+  const mountPath = basePath || "/";
+  app.use(mountPath, publicRouter);
 
-// ── Health ──────────────────────────────────────────────────────────────
-
-app.get("/health", (_req: Request, res: Response) => {
-  res.json({ status: "ok" });
-});
-
-// ── Error middleware ────────────────────────────────────────────────────
-
-// Zod validation error handler — catches ZodError from routes
-app.use(
-  (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    if (err && typeof err === "object" && "name" in err && (err as Record<string, unknown>).name === "ZodError") {
-      const zodErr = err as unknown as { issues: Array<{ path: (string | number)[]; message: string }> };
-      const first = zodErr.issues[0];
-      const field =
-        first && first.path.length > 0
-          ? String(first.path[first.path.length - 1])
-          : "unknown";
-      const message = first?.message ?? "Validation error";
-      res.status(422).json({
-        detail: { field, message },
-      });
-      return;
-    }
-
-    // Generic 500
-    console.error("Unhandled error:", err);
-    res.status(500).json({
-      detail: "Error interno del servidor",
+  // Root-level health always available when prefix is set (gateway probes)
+  if (basePath) {
+    app.get("/health", (_req: Request, res: Response) => {
+      res.json({ status: "ok" });
     });
-  },
-);
+  }
+
+  // ── Error middleware ──────────────────────────────────────────────────
+
+  // Zod validation error handler — catches ZodError from routes
+  app.use(
+    (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+      if (err && typeof err === "object" && "name" in err && (err as Record<string, unknown>).name === "ZodError") {
+        const zodErr = err as unknown as { issues: Array<{ path: (string | number)[]; message: string }> };
+        const first = zodErr.issues[0];
+        const field =
+          first && first.path.length > 0
+            ? String(first.path[first.path.length - 1])
+            : "unknown";
+        const message = first?.message ?? "Validation error";
+        res.status(422).json({
+          detail: { field, message },
+        });
+        return;
+      }
+
+      // Generic 500
+      console.error("Unhandled error:", err);
+      res.status(500).json({
+        detail: "Error interno del servidor",
+      });
+    },
+  );
+
+  return app;
+}
+
+// ── Default app instance (production / local dev) ──────────────────────
+
+const app = createApp(settings.base_path);
 
 // ── Lifecycle ───────────────────────────────────────────────────────────
 

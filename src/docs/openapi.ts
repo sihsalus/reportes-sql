@@ -739,3 +739,19 @@ export const openapiSpec = {
     },
   },
 } as const;
+
+/**
+ * Build the OpenAPI spec with the correct server URL for the given base path.
+ *
+ * When BASE_PATH is set (e.g. "/openmrs/services/reportes-sql"), the server
+ * URL includes it so Swagger UI "Try it out" targets the correct prefixed route.
+ */
+export function buildOpenapiSpec(basePath?: string) {
+  const serverUrl = basePath
+    ? `http://localhost:8000${basePath}`
+    : "http://localhost:8000";
+  return {
+    ...openapiSpec,
+    servers: [{ url: serverUrl, description: "Desarrollo local" }],
+  };
+}
