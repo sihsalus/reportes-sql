@@ -49,6 +49,6 @@ USER app
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8000/health || exit 1
+  CMD ["node", "-e", "const http=require('node:http');const req=http.get('http://127.0.0.1:8000/health',res=>{res.resume();process.exit(res.statusCode===200?0:1)});req.on('error',()=>process.exit(1));req.setTimeout(4000,()=>{req.destroy();process.exit(1)});"]
 
 CMD ["node", "dist/main.js"]
