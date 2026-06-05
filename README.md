@@ -79,6 +79,25 @@ BASE_PATH=/openmrs/services/reportes-sql pnpm dev
 # Health probe at http://localhost:8000/health
 ```
 
+### Local frontend override for `esm-indicadores-app`
+
+If you want to run only the indicadores microfrontend against a standalone local
+`reportes-sql` instance, use a local override in the frontend repo instead of
+committing shared repo config:
+
+```json
+{
+  "@sihsalus/esm-indicadores-app": {
+    "reportesSqlApiPath": "http://127.0.0.1:8000"
+  }
+}
+```
+
+Notes:
+- Put that override in your local `config/frontend.json` inside the frontend repo.
+- Do not use the deprecated `indicatorsApiPath` key for this app.
+- Do not commit that override unless the whole team explicitly wants the shared local default.
+
 ### Production (compiled)
 
 ```bash
