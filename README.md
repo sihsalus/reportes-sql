@@ -152,6 +152,25 @@ The production image:
 
 *All business endpoints are prefixed when `BASE_PATH` is set.*
 
+## Age filters
+
+La edad se calcula **desde la fecha de nacimiento hasta la fecha del encuentro**,
+no desde el inicio del período de reporte.
+
+| Filtro | Cota | Operador |
+|--------|------|----------|
+| `min_dias` / `min_meses` / `min_anios` | Mínima | `>=` (inclusivo) |
+| `max_dias` | Máxima | `<=` (inclusivo) |
+| `max_meses_excl` | Máxima | `<` (exclusivo) |
+| `max_anios_excl` | Máxima | `<` (exclusivo) |
+
+**Ejemplo del mismo día**: con `max_anios_excl: 5` y fecha de nacimiento
+`2020-06-15`, un encuentro el `2025-06-15` queda **excluido**
+(el paciente cumple 5 años ese día). Para incluirlo se debe usar `max_dias`
+o una cota mayor con `max_anios_excl`.
+
+Solo se permite una cota mínima y una cota máxima a la vez.
+
 ## Project structure
 
 ```

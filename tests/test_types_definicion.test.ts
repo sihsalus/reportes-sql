@@ -17,19 +17,27 @@ import {
 import { ZodError } from "zod";
 
 describe("DefinicionIndicador", () => {
-  test("minimal valid — tipo + periodo", () => {
+  test("minimal valid — tipo only (periodo is now optional)", () => {
+    const d = DefinicionIndicadorSchema.parse({
+      tipo: "conteo_atenciones",
+    });
+    expect(d.tipo).toBe("conteo_atenciones");
+    expect(d.periodo).toBeUndefined();
+    expect(d.evento).toBeUndefined();
+  });
+
+  test("periodo still accepted for backward compat (optional)", () => {
     const d = DefinicionIndicadorSchema.parse({
       tipo: "conteo_atenciones",
       periodo: "mes_actual",
     });
     expect(d.tipo).toBe("conteo_atenciones");
-    expect(d.evento).toBeUndefined();
+    expect(d.periodo).toBe("mes_actual");
   });
 
-  test("full with diagnosticos", () => {
+  test("full with diagnosticos (no periodo required)", () => {
     const d = DefinicionIndicadorSchema.parse({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { max_dias: 1825 },
       evento: {
         location_uuids: ["uuid-consulta-externa"],
@@ -47,10 +55,9 @@ describe("DefinicionIndicador", () => {
     expect(d.evento!.diagnosticos![0].tipo_diagnostico).toBe("definitivo");
   });
 
-  test("full with ordenes", () => {
+  test("full with ordenes (no periodo required)", () => {
     const d = DefinicionIndicadorSchema.parse({
       tipo: "conteo_pacientes",
-      periodo: "mes_actual",
       evento: {
         location_uuids: ["uuid-consulta-externa"],
         ordenes: [
@@ -69,7 +76,6 @@ describe("DefinicionIndicador", () => {
     expect(() =>
       DefinicionIndicadorSchema.parse({
         tipo: "invalido",
-        periodo: "mes_actual",
       }),
     ).toThrow(ZodError);
   });
@@ -131,7 +137,6 @@ describe("MutualExclusivity", () => {
     expect(() =>
       DefinicionIndicadorSchema.parse({
         tipo: "conteo_atenciones",
-        periodo: "mes_actual",
         evento: {
           location_uuids: ["uuid-x"],
           diagnosticos: [{ concepto_uuids: ["uuid-d"] }],
@@ -146,7 +151,6 @@ describe("BackwardCompatNormalizer", () => {
   test("old flat diagnostico normalizes", () => {
     const old = {
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: { location_uuids: ["uuid-x"] },
       diagnostico: {
         codigos_cie10: ["J00.X", "J04.0"],
@@ -164,7 +168,6 @@ describe("BackwardCompatNormalizer", () => {
   test("old flat observaciones normalizes to ordenes", () => {
     const old = {
       tipo: "conteo_pacientes",
-      periodo: "mes_actual",
       evento: { location_uuids: ["uuid-x"] },
       observaciones: [
         { concepto_uuid: "uuid-a" },
@@ -182,7 +185,6 @@ describe("BackwardCompatNormalizer", () => {
   test("old flat both diagnostico and observaciones are mutually exclusive", () => {
     const old = {
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: { location_uuids: ["uuid-x"] },
       diagnostico: { tipo_diagnostico: "definitivo" },
       observaciones: [{ concepto_uuid: "uuid-a" }],
@@ -195,7 +197,6 @@ describe("BackwardCompatNormalizer", () => {
   test("new nested passes through unchanged", () => {
     const newData = {
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: ["uuid-x"],
         diagnosticos: [
@@ -215,7 +216,6 @@ describe("BackwardCompatNormalizer", () => {
   test("idempotent double parse", () => {
     const old = {
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: { location_uuids: ["uuid-x"] },
       observaciones: [{ concepto_uuid: "uuid-a" }],
     };
@@ -229,7 +229,6 @@ describe("BackwardCompatNormalizer", () => {
   test("old eventos array picks first", () => {
     const old = {
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       eventos: [
         { location_uuids: ["uuid-first"] },
         { location_uuids: ["uuid-second"] },
@@ -243,7 +242,6 @@ describe("BackwardCompatNormalizer", () => {
   test("old diagnostico no tipo skips", () => {
     const old = {
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: { location_uuids: ["uuid-x"] },
       diagnostico: { codigos_cie10: ["J00.X"] },
     };
@@ -466,7 +464,6 @@ describe("FiltrosPoblacionCanonical", () => {
     expect(() =>
       DefinicionIndicadorSchema.parse({
         tipo: "conteo_atenciones",
-        periodo: "mes_actual",
         poblacion: { min_dias: 10, min_meses: 1 },
       }),
     ).toThrow(/mutually exclusive/);
@@ -534,7 +531,6 @@ describe("FiltrosPoblacionLegacy", () => {
   test("legacy normalized through definicion", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { edad_max_dias: 1825 },
       evento: { location_uuids: ["uuid-x"] },
     });
@@ -600,10 +596,69 @@ describe("FiltrosEventoLocation", () => {
   test("location_uuids in definicion", () => {
     const d = DefinicionIndicadorSchema.parse({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: { location_uuids: ["uuid-consulta-externa"] },
     });
     expect(d.evento).toBeDefined();
     expect(d.evento!.location_uuids).toEqual(["uuid-consulta-externa"]);
+  });
+});
+
+// ── Periodo removal tests ──────────────────────────────────────────────
+
+import {
+  rejectPeriodoInPayload,
+  stripPeriodoFromDefinicion,
+} from "../src/types/definicion";
+
+describe("PeriodoRemoval", () => {
+  test("stripPeriodoFromDefinicion removes periodo from stored JSONB", () => {
+    const stored = {
+      tipo: "conteo_atenciones",
+      periodo: "trimestre_actual",
+      evento: { location_uuids: ["uuid-x"] },
+    };
+    const stripped = stripPeriodoFromDefinicion(stored) as Record<string, unknown>;
+    expect("periodo" in stripped).toBe(false);
+    expect(stripped["tipo"]).toBe("conteo_atenciones");
+    expect(stripped["evento"]).toBeDefined();
+  });
+
+  test("stripPeriodoFromDefinicion is no-op when periodo is absent", () => {
+    const stored = {
+      tipo: "conteo_atenciones",
+      evento: { location_uuids: ["uuid-x"] },
+    };
+    const stripped = stripPeriodoFromDefinicion(stored) as Record<string, unknown>;
+    expect(stripped["tipo"]).toBe("conteo_atenciones");
+    expect(stripped["evento"]).toBeDefined();
+  });
+
+  test("parseDefinicionIndicador strips legacy periodo on read", () => {
+    const stored = {
+      tipo: "conteo_atenciones",
+      periodo: "anual_actual",
+      evento: { location_uuids: ["uuid-x"] },
+    };
+    const d = parseDefinicionIndicador(stored);
+    expect(d.periodo).toBeUndefined();
+    expect(d.tipo).toBe("conteo_atenciones");
+    expect(d.evento?.location_uuids).toEqual(["uuid-x"]);
+  });
+
+  test("rejectPeriodoInPayload throws for inbound periodo", () => {
+    expect(() =>
+      rejectPeriodoInPayload({
+        tipo: "conteo_atenciones",
+        periodo: "mes_actual",
+      }),
+    ).toThrow(/periodo.*ya no se acepta/);
+  });
+
+  test("rejectPeriodoInPayload passes when periodo absent", () => {
+    expect(() =>
+      rejectPeriodoInPayload({
+        tipo: "conteo_atenciones",
+      }),
+    ).not.toThrow();
   });
 });

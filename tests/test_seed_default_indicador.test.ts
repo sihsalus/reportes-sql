@@ -45,7 +45,7 @@ describe("seedDefaultIndicador", () => {
       expect.objectContaining({
         indicador_id: "indicador-1",
         version: 1,
-        definicion: DEFAULT_DEFINICION,
+        definicion: expect.objectContaining({ tipo: "conteo_atenciones" }),
       }),
     );
     expect(result).toEqual({

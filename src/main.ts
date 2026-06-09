@@ -20,6 +20,7 @@ import swaggerUi from "swagger-ui-express";
 import { settings } from "./config/index.js";
 import { sequelize } from "./database/postgres.js";
 import { disposeMysql } from "./database/mysql.js";
+import { backfillResultadoCanonical, createRollupViews } from "./database/views.js";
 import { indicadoresRouter } from "./routers/indicadores.js";
 import { resultadosRouter } from "./routers/resultados.js";
 import { conceptosRouter } from "./routers/conceptos.js";
@@ -119,6 +120,12 @@ async function start(): Promise<void> {
   // Sync Sequelize models with PostgreSQL (safe — does not drop data)
   await sequelize.sync();
   console.log("PostgreSQL models synced.");
+
+  // Backfill canonical fields for existing rows
+  await backfillResultadoCanonical();
+
+  // Create/refresh rollup views for SQL consumers
+  await createRollupViews();
 
   if (settings.auto_seed_default_indicator) {
     const seeded = await seedDefaultIndicador();

@@ -398,7 +398,7 @@ describe("AgeFilterSQL", () => {
     const { sql, params } = buildQuery(d, INICIO, FIN);
     expect(sql).toContain("DATEDIFF");
     expect(sql).toContain("p.birthdate");
-    expect(sql).toContain("DATEDIFF(:inicio, p.birthdate) >= :min_dias");
+    expect(sql).toContain("DATEDIFF(e.encounter_datetime, p.birthdate) >= :min_dias");
     expect(params["min_dias"]).toBe(1);
   });
 
@@ -410,7 +410,7 @@ describe("AgeFilterSQL", () => {
     });
     const { sql } = buildQuery(d, INICIO, FIN);
     expect(sql).toContain(
-      "DATEDIFF(:inicio, p.birthdate) >= :min_dias",
+      "DATEDIFF(e.encounter_datetime, p.birthdate) >= :min_dias",
     );
   });
 
@@ -422,7 +422,7 @@ describe("AgeFilterSQL", () => {
     });
     const { sql, params } = buildQuery(d, INICIO, FIN);
     expect(sql).toContain(
-      "DATEDIFF(:inicio, p.birthdate) <= :max_dias",
+      "DATEDIFF(e.encounter_datetime, p.birthdate) <= :max_dias",
     );
     expect(params["max_dias"]).toBe(365);
   });
@@ -448,7 +448,7 @@ describe("AgeFilterSQL", () => {
     });
     const { sql } = buildQuery(d, INICIO, FIN);
     expect(sql).toContain(
-      "DATE_ADD(p.birthdate, INTERVAL :min_meses MONTH) <= :inicio",
+      "DATE_ADD(p.birthdate, INTERVAL :min_meses MONTH) <= e.encounter_datetime",
     );
   });
 
@@ -465,6 +465,18 @@ describe("AgeFilterSQL", () => {
     expect(params["min_anios"]).toBe(18);
   });
 
+  test("min_anios uses encounter datetime so same-day 18th birthday qualifies", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      periodo: "mes_actual",
+      poblacion: { min_anios: 18 },
+    });
+    const { sql } = buildQuery(d, INICIO, FIN);
+    expect(sql).toContain(
+      "DATE_ADD(p.birthdate, INTERVAL :min_anios YEAR) <= e.encounter_datetime",
+    );
+  });
+
   test("max_meses_excl uses DATE_ADD gt", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
@@ -475,7 +487,7 @@ describe("AgeFilterSQL", () => {
     expect(sql).toContain(
       "DATE_ADD(p.birthdate, INTERVAL :max_meses_excl MONTH)",
     );
-    expect(sql).toContain("> :inicio");
+    expect(sql).toContain("> e.encounter_datetime");
     expect(params["max_meses_excl"]).toBe(6);
   });
 
@@ -487,7 +499,7 @@ describe("AgeFilterSQL", () => {
     });
     const { sql } = buildQuery(d, INICIO, FIN);
     expect(sql).toContain(
-      "DATE_ADD(p.birthdate, INTERVAL :max_meses_excl MONTH) > :inicio",
+      "DATE_ADD(p.birthdate, INTERVAL :max_meses_excl MONTH) > e.encounter_datetime",
     );
   });
 
@@ -501,7 +513,7 @@ describe("AgeFilterSQL", () => {
     expect(sql).toContain(
       "DATE_ADD(p.birthdate, INTERVAL :max_anios_excl YEAR)",
     );
-    expect(sql).toContain("> :inicio");
+    expect(sql).toContain("> e.encounter_datetime");
     expect(params["max_anios_excl"]).toBe(5);
   });
 
@@ -513,7 +525,19 @@ describe("AgeFilterSQL", () => {
     });
     const { sql } = buildQuery(d, INICIO, FIN);
     expect(sql).toContain(
-      "DATE_ADD(p.birthdate, INTERVAL :max_anios_excl YEAR) > :inicio",
+      "DATE_ADD(p.birthdate, INTERVAL :max_anios_excl YEAR) > e.encounter_datetime",
+    );
+  });
+
+  test("max_anios_excl uses encounter datetime so same-day 65th birthday is excluded", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      periodo: "mes_actual",
+      poblacion: { max_anios_excl: 65 },
+    });
+    const { sql } = buildQuery(d, INICIO, FIN);
+    expect(sql).toContain(
+      "DATE_ADD(p.birthdate, INTERVAL :max_anios_excl YEAR) > e.encounter_datetime",
     );
   });
 
@@ -528,6 +552,25 @@ describe("AgeFilterSQL", () => {
     expect(sql).toContain("DATE_ADD");
     expect(params["min_dias"]).toBe(30);
     expect(params["max_anios_excl"]).toBe(5);
+  });
+
+  test("minimo_ocurrencias path keeps age relative to each encounter", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      periodo: "mes_actual",
+      poblacion: { min_dias: 30, max_anios_excl: 5 },
+      evento: {
+        location_uuids: [UUID_LOC],
+        minimo_ocurrencias: 2,
+      },
+    });
+    const { sql } = buildQuery(d, INICIO, FIN);
+    expect(sql).toContain(
+      "DATEDIFF(e.encounter_datetime, p.birthdate) >= :min_dias",
+    );
+    expect(sql).toContain(
+      "DATE_ADD(p.birthdate, INTERVAL :max_anios_excl YEAR) > e.encounter_datetime",
+    );
   });
 
   test("no age filter no person join for age", () => {
@@ -560,7 +603,7 @@ describe("AgeFilterSQL", () => {
     });
     const { sql, params } = buildQuery(d, INICIO, FIN);
     expect(sql).toContain(
-      "DATEDIFF(:inicio, p.birthdate) >= :min_dias",
+      "DATEDIFF(e.encounter_datetime, p.birthdate) >= :min_dias",
     );
     expect(params["min_dias"]).toBe(1);
   });
@@ -573,7 +616,7 @@ describe("AgeFilterSQL", () => {
     });
     const { sql, params } = buildQuery(d, INICIO, FIN);
     expect(sql).toContain(
-      "DATE_ADD(p.birthdate, INTERVAL :max_anios_excl YEAR) > :inicio",
+      "DATE_ADD(p.birthdate, INTERVAL :max_anios_excl YEAR) > e.encounter_datetime",
     );
     expect(params["max_anios_excl"]).toBe(5);
   });

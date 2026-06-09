@@ -402,28 +402,28 @@ function buildAgeFilter(
   // ── Minimum bounds ──
   if (poblacion.min_dias != null) {
     params["min_dias"] = poblacion.min_dias;
-    clauses.push("DATEDIFF(:inicio, p.birthdate) >= :min_dias");
+    clauses.push("DATEDIFF(e.encounter_datetime, p.birthdate) >= :min_dias");
   } else if (poblacion.min_meses != null) {
     params["min_meses"] = poblacion.min_meses;
-    clauses.push("DATE_ADD(p.birthdate, INTERVAL :min_meses MONTH) <= :inicio");
+    clauses.push("DATE_ADD(p.birthdate, INTERVAL :min_meses MONTH) <= e.encounter_datetime");
   } else if (poblacion.min_anios != null) {
     params["min_anios"] = poblacion.min_anios;
-    clauses.push("DATE_ADD(p.birthdate, INTERVAL :min_anios YEAR) <= :inicio");
+    clauses.push("DATE_ADD(p.birthdate, INTERVAL :min_anios YEAR) <= e.encounter_datetime");
   }
 
   // ── Maximum bounds ──
   if (poblacion.max_dias != null) {
     params["max_dias"] = poblacion.max_dias;
-    clauses.push("DATEDIFF(:inicio, p.birthdate) <= :max_dias");
+    clauses.push("DATEDIFF(e.encounter_datetime, p.birthdate) <= :max_dias");
   } else if (poblacion.max_meses_excl != null) {
     params["max_meses_excl"] = poblacion.max_meses_excl;
     clauses.push(
-      "DATE_ADD(p.birthdate, INTERVAL :max_meses_excl MONTH) > :inicio",
+      "DATE_ADD(p.birthdate, INTERVAL :max_meses_excl MONTH) > e.encounter_datetime",
     );
   } else if (poblacion.max_anios_excl != null) {
     params["max_anios_excl"] = poblacion.max_anios_excl;
     clauses.push(
-      "DATE_ADD(p.birthdate, INTERVAL :max_anios_excl YEAR) > :inicio",
+      "DATE_ADD(p.birthdate, INTERVAL :max_anios_excl YEAR) > e.encounter_datetime",
     );
   }
 

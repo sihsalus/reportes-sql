@@ -19,11 +19,13 @@ import {
 } from "../models/indicador.js";
 import {
   parseDefinicionIndicador,
+  rejectPeriodoInPayload,
+  stripPeriodoFromDefinicion,
   DefinicionIndicadorSchema,
   type DefinicionIndicador,
 } from "../types/definicion.js";
 import { buildQuery } from "../engine/interpreter.js";
-import { calcularPeriodo } from "../engine/periodo.js";
+import { calcularMesActual } from "../engine/periodo.js";
 import {
   validarDefinicionLocationUuids,
   resolveConceptMap,
@@ -74,6 +76,19 @@ indicadoresRouter.post(
         },
       });
       return;
+    }
+
+    // Reject inbound periodo (breaking contract change)
+    if (body.definicion) {
+      try {
+        rejectPeriodoInPayload(body.definicion);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Validation error";
+        res.status(422).json({
+          detail: { field: "definicion.periodo", message },
+        });
+        return;
+      }
     }
 
     // Parse and validate definicion
@@ -175,9 +190,16 @@ indicadoresRouter.get(
       order: [["version", "DESC"]],
     });
 
+    // Strip legacy periodo from version definitions on read
+    const safeVersiones = versiones.map((v) => {
+      const json = v.toJSON() as { definicion: unknown; [key: string]: unknown };
+      json.definicion = stripPeriodoFromDefinicion(json.definicion);
+      return json;
+    });
+
     res.json({
       ...indicador.toJSON(),
-      versiones,
+      versiones: safeVersiones,
     });
   }),
 );
@@ -212,6 +234,17 @@ indicadoresRouter.put(
 
     // ── Auto-versioning when definicion is present ──
     if (body.definicion != null) {
+      // Reject inbound periodo
+      try {
+        rejectPeriodoInPayload(body.definicion);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Validation error";
+        res.status(422).json({
+          detail: { field: "definicion.periodo", message },
+        });
+        return;
+      }
+
       let newDefinicion: DefinicionIndicador;
       try {
         newDefinicion = parseDefinicionIndicador(body.definicion);
@@ -335,6 +368,17 @@ indicadoresRouter.post(
       return;
     }
 
+    // Reject inbound periodo
+    try {
+      rejectPeriodoInPayload(body.definicion);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Validation error";
+      res.status(422).json({
+        detail: { field: "definicion.periodo", message },
+      });
+      return;
+    }
+
     let definicion: DefinicionIndicador;
     try {
       definicion = parseDefinicionIndicador(body.definicion);
@@ -443,9 +487,9 @@ indicadoresRouter.get(
       }
     }
 
-    // Parse definicion and compute period
+    // Parse definicion and compute current month period
     const definicion = parseDefinicionIndicador(version.definicion);
-    const [periodoInicio, periodoFin] = calcularPeriodo(definicion.periodo);
+    const { inicio: periodoInicio, fin: periodoFin } = calcularMesActual();
 
     // Resolve concept_map for ordenes from OpenMRS MySQL
     let conceptMap: Record<string, number> | null = null;

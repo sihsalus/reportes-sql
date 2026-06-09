@@ -29,12 +29,54 @@ export type PeriodoIndicador = z.infer<typeof PeriodoIndicador>;
 
 export const FiltrosPoblacionSchema = z
   .object({
-    min_dias: z.number().int().min(0).optional(),
-    min_meses: z.number().int().min(0).optional(),
-    min_anios: z.number().int().min(0).optional(),
-    max_dias: z.number().int().min(0).optional(),
-    max_meses_excl: z.number().int().min(0).optional(),
-    max_anios_excl: z.number().int().min(0).optional(),
+    min_dias: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        "Edad mínima en días (inclusivo). Evaluada contra la fecha del encuentro, no el inicio del período.",
+      ),
+    min_meses: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        "Edad mínima en meses (inclusivo). Evaluada contra la fecha del encuentro.",
+      ),
+    min_anios: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        "Edad mínima en años (inclusivo). Evaluada contra la fecha del encuentro.",
+      ),
+    max_dias: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        "Edad máxima en días (inclusivo). Evaluada contra la fecha del encuentro, no el inicio del período.",
+      ),
+    max_meses_excl: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        "Edad máxima en meses (exclusivo). El encuentro debe ser anterior al cumpleaños exacto. Evaluada contra la fecha del encuentro.",
+      ),
+    max_anios_excl: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        "Edad máxima en años (exclusivo). El encuentro debe ser anterior al cumpleaños exacto. Evaluada contra la fecha del encuentro.",
+      ),
     sexo: z.enum(["M", "F"]).optional(),
   })
   .superRefine((data, ctx) => {
@@ -107,7 +149,7 @@ export type FiltrosEvento = z.infer<typeof FiltrosEventoSchema>;
 export const DefinicionIndicadorSchema = z
   .object({
     tipo: TipoIndicador,
-    periodo: PeriodoIndicador,
+    periodo: PeriodoIndicador.optional(),
     poblacion: FiltrosPoblacionSchema.optional(),
     evento: FiltrosEventoSchema.optional(),
   });
@@ -199,13 +241,32 @@ export function normalizeEventoLegacy(data: unknown): unknown {
 }
 
 /**
+ * Remove `periodo` from a stored definition for backward compatibility.
+ * Legacy definitions may have a `periodo` field that is no longer meaningful;
+ * this function strips it so downstream parsers see a clean shape.
+ */
+export function stripPeriodoFromDefinicion(data: unknown): unknown {
+  if (typeof data !== "object" || data === null) return data;
+  const d = data as Record<string, unknown>;
+  if ("periodo" in d) {
+    const { periodo: _, ...rest } = d;
+    return rest;
+  }
+  return data;
+}
+
+/**
  * Preprocess hook for DefinicionIndicador: normalize flat JSONB shapes
  * (old diagnostico, observaciones, eventos[]) into nested evento structure.
+ * Also strips legacy `periodo` from stored JSONB for backward compatibility.
  */
 export function normalizeDefinicionFlat(data: unknown): unknown {
   if (typeof data !== "object" || data === null) return data;
 
-  const d = { ...(data as Record<string, unknown>) };
+  let d = { ...(data as Record<string, unknown>) };
+
+  // ── Strip legacy periodo (stored JSONB backward compat) ──
+  d = stripPeriodoFromDefinicion(d) as Record<string, unknown>;
 
   // ── Normalize nested poblacion first (legacy edad_* keys) ──
   if ("poblacion" in d && typeof d["poblacion"] === "object" && d["poblacion"] !== null) {
@@ -290,13 +351,29 @@ export function normalizeDefinicionFlat(data: unknown): unknown {
 
 /**
  * Parse and validate a DefinicionIndicador with full legacy normalization.
- * Use this for API request bodies and stored JSONB reads.
+ *
+ * Use this for stored JSONB reads (which may contain legacy `periodo`).
+ * For API request bodies, call `rejectPeriodoInPayload` first to reject
+ * inbound payloads that still include `periodo`.
  */
 export function parseDefinicionIndicador(
   data: unknown,
 ): DefinicionIndicador {
   const step1 = normalizeDefinicionFlat(data);
   return DefinicionIndicadorSchema.parse(step1);
+}
+
+/**
+ * Check whether a raw definition payload contains a `periodo` field and
+ * throw a validation error if it does. Call this BEFORE parseDefinicionIndicador
+ * on inbound API payloads to reject the old contract.
+ */
+export function rejectPeriodoInPayload(data: unknown): void {
+  if (typeof data === "object" && data !== null && "periodo" in (data as Record<string, unknown>)) {
+    throw new Error(
+      "El campo 'periodo' ya no se acepta. Las mediciones son siempre mensuales.",
+    );
+  }
 }
 
 /**

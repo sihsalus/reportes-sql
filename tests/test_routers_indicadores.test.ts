@@ -98,7 +98,6 @@ function makeVersionRow(overrides: Record<string, unknown> = {}) {
     version: 1,
     definicion: {
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: { location_uuids: ["uuid-loc"] },
     },
     creado_en: new Date("2026-01-01"),
@@ -129,7 +128,6 @@ describe("Indicadores Router", () => {
           nombre: "Test",
           definicion: {
             tipo: "conteo_atenciones",
-            periodo: "mes_actual",
           },
         });
 
@@ -142,7 +140,7 @@ describe("Indicadores Router", () => {
       const app = createTestApp();
       const res = await supertest(app)
         .post("/indicadores")
-        .send({ definicion: { tipo: "conteo_atenciones", periodo: "mes_actual" } });
+        .send({ definicion: { tipo: "conteo_atenciones" } });
 
       expect(res.status).toBe(422);
     });
@@ -162,10 +160,26 @@ describe("Indicadores Router", () => {
         .post("/indicadores")
         .send({
           nombre: "Test",
-          definicion: { tipo: "invalido", periodo: "mes_actual" },
+          definicion: { tipo: "invalido" },
         });
 
       expect(res.status).toBe(422);
+    });
+
+    test("rejects definicion with periodo field (breaking contract)", async () => {
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/indicadores")
+        .send({
+          nombre: "Test",
+          definicion: {
+            tipo: "conteo_atenciones",
+            periodo: "mes_actual",
+          },
+        });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toContain("periodo");
     });
   });
 
@@ -235,7 +249,6 @@ describe("Indicadores Router", () => {
           nombre: "Updated",
           definicion: {
             tipo: "conteo_pacientes",
-            periodo: "trimestre_actual",
           },
         });
 
@@ -249,7 +262,6 @@ describe("Indicadores Router", () => {
         makeVersionRow({
           definicion: {
             tipo: "conteo_atenciones",
-            periodo: "mes_actual",
           },
         }),
       );
@@ -261,7 +273,6 @@ describe("Indicadores Router", () => {
           nombre: "Updated",
           definicion: {
             tipo: "conteo_atenciones",
-            periodo: "mes_actual",
           },
         });
 
@@ -315,7 +326,6 @@ describe("Indicadores Router", () => {
         .send({
           definicion: {
             tipo: "conteo_pacientes",
-            periodo: "anual_actual",
           },
         });
 
@@ -332,11 +342,27 @@ describe("Indicadores Router", () => {
         .send({
           definicion: {
             tipo: "conteo_atenciones",
-            periodo: "mes_actual",
           },
         });
 
       expect(res.status).toBe(404);
+    });
+
+    test("rejects versione with periodo field", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post(`/indicadores/${UUID}/versiones`)
+        .send({
+          definicion: {
+            tipo: "conteo_atenciones",
+            periodo: "anual_actual",
+          },
+        });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toContain("periodo");
     });
   });
 

@@ -3,6 +3,10 @@
  *
  * Extracted so the SQL preview endpoint can reuse the same period
  * calculation logic without circular imports.
+ *
+ * DEPRECATED: `calcularPeriodo` is kept for backward compat with preview-sql
+ * and legacy tests. New code should use `calcularMesActual` and pass
+ * `mes_referencia` explicitly.
  */
 
 import type { PeriodoIndicador } from "../types/definicion.js";
@@ -12,6 +16,8 @@ import type { PeriodoIndicador } from "../types/definicion.js";
  *
  * Uses JavaScript Date for month/year boundaries and day arithmetic.
  *
+ * @deprecated Use `calcularMesActual` instead. This function exists for
+ * backward compatibility and will be removed once all callers are migrated.
  * @throws Error for unknown periodo literals.
  */
 export function calcularPeriodo(periodo: PeriodoIndicador): [Date, Date] {
@@ -45,6 +51,35 @@ export function calcularPeriodo(periodo: PeriodoIndicador): [Date, Date] {
     default:
       throw new Error(`Periodo desconocido: ${periodo}`);
   }
+}
+
+/**
+ * Calculate the current calendar month's boundaries in UTC.
+ *
+ * Returns [inicio, fin] where:
+ * - inicio: first day of the current month at 00:00 UTC
+ * - fin: today at 00:00 UTC (for real-time calculation) or last day of month
+ *
+ * Use `mes_referencia` (inicio) as the canonical month identifier
+ * when persisting results.
+ */
+export function calcularMesActual(): { inicio: Date; fin: Date; mes_referencia: Date } {
+  const hoy = todayUTC();
+  const inicio = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), 1));
+  return { inicio, fin: hoy, mes_referencia: inicio };
+}
+
+/**
+ * Calculate the boundaries for a specific month given its first day.
+ * Used when recalculating historical months.
+ */
+export function calcularMesEspecifico(
+  anio: number,
+  mes: number, // 1-indexed (January = 1)
+): { inicio: Date; fin: Date; mes_referencia: Date } {
+  const inicio = new Date(Date.UTC(anio, mes - 1, 1));
+  const fin = new Date(Date.UTC(anio, mes, 0)); // last day of month
+  return { inicio, fin, mes_referencia: inicio };
 }
 
 /**

@@ -126,6 +126,8 @@ export class IndicadorResultado extends Model<
   declare periodo_fin: Date;
   declare valor: number;
   declare calculado_en: CreationOptional<Date>;
+  declare mes_referencia: CreationOptional<Date | null>;
+  declare es_canonico: CreationOptional<boolean>;
 }
 
 IndicadorResultado.init(
@@ -160,11 +162,26 @@ IndicadorResultado.init(
       defaultValue: DataTypes.NOW,
       allowNull: false,
     },
+    mes_referencia: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
+    es_canonico: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      allowNull: false,
+    },
   },
   {
     sequelize,
     tableName: "indicador_resultado",
     timestamps: false,
+    indexes: [
+      {
+        name: "idx_resultado_version_mes_canonico",
+        fields: ["indicador_version_id", "mes_referencia", "es_canonico"],
+      },
+    ],
   },
 );
 

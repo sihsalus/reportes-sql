@@ -5,7 +5,6 @@ const SEEDED_INDICADOR_NOMBRE = "seed/default-indicator";
 
 const DEFAULT_DEFINICION = parseDefinicionIndicador({
   tipo: "conteo_atenciones",
-  periodo: "mes_actual",
 });
 
 export interface SeedDefaultIndicadorResult {
