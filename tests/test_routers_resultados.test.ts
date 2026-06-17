@@ -285,4 +285,160 @@ describe("Resultados Router", () => {
       expect(res.body.total).toBe(0);
     });
   });
+
+  describe("POST /resultados/recalcular-anio — annual historical recalculation", () => {
+    test("rejects future years", async () => {
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({ anio: 2099 });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("anio");
+    });
+
+    test("rejects non-integer anio", async () => {
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({ anio: "2025" });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("anio");
+    });
+
+    test("rejects missing anio", async () => {
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({});
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("anio");
+    });
+
+    test("past year processes all 12 months", async () => {
+      mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+      mockVersionFindOne.mockResolvedValue(makeVersion());
+      mockExecuteAndPersist.mockResolvedValue([]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({ anio: 2025 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.anio).toBe(2025);
+      expect(res.body.meses_procesados).toBe(12);
+      expect(res.body.indicadores_considerados).toBe(1);
+      expect(res.body.recalculados).toBe(12);
+      expect(res.body.errores).toHaveLength(0);
+      expect(mockExecuteAndPersist).toHaveBeenCalledTimes(12);
+    });
+
+    test("current year processes only up to current month", async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date("2026-04-15T00:00:00.000Z"));
+
+      mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+      mockVersionFindOne.mockResolvedValue(makeVersion());
+      mockExecuteAndPersist.mockResolvedValue([]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({ anio: 2026 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.anio).toBe(2026);
+      expect(res.body.meses_procesados).toBe(4);
+      expect(res.body.recalculados).toBe(4);
+      expect(mockExecuteAndPersist).toHaveBeenCalledTimes(4);
+
+      // Verify month-specific periods were passed
+      const firstCall = mockExecuteAndPersist.mock.calls[0];
+      expect(firstCall[3]).toEqual(new Date("2026-01-01T00:00:00.000Z")); // inicio
+      expect(firstCall[4]).toEqual(new Date("2026-01-31T00:00:00.000Z")); // fin
+      expect(firstCall[5]).toEqual(new Date("2026-01-01T00:00:00.000Z")); // mes_referencia
+
+      jest.useRealTimers();
+    });
+
+    test("scopes to specific indicador_id", async () => {
+      const inactiveInd = makeIndicador({ id: "uuid-inactive", nombre: "Inactive", activo: false });
+      mockIndicadorFindAll.mockImplementation(async (options: unknown) => {
+        const opts = options as { where?: { id?: string } };
+        if (opts?.where?.id === "uuid-inactive") {
+          return [inactiveInd];
+        }
+        return [];
+      });
+      mockVersionFindOne.mockResolvedValue(makeVersion({ indicador_id: "uuid-inactive" }));
+      mockExecuteAndPersist.mockResolvedValue([]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({ anio: 2025, indicador_id: "uuid-inactive" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.indicador_id).toBe("uuid-inactive");
+      expect(res.body.indicadores_considerados).toBe(1);
+      expect(res.body.recalculados).toBe(12);
+      expect(mockIndicadorFindAll).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: "uuid-inactive" } }),
+      );
+    });
+
+    test("returns 422 when indicador_id not found", async () => {
+      mockIndicadorFindAll.mockResolvedValue([]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({ anio: 2025, indicador_id: "nonexistent" });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("indicador_id");
+    });
+
+    test("isolates failures per month and continues", async () => {
+      mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+      mockVersionFindOne
+        .mockResolvedValueOnce(makeVersion())
+        .mockResolvedValueOnce(makeVersion())
+        .mockResolvedValueOnce(makeVersion())
+        .mockResolvedValueOnce(makeVersion())
+        .mockResolvedValueOnce(makeVersion())
+        .mockResolvedValueOnce(null) // fail month 6
+        .mockResolvedValue(makeVersion());
+
+      mockExecuteAndPersist.mockResolvedValue([]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({ anio: 2025 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.recalculados).toBe(11);
+      expect(res.body.errores).toHaveLength(1);
+      expect(res.body.errores[0].mes).toBe(6);
+      expect(res.body.errores[0].error).toBe("Sin versiones definidas");
+      expect(mockExecuteAndPersist).toHaveBeenCalledTimes(11);
+    });
+
+    test("handles empty indicator list", async () => {
+      mockIndicadorFindAll.mockResolvedValue([]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({ anio: 2025 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.recalculados).toBe(0);
+      expect(res.body.total).toBe(0);
+    });
+  });
 });

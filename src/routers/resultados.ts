@@ -21,7 +21,7 @@ import { sequelize } from "../database/postgres.js";
 import { parseDefinicionIndicador } from "../types/definicion.js";
 import { buildQuery } from "../engine/interpreter.js";
 import { executeAndPersist } from "../engine/executor.js";
-import { calcularMesActual } from "../engine/periodo.js";
+import { calcularMesActual, calcularMesEspecifico } from "../engine/periodo.js";
 import { resolveConceptMap } from "../validators/openmrs.js";
 
 export const resultadosRouter: Router = Router();
@@ -379,6 +379,145 @@ resultadosRouter.post(
       errores,
       total,
       mes_referencia: mes_referencia.toISOString().slice(0, 7),
+    });
+  }),
+);
+
+// ── POST /resultados/recalcular-anio ───────────────────────────────────
+
+resultadosRouter.post(
+  "/recalcular-anio",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { anio, indicador_id } = req.body as {
+      anio?: number;
+      indicador_id?: string;
+    };
+
+    if (typeof anio !== "number" || !Number.isInteger(anio)) {
+      res.status(422).json({
+        detail: { field: "anio", message: "anio debe ser un número entero" },
+      });
+      return;
+    }
+
+    const hoy = new Date();
+    const currentYear = hoy.getUTCFullYear();
+    const currentMonth = hoy.getUTCMonth() + 1; // 1-indexed
+
+    if (anio > currentYear) {
+      res.status(422).json({
+        detail: { field: "anio", message: "No se puede recalcular un año futuro" },
+      });
+      return;
+    }
+
+    let indicadores;
+    if (indicador_id) {
+      indicadores = await Indicador.findAll({ where: { id: indicador_id } });
+      if (indicadores.length === 0) {
+        res.status(422).json({
+          detail: { field: "indicador_id", message: "Indicador no encontrado" },
+        });
+        return;
+      }
+    } else {
+      indicadores = await Indicador.findAll({ where: { activo: true } });
+    }
+
+    const maxMes = anio === currentYear ? currentMonth : 12;
+    const meses: number[] = [];
+    for (let m = 1; m <= maxMes; m++) meses.push(m);
+
+    let recalculados = 0;
+    const errores: Array<{
+      indicador_id: string;
+      indicador_nombre: string;
+      mes: number;
+      error: string;
+    }> = [];
+    const total = indicadores.length * meses.length;
+
+    for (const indicador of indicadores) {
+      for (const mes of meses) {
+        try {
+          const latest = await IndicadorVersion.findOne({
+            where: { indicador_id: indicador.id },
+            order: [["version", "DESC"]],
+          });
+
+          if (!latest) {
+            errores.push({
+              indicador_id: indicador.id,
+              indicador_nombre: indicador.nombre,
+              mes,
+              error: "Sin versiones definidas",
+            });
+            continue;
+          }
+
+          const definicion = parseDefinicionIndicador(latest.definicion);
+
+          let conceptMap: Record<string, number> | null = null;
+          const ordenes = definicion.evento?.ordenes;
+          if (ordenes && ordenes.length > 0) {
+            const uuids = ordenes.map((f) => f.concepto_uuid);
+            const resolved = await resolveConceptMap(uuids);
+            conceptMap = {};
+            const missing: string[] = [];
+            for (const f of ordenes) {
+              const cid = resolved[f.concepto_uuid];
+              if (cid !== undefined) {
+                conceptMap[f.concepto_uuid] = cid;
+              } else {
+                missing.push(f.concepto_uuid);
+              }
+            }
+            if (missing.length > 0) {
+              throw new Error(
+                `Conceptos de órdenes no encontrados: ${missing.join(", ")}`,
+              );
+            }
+          }
+
+          const { inicio, fin, mes_referencia } = calcularMesEspecifico(anio, mes);
+          const { sql, params } = buildQuery(
+            definicion,
+            inicio,
+            fin,
+            conceptMap,
+          );
+
+          await executeAndPersist(
+            sql,
+            params as Record<string, unknown>,
+            latest.id,
+            inicio,
+            fin,
+            mes_referencia,
+          );
+
+          recalculados += 1;
+        } catch (err: unknown) {
+          const message =
+            err instanceof Error ? err.message : "Error desconocido";
+          errores.push({
+            indicador_id: indicador.id,
+            indicador_nombre: indicador.nombre,
+            mes,
+            error: message,
+          });
+        }
+      }
+    }
+
+    res.json({
+      anio,
+      indicador_id: indicador_id || null,
+      meses_procesados: meses.length,
+      indicadores_considerados: indicadores.length,
+      recalculados,
+      errores,
+      total,
     });
   }),
 );
