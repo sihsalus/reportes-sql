@@ -221,10 +221,25 @@ resultadosRouter.get(
       return;
     }
 
-    const anio = parseInt(anioStr ?? String(new Date().getUTCFullYear()), 10);
-    if (isNaN(anio) || anio < 2000 || anio > 2100) {
+    // Strict integer contract: reject missing, non-digit, or non-integer
+    // values before parsing. `parseInt("2026abc", 10) === 2026`, so we must
+    // validate the raw string with a digit-only pattern.
+    if (anioStr === undefined || anioStr === "") {
       res.status(422).json({
-        detail: { field: "anio", message: "anio debe ser un año válido (2000-2100)" },
+        detail: { field: "anio", message: "anio es obligatorio" },
+      });
+      return;
+    }
+    if (!/^-?\d+$/.test(anioStr)) {
+      res.status(422).json({
+        detail: { field: "anio", message: "anio debe ser un número entero" },
+      });
+      return;
+    }
+    const anio = parseInt(anioStr, 10);
+    if (anio < 2000 || anio > 2100) {
+      res.status(422).json({
+        detail: { field: "anio", message: "anio debe estar en el rango 2000-2100" },
       });
       return;
     }
@@ -403,6 +418,16 @@ resultadosRouter.post(
     const hoy = new Date();
     const currentYear = hoy.getUTCFullYear();
     const currentMonth = hoy.getUTCMonth() + 1; // 1-indexed
+
+    // Lower bound: stays consistent with `/resultados/series` (2000-2100).
+    // Recalculating pre-2000 is meaningless for clinical indicators and would
+    // produce unbounded batch sizes.
+    if (anio < 2000) {
+      res.status(422).json({
+        detail: { field: "anio", message: "anio debe ser un año realista (>= 2000)" },
+      });
+      return;
+    }
 
     if (anio > currentYear) {
       res.status(422).json({

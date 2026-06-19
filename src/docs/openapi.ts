@@ -483,6 +483,158 @@ export const openapiSpec = {
       },
     },
 
+    "/resultados/series": {
+      get: {
+        tags: ["Resultados"],
+        summary:
+          "Time-series rollup para un indicador en un año (canónico mensual)",
+        operationId: "getSeries",
+        parameters: [
+          {
+            name: "indicador_id",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+            description: "UUID del indicador",
+          },
+          {
+            name: "anio",
+            in: "query",
+            required: true,
+            schema: { type: "integer", minimum: 2000, maximum: 2100 },
+            description:
+              "Año a consultar. Requerido: entero en formato 'YYYY'. Rango válido 2000-2100.",
+          },
+          {
+            name: "granularity",
+            in: "query",
+            schema: {
+              type: "string",
+              enum: ["mensual", "trimestral", "semestral", "anual"],
+              default: "mensual",
+            },
+            description: "Granularidad del rollup (default: mensual).",
+          },
+        ],
+        responses: {
+          "200": {
+            description:
+              "Series temporales con `periodo_label`, `valor` y `meses_disponibles`",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    items: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          periodo_label: { type: "string" },
+                          valor: { type: "number" },
+                          meses_disponibles: { type: "integer" },
+                          anio: { type: "integer" },
+                          mes_referencia: {
+                            type: "string",
+                            format: "date",
+                            nullable: true,
+                          },
+                          trimestre: { type: "integer", nullable: true },
+                          semestre: { type: "integer", nullable: true },
+                        },
+                      },
+                    },
+                    indicador_id: { type: "string", format: "uuid" },
+                    anio: { type: "integer" },
+                    granularity: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          "422": {
+            description: "Parámetros inválidos (indicador_id ausente, anio ausente o no entero, anio fuera de rango, o granularity desconocida)",
+            content: { "application/json": { schema: Error422 } },
+          },
+        },
+      },
+    },
+
+    "/resultados/recalcular-anio": {
+      post: {
+        tags: ["Resultados"],
+        summary:
+          "Recalcular batch de un año completo (canónico mensual, por indicador o todos los activos)",
+        operationId: "recalcularAnio",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["anio"],
+                properties: {
+                  anio: {
+                    type: "integer",
+                    minimum: 2000,
+                    description:
+                      "Año a recalcular (entero, >= 2000, no futuro). Para el año actual solo se procesan meses hasta el mes UTC actual.",
+                  },
+                  indicador_id: {
+                    type: "string",
+                    format: "uuid",
+                    description:
+                      "UUID de un indicador específico. Si se omite, se procesan todos los indicadores activos.",
+                    nullable: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Resumen del recálculo batch",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    anio: { type: "integer" },
+                    indicador_id: {
+                      type: "string",
+                      format: "uuid",
+                      nullable: true,
+                    },
+                    meses_procesados: { type: "integer" },
+                    indicadores_considerados: { type: "integer" },
+                    recalculados: { type: "integer" },
+                    errores: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          indicador_id: { type: "string" },
+                          indicador_nombre: { type: "string" },
+                          mes: { type: "integer" },
+                          error: { type: "string" },
+                        },
+                      },
+                    },
+                    total: { type: "integer" },
+                  },
+                },
+              },
+            },
+          },
+          "422": {
+            description: "anio inválido (no entero, < 2000, o año futuro) o indicador no encontrado",
+            content: { "application/json": { schema: Error422 } },
+          },
+        },
+      },
+    },
+
     // ── Conceptos ───────────────────────────────────────────────────────
     "/conceptos/encounter-types": {
       get: {

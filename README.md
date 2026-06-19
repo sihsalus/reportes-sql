@@ -143,7 +143,10 @@ The production image:
 | `GET` | `/indicadores/{id}/preview-sql` | Preview generated SQL |
 | `GET` | `/resultados` | List pre-calculated results |
 | `POST` | `/resultados/calcular-ahora` | Batch-calculate all active indicators |
+| `GET` | `/resultados/series` | Time-series rollup for an indicator (`?indicador_id=`, `?anio=`, optional `?granularity=`) |
+| `POST` | `/resultados/recalcular-anio` | Batch-recalculate indicators for a year; `anio` and optional `indicador_id` are read from the request body |
 | `GET` | `/conceptos/buscar?q=` | Search OpenMRS concepts |
+| `GET` | `/conceptos/buscar/resolve?uuids=` | Batch-resolve concept UUIDs to display labels |
 | `GET` | `/conceptos/encounter-types` | List encounter types |
 | `GET` | `/conceptos/diagnosticos/buscar?q=` | Search diagnoses (CIE-10) |
 | `GET` | `/conceptos/locations?q=` | Search locations |
@@ -203,11 +206,13 @@ pnpm test:coverage     # with coverage report
 
 ## Container image (GHCR)
 
-The CI workflow publishes container images to GitHub Container Registry as:
+The `publish.yml` workflow builds and pushes container images to GitHub
+Container Registry as:
 
 `ghcr.io/<owner-or-org>/reportes-sql`
 
 The owner/org segment is resolved from the GitHub repository automatically.
+The `ci.yml` workflow only runs tests and build — it does not publish.
 
 ### Published tags
 
@@ -215,7 +220,9 @@ The owner/org segment is resolved from the GitHub repository automatically.
 |---------|-----------|
 | `main` branch | `main`, `sha-<commit>`, `latest` |
 | `v1.2.3` tag | `1.2.3`, `1.2`, `1` |
-| Pull request | `pr-<number>` |
+
+The publish workflow runs on pushes to `main` and on semver tags. It does
+not run on pull requests, so PRs are not published as `pr-<number>` images.
 
 ### Pull the image
 

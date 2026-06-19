@@ -20,8 +20,6 @@ import {
 import {
   parseDefinicionIndicador,
   rejectPeriodoInPayload,
-  stripPeriodoFromDefinicion,
-  DefinicionIndicadorSchema,
   type DefinicionIndicador,
 } from "../types/definicion.js";
 import { buildQuery } from "../engine/interpreter.js";
@@ -190,16 +188,9 @@ indicadoresRouter.get(
       order: [["version", "DESC"]],
     });
 
-    // Strip legacy periodo from version definitions on read
-    const safeVersiones = versiones.map((v) => {
-      const json = v.toJSON() as { definicion: unknown; [key: string]: unknown };
-      json.definicion = stripPeriodoFromDefinicion(json.definicion);
-      return json;
-    });
-
     res.json({
       ...indicador.toJSON(),
-      versiones: safeVersiones,
+      versiones: versiones.map((v) => v.toJSON()),
     });
   }),
 );

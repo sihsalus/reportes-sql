@@ -20,4 +20,5 @@ export default {
   },
   clearMocks: true,
   extensionsToTreatAsEsm: [".ts"],
+  globalSetup: "<rootDir>/tests/jest-no-focused.mjs",
 };

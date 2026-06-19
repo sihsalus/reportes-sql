@@ -1,7 +1,9 @@
 /**
  * Zod validation coverage for the current TypeScript schemas.
  *
- * Legacy note: these cases preserve behavior from the removed Python implementation.
+ * Legacy note: pre-production, all legacy normalization has been removed
+ * from the schema layer. Tests below exercise the canonical contract
+ * only.
  */
 import {
   DefinicionIndicadorSchema,
@@ -12,30 +14,24 @@ import {
   parseDefinicionIndicador,
   parseFiltrosPoblacion,
   parseFiltrosEvento,
+  rejectPeriodoInPayload,
   hasAgeFilter,
 } from "../src/types/definicion";
 import { ZodError } from "zod";
 
 describe("DefinicionIndicador", () => {
-  test("minimal valid — tipo only (periodo is now optional)", () => {
+  test("minimal valid — tipo only", () => {
     const d = DefinicionIndicadorSchema.parse({
       tipo: "conteo_atenciones",
     });
     expect(d.tipo).toBe("conteo_atenciones");
-    expect(d.periodo).toBeUndefined();
+    expect(d.poblacion).toBeUndefined();
     expect(d.evento).toBeUndefined();
+    // periodo is not part of the canonical contract
+    expect("periodo" in d).toBe(false);
   });
 
-  test("periodo still accepted for backward compat (optional)", () => {
-    const d = DefinicionIndicadorSchema.parse({
-      tipo: "conteo_atenciones",
-      periodo: "mes_actual",
-    });
-    expect(d.tipo).toBe("conteo_atenciones");
-    expect(d.periodo).toBe("mes_actual");
-  });
-
-  test("full with diagnosticos (no periodo required)", () => {
+  test("full with diagnosticos", () => {
     const d = DefinicionIndicadorSchema.parse({
       tipo: "conteo_atenciones",
       poblacion: { max_dias: 1825 },
@@ -55,7 +51,7 @@ describe("DefinicionIndicador", () => {
     expect(d.evento!.diagnosticos![0].tipo_diagnostico).toBe("definitivo");
   });
 
-  test("full with ordenes (no periodo required)", () => {
+  test("full with ordenes", () => {
     const d = DefinicionIndicadorSchema.parse({
       tipo: "conteo_pacientes",
       evento: {
@@ -147,55 +143,9 @@ describe("MutualExclusivity", () => {
   });
 });
 
-describe("BackwardCompatNormalizer", () => {
-  test("old flat diagnostico normalizes", () => {
-    const old = {
-      tipo: "conteo_atenciones",
-      evento: { location_uuids: ["uuid-x"] },
-      diagnostico: {
-        codigos_cie10: ["J00.X", "J04.0"],
-        tipo_diagnostico: "definitivo",
-      },
-    };
-    const d = parseDefinicionIndicador(old);
-    expect(d.evento).toBeDefined();
-    expect(d.evento!.diagnosticos).toBeDefined();
-    expect(d.evento!.diagnosticos!.length).toBe(1);
-    expect(d.evento!.diagnosticos![0].concepto_uuids).toEqual([]);
-    expect(d.evento!.diagnosticos![0].tipo_diagnostico).toBe("definitivo");
-  });
-
-  test("old flat observaciones normalizes to ordenes", () => {
-    const old = {
-      tipo: "conteo_pacientes",
-      evento: { location_uuids: ["uuid-x"] },
-      observaciones: [
-        { concepto_uuid: "uuid-a" },
-        { concepto_uuid: "uuid-b" },
-      ],
-    };
-    const d = parseDefinicionIndicador(old);
-    expect(d.evento).toBeDefined();
-    expect(d.evento!.ordenes).toBeDefined();
-    expect(d.evento!.ordenes!.length).toBe(2);
-    expect(d.evento!.ordenes![0].concepto_uuid).toBe("uuid-a");
-    expect(d.evento!.ordenes![1].concepto_uuid).toBe("uuid-b");
-  });
-
-  test("old flat both diagnostico and observaciones are mutually exclusive", () => {
-    const old = {
-      tipo: "conteo_atenciones",
-      evento: { location_uuids: ["uuid-x"] },
-      diagnostico: { tipo_diagnostico: "definitivo" },
-      observaciones: [{ concepto_uuid: "uuid-a" }],
-    };
-    expect(() => parseDefinicionIndicador(old)).toThrow(
-      /mutually exclusive/,
-    );
-  });
-
-  test("new nested passes through unchanged", () => {
-    const newData = {
+describe("CanonicalContract", () => {
+  test("nested diagnosticos pass through unchanged", () => {
+    const data = {
       tipo: "conteo_atenciones",
       evento: {
         location_uuids: ["uuid-x"],
@@ -207,47 +157,64 @@ describe("BackwardCompatNormalizer", () => {
         ],
       },
     };
-    const d = parseDefinicionIndicador(newData);
+    const d = parseDefinicionIndicador(data);
     expect(d.evento).toBeDefined();
     expect(d.evento!.diagnosticos).toBeDefined();
     expect(d.evento!.diagnosticos![0].concepto_uuids).toEqual(["uuid-d"]);
   });
 
   test("idempotent double parse", () => {
-    const old = {
+    const data = {
       tipo: "conteo_atenciones",
-      evento: { location_uuids: ["uuid-x"] },
-      observaciones: [{ concepto_uuid: "uuid-a" }],
+      evento: {
+        location_uuids: ["uuid-x"],
+        ordenes: [{ concepto_uuid: "uuid-a" }],
+      },
     };
-    const d1 = parseDefinicionIndicador(old);
+    const d1 = parseDefinicionIndicador(data);
     const dump1 = JSON.parse(JSON.stringify(d1));
     const d2 = parseDefinicionIndicador(dump1);
     const dump2 = JSON.parse(JSON.stringify(d2));
     expect(dump1).toEqual(dump2);
   });
 
-  test("old eventos array picks first", () => {
-    const old = {
-      tipo: "conteo_atenciones",
-      eventos: [
-        { location_uuids: ["uuid-first"] },
-        { location_uuids: ["uuid-second"] },
-      ],
-    };
-    const d = parseDefinicionIndicador(old);
-    expect(d.evento).toBeDefined();
-    expect(d.evento!.location_uuids).toEqual(["uuid-first"]);
+  test("legacy edad_* keys are rejected", () => {
+    expect(() => parseFiltrosPoblacion({ edad_min_anios: 10 })).toThrow();
   });
 
-  test("old diagnostico no tipo skips", () => {
-    const old = {
-      tipo: "conteo_atenciones",
-      evento: { location_uuids: ["uuid-x"] },
-      diagnostico: { codigos_cie10: ["J00.X"] },
-    };
-    const d = parseDefinicionIndicador(old);
-    expect(d.evento).toBeDefined();
-    expect(d.evento!.diagnosticos).toBeUndefined();
+  test("legacy encounter_type_uuids is rejected", () => {
+    expect(() =>
+      parseFiltrosEvento({ encounter_type_uuids: ["uuid-legacy"] }),
+    ).toThrow();
+  });
+
+  test("flat diagnostico is rejected (no normalization)", () => {
+    expect(() =>
+      parseDefinicionIndicador({
+        tipo: "conteo_atenciones",
+        evento: { location_uuids: ["uuid-x"] },
+        diagnostico: { tipo_diagnostico: "definitivo" },
+      }),
+    ).toThrow();
+  });
+
+  test("flat observaciones is rejected (no normalization)", () => {
+    expect(() =>
+      parseDefinicionIndicador({
+        tipo: "conteo_pacientes",
+        evento: { location_uuids: ["uuid-x"] },
+        observaciones: [{ concepto_uuid: "uuid-a" }],
+      }),
+    ).toThrow();
+  });
+
+  test("eventos array is rejected (no normalization to singular evento)", () => {
+    expect(() =>
+      parseDefinicionIndicador({
+        tipo: "conteo_atenciones",
+        eventos: [{ location_uuids: ["uuid-x"] }],
+      }),
+    ).toThrow();
   });
 });
 
@@ -303,7 +270,7 @@ describe("FiltroOrdenValidation", () => {
   });
 });
 
-// ── Phase 1: Canonical six-field age filter ───────────────────────────
+// ── Canonical six-field age filter ─────────────────────────────────────
 
 describe("FiltrosPoblacionCanonical", () => {
   test("canonical min_dias valid", () => {
@@ -447,7 +414,7 @@ describe("FiltrosPoblacionCanonical", () => {
     expect(p.max_meses_excl).toBe(24);
   });
 
-  test("model dump uses canonical names", () => {
+  test("canonical output uses canonical names only", () => {
     const p = FiltrosPoblacionSchema.parse({
       min_anios: 5,
       max_dias: 365,
@@ -470,76 +437,6 @@ describe("FiltrosPoblacionCanonical", () => {
   });
 });
 
-describe("FiltrosPoblacionLegacy", () => {
-  test("legacy edad_min_anios to min_anios", () => {
-    const p = parseFiltrosPoblacion({ edad_min_anios: 10 });
-    expect(p.min_anios).toBe(10);
-    expect(p.min_meses).toBeUndefined();
-  });
-
-  test("legacy edad_max_anios to max_anios_excl", () => {
-    const p = parseFiltrosPoblacion({ edad_max_anios: 5 });
-    expect(p.max_anios_excl).toBe(5);
-  });
-
-  test("legacy edad_min_meses to min_meses", () => {
-    const p = parseFiltrosPoblacion({ edad_min_meses: 6 });
-    expect(p.min_meses).toBe(6);
-  });
-
-  test("legacy edad_max_meses to max_meses_excl", () => {
-    const p = parseFiltrosPoblacion({ edad_max_meses: 12 });
-    expect(p.max_meses_excl).toBe(12);
-  });
-
-  test("legacy edad_min_dias to min_dias", () => {
-    const p = parseFiltrosPoblacion({ edad_min_dias: 1 });
-    expect(p.min_dias).toBe(1);
-  });
-
-  test("legacy edad_max_dias to max_dias", () => {
-    const p = parseFiltrosPoblacion({ edad_max_dias: 1825 });
-    expect(p.max_dias).toBe(1825);
-  });
-
-  test("mixed legacy and canonical rejected", () => {
-    expect(() =>
-      parseFiltrosPoblacion({ edad_min_anios: 10, min_meses: 6 }),
-    ).toThrow(/Cannot mix/);
-  });
-
-  test("mixed legacy max and canonical max rejected", () => {
-    expect(() =>
-      parseFiltrosPoblacion({ edad_max_dias: 100, max_anios_excl: 5 }),
-    ).toThrow(/Cannot mix/);
-  });
-
-  test("legacy model uses canonical names", () => {
-    const p = parseFiltrosPoblacion({
-      edad_min_anios: 10,
-      edad_max_dias: 365,
-    });
-    expect(p.min_anios).toBe(10);
-    expect(p.max_dias).toBe(365);
-  });
-
-  test("legacy has_age_filter", () => {
-    const p = parseFiltrosPoblacion({ edad_min_dias: 1 });
-    expect(hasAgeFilter(p)).toBe(true);
-  });
-
-  test("legacy normalized through definicion", () => {
-    const d = parseDefinicionIndicador({
-      tipo: "conteo_atenciones",
-      poblacion: { edad_max_dias: 1825 },
-      evento: { location_uuids: ["uuid-x"] },
-    });
-    expect(d.poblacion).toBeDefined();
-    expect(d.poblacion!.max_dias).toBe(1825);
-    expect(hasAgeFilter(d.poblacion!)).toBe(true);
-  });
-});
-
 describe("FiltrosEventoLocation", () => {
   test("location_uuids accepted", () => {
     const ev = FiltrosEventoSchema.parse({
@@ -556,23 +453,6 @@ describe("FiltrosEventoLocation", () => {
   test("location_uuids empty list accepted", () => {
     const ev = FiltrosEventoSchema.parse({ location_uuids: [] });
     expect(ev.location_uuids).toEqual([]);
-  });
-
-  test("legacy encounter_type_uuids normalized to location_uuids", () => {
-    const ev = parseFiltrosEvento({
-      encounter_type_uuids: ["uuid-legacy"],
-    });
-    expect(ev.location_uuids).toEqual(["uuid-legacy"]);
-  });
-
-  test("legacy normalization not in output", () => {
-    const ev = parseFiltrosEvento({
-      encounter_type_uuids: ["uuid-legacy"],
-    });
-    expect(ev.location_uuids).toEqual(["uuid-legacy"]);
-    expect(
-      "encounter_type_uuids" in (ev as Record<string, unknown>),
-    ).toBe(false);
   });
 
   test("location_uuids with diagnosticos", () => {
@@ -603,48 +483,9 @@ describe("FiltrosEventoLocation", () => {
   });
 });
 
-// ── Periodo removal tests ──────────────────────────────────────────────
+// ── Periodo rejection tests ────────────────────────────────────────────
 
-import {
-  rejectPeriodoInPayload,
-  stripPeriodoFromDefinicion,
-} from "../src/types/definicion";
-
-describe("PeriodoRemoval", () => {
-  test("stripPeriodoFromDefinicion removes periodo from stored JSONB", () => {
-    const stored = {
-      tipo: "conteo_atenciones",
-      periodo: "trimestre_actual",
-      evento: { location_uuids: ["uuid-x"] },
-    };
-    const stripped = stripPeriodoFromDefinicion(stored) as Record<string, unknown>;
-    expect("periodo" in stripped).toBe(false);
-    expect(stripped["tipo"]).toBe("conteo_atenciones");
-    expect(stripped["evento"]).toBeDefined();
-  });
-
-  test("stripPeriodoFromDefinicion is no-op when periodo is absent", () => {
-    const stored = {
-      tipo: "conteo_atenciones",
-      evento: { location_uuids: ["uuid-x"] },
-    };
-    const stripped = stripPeriodoFromDefinicion(stored) as Record<string, unknown>;
-    expect(stripped["tipo"]).toBe("conteo_atenciones");
-    expect(stripped["evento"]).toBeDefined();
-  });
-
-  test("parseDefinicionIndicador strips legacy periodo on read", () => {
-    const stored = {
-      tipo: "conteo_atenciones",
-      periodo: "anual_actual",
-      evento: { location_uuids: ["uuid-x"] },
-    };
-    const d = parseDefinicionIndicador(stored);
-    expect(d.periodo).toBeUndefined();
-    expect(d.tipo).toBe("conteo_atenciones");
-    expect(d.evento?.location_uuids).toEqual(["uuid-x"]);
-  });
-
+describe("PeriodoRejection", () => {
   test("rejectPeriodoInPayload throws for inbound periodo", () => {
     expect(() =>
       rejectPeriodoInPayload({
@@ -660,5 +501,13 @@ describe("PeriodoRemoval", () => {
         tipo: "conteo_atenciones",
       }),
     ).not.toThrow();
+  });
+
+  test("canonical schema does not surface periodo in output", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      evento: { location_uuids: ["uuid-x"] },
+    });
+    expect("periodo" in d).toBe(false);
   });
 });

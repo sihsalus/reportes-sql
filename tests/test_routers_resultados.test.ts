@@ -154,10 +154,11 @@ describe("Resultados Router", () => {
     test("returns 422 for invalid granularity", async () => {
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&granularity=invalid",
+        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=invalid",
       );
 
       expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("granularity");
     });
 
     test("returns monthly series rows", async () => {
@@ -201,11 +202,66 @@ describe("Resultados Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&granularity=mensual",
+        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=mensual",
       );
 
       expect(res.status).toBe(200);
       expect(res.body.items).toHaveLength(0);
+    });
+
+    test("rejects missing anio", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x",
+      );
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("anio");
+      expect(res.body.detail.message).toMatch(/obligatorio/);
+    });
+
+    test("rejects anio with trailing garbage (e.g. 2026abc)", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x&anio=2026abc",
+      );
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("anio");
+      expect(res.body.detail.message).toMatch(/entero/);
+    });
+
+    test("rejects decimal anio", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x&anio=2026.5",
+      );
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("anio");
+      expect(res.body.detail.message).toMatch(/entero/);
+    });
+
+    test("rejects anio below 2000", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x&anio=1999",
+      );
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("anio");
+      expect(res.body.detail.message).toMatch(/2000-2100/);
+    });
+
+    test("rejects anio above 2100", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x&anio=2101",
+      );
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("anio");
+      expect(res.body.detail.message).toMatch(/2000-2100/);
     });
   });
 
@@ -315,6 +371,17 @@ describe("Resultados Router", () => {
 
       expect(res.status).toBe(422);
       expect(res.body.detail.field).toBe("anio");
+    });
+
+    test("rejects anio below 2000", async () => {
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({ anio: 1999 });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("anio");
+      expect(res.body.detail.message).toMatch(/>= 2000/);
     });
 
     test("past year processes all 12 months", async () => {

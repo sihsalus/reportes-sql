@@ -10,7 +10,6 @@ import {
   FiltroDiagnosticoSchema,
   FiltroOrdenSchema,
   parseDefinicionIndicador,
-  parseFiltrosPoblacion,
 } from "../src/types/definicion";
 import type { FiltrosEvento, FiltroDiagnostico, FiltroOrden } from "../src/types/definicion";
 
@@ -32,7 +31,6 @@ describe("BuildQuery", () => {
   test("minimal query — conteo_atenciones with location", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: { location_uuids: [UUID_LOC] },
     });
     const { sql } = buildQuery(definicion, INICIO, FIN);
@@ -43,7 +41,6 @@ describe("BuildQuery", () => {
   test("conteo_pacientes", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_pacientes",
-      periodo: "mes_actual",
       evento: { location_uuids: [UUID_LOC] },
     });
     const { sql } = buildQuery(definicion, INICIO, FIN);
@@ -53,7 +50,6 @@ describe("BuildQuery", () => {
   test("minimo_ocurrencias adds subquery", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         minimo_ocurrencias: 3,
@@ -66,7 +62,6 @@ describe("BuildQuery", () => {
   test("diagnosticos join and filter", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         diagnosticos: [
@@ -85,7 +80,6 @@ describe("BuildQuery", () => {
   test("diagnosticos presuntivo", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         diagnosticos: [
@@ -101,7 +95,6 @@ describe("BuildQuery", () => {
   test("diagnosticos empty uuids omits concept filter", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         diagnosticos: [
@@ -117,7 +110,6 @@ describe("BuildQuery", () => {
   test("diagnosticos multiple uuids OR logic", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         diagnosticos: [{ concepto_uuids: [UUID_DIAG, UUID_DIAG2] }],
@@ -132,7 +124,6 @@ describe("BuildQuery", () => {
   test("diagnosticos single uuid uses paren placeholder", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         diagnosticos: [
@@ -148,7 +139,6 @@ describe("BuildQuery", () => {
   test("diagnosticos no match omits filter", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         diagnosticos: [{ concepto_uuids: [] }],
@@ -161,7 +151,6 @@ describe("BuildQuery", () => {
   test("ordenes generates EXISTS", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         ordenes: [{ concepto_uuid: UUID_ORD }],
@@ -176,7 +165,6 @@ describe("BuildQuery", () => {
   test("ordenes multiple AND logic", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         ordenes: [
@@ -195,7 +183,6 @@ describe("BuildQuery", () => {
   test("ordenes no concept_map omits", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         ordenes: [{ concepto_uuid: UUID_ORD }],
@@ -208,7 +195,6 @@ describe("BuildQuery", () => {
   test("no obs table references", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         ordenes: [{ concepto_uuid: UUID_ORD }],
@@ -222,7 +208,6 @@ describe("BuildQuery", () => {
   test("poblacion age filter adds person join", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: { location_uuids: [UUID_LOC] },
       poblacion: { min_dias: 1 },
     });
@@ -233,7 +218,6 @@ describe("BuildQuery", () => {
   test("no evento returns valid SQL", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
     });
     const { sql } = buildQuery(definicion, INICIO, FIN);
     expect(typeof sql).toBe("string");
@@ -243,7 +227,6 @@ describe("BuildQuery", () => {
   test("minimo_ocurrencias with diagnosticos", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         minimo_ocurrencias: 3,
@@ -260,7 +243,6 @@ describe("BuildQuery", () => {
   test("minimo_ocurrencias with ordenes", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         minimo_ocurrencias: 3,
@@ -276,7 +258,6 @@ describe("BuildQuery", () => {
   test("no location join when empty", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {},
     });
     const { sql } = buildQuery(definicion, INICIO, FIN);
@@ -286,7 +267,6 @@ describe("BuildQuery", () => {
   test("location join and where with two uuids", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC, "uuid-loc-2"],
       },
@@ -304,7 +284,6 @@ describe("FechaBoundsExclusive", () => {
   test("conteo_atenciones uses ge and lt", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: { location_uuids: [UUID_LOC] },
     });
     const { sql } = buildQuery(d, INICIO, FIN);
@@ -316,7 +295,6 @@ describe("FechaBoundsExclusive", () => {
   test("conteo_pacientes uses ge and lt", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_pacientes",
-      periodo: "mes_actual",
       evento: { location_uuids: [UUID_LOC] },
     });
     const { sql } = buildQuery(d, INICIO, FIN);
@@ -328,7 +306,6 @@ describe("FechaBoundsExclusive", () => {
   test("subquery uses ge and lt", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         minimo_ocurrencias: 3,
@@ -343,7 +320,6 @@ describe("FechaBoundsExclusive", () => {
   test("params contain fin_excl not fin", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: { location_uuids: [UUID_LOC] },
     });
     const { params } = buildQuery(d, INICIO, FIN);
@@ -355,7 +331,6 @@ describe("FechaBoundsExclusive", () => {
   test("fin_excl is inicio plus one day", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: { location_uuids: [UUID_LOC] },
     });
     const { params } = buildQuery(d, INICIO, FIN);
@@ -365,7 +340,6 @@ describe("FechaBoundsExclusive", () => {
   test("fin_excl correct for conteo_pacientes", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_pacientes",
-      periodo: "mes_actual",
       evento: { location_uuids: [UUID_LOC] },
     });
     const { params } = buildQuery(d, INICIO, FIN);
@@ -375,7 +349,6 @@ describe("FechaBoundsExclusive", () => {
   test("fin_excl correct for subquery", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: {
         location_uuids: [UUID_LOC],
         minimo_ocurrencias: 3,
@@ -392,7 +365,6 @@ describe("AgeFilterSQL", () => {
   test("min_dias generates DATEDIFF ge", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { min_dias: 1 },
     });
     const { sql, params } = buildQuery(d, INICIO, FIN);
@@ -405,7 +377,6 @@ describe("AgeFilterSQL", () => {
   test("min_dias sql contains ge operator", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { min_dias: 30 },
     });
     const { sql } = buildQuery(d, INICIO, FIN);
@@ -417,7 +388,6 @@ describe("AgeFilterSQL", () => {
   test("max_dias generates DATEDIFF le", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { max_dias: 365 },
     });
     const { sql, params } = buildQuery(d, INICIO, FIN);
@@ -430,7 +400,6 @@ describe("AgeFilterSQL", () => {
   test("min_meses uses DATE_ADD month", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { min_meses: 6 },
     });
     const { sql, params } = buildQuery(d, INICIO, FIN);
@@ -443,7 +412,6 @@ describe("AgeFilterSQL", () => {
   test("min_meses compare le inicio", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { min_meses: 12 },
     });
     const { sql } = buildQuery(d, INICIO, FIN);
@@ -455,7 +423,6 @@ describe("AgeFilterSQL", () => {
   test("min_anios uses DATE_ADD year", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { min_anios: 18 },
     });
     const { sql, params } = buildQuery(d, INICIO, FIN);
@@ -468,7 +435,6 @@ describe("AgeFilterSQL", () => {
   test("min_anios uses encounter datetime so same-day 18th birthday qualifies", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { min_anios: 18 },
     });
     const { sql } = buildQuery(d, INICIO, FIN);
@@ -480,7 +446,6 @@ describe("AgeFilterSQL", () => {
   test("max_meses_excl uses DATE_ADD gt", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { max_meses_excl: 6 },
     });
     const { sql, params } = buildQuery(d, INICIO, FIN);
@@ -494,7 +459,6 @@ describe("AgeFilterSQL", () => {
   test("max_meses_excl is exclusive", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { max_meses_excl: 12 },
     });
     const { sql } = buildQuery(d, INICIO, FIN);
@@ -506,7 +470,6 @@ describe("AgeFilterSQL", () => {
   test("max_anios_excl uses DATE_ADD year gt", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { max_anios_excl: 5 },
     });
     const { sql, params } = buildQuery(d, INICIO, FIN);
@@ -520,7 +483,6 @@ describe("AgeFilterSQL", () => {
   test("max_anios_excl is exclusive", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { max_anios_excl: 18 },
     });
     const { sql } = buildQuery(d, INICIO, FIN);
@@ -532,7 +494,6 @@ describe("AgeFilterSQL", () => {
   test("max_anios_excl uses encounter datetime so same-day 65th birthday is excluded", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { max_anios_excl: 65 },
     });
     const { sql } = buildQuery(d, INICIO, FIN);
@@ -544,7 +505,6 @@ describe("AgeFilterSQL", () => {
   test("both bounds min_dias max_anios_excl", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { min_dias: 30, max_anios_excl: 5 },
     });
     const { sql, params } = buildQuery(d, INICIO, FIN);
@@ -557,7 +517,6 @@ describe("AgeFilterSQL", () => {
   test("minimo_ocurrencias path keeps age relative to each encounter", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       poblacion: { min_dias: 30, max_anios_excl: 5 },
       evento: {
         location_uuids: [UUID_LOC],
@@ -576,7 +535,6 @@ describe("AgeFilterSQL", () => {
   test("no age filter no person join for age", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
-      periodo: "mes_actual",
       evento: { location_uuids: [UUID_LOC] },
     });
     const { sql } = buildQuery(d, INICIO, FIN);
@@ -586,7 +544,6 @@ describe("AgeFilterSQL", () => {
   test("sexo only still adds person join in conteo_pacientes", () => {
     const d = parseDefinicionIndicador({
       tipo: "conteo_pacientes",
-      periodo: "mes_actual",
       evento: { location_uuids: [UUID_LOC] },
       poblacion: { sexo: "F" },
     });
@@ -595,29 +552,21 @@ describe("AgeFilterSQL", () => {
     expect(params["sexo"]).toBe("F");
   });
 
-  test("legacy edad_min_dias through interpreter", () => {
-    const d = parseDefinicionIndicador({
-      tipo: "conteo_atenciones",
-      periodo: "mes_actual",
-      poblacion: { edad_min_dias: 1 },
-    });
-    const { sql, params } = buildQuery(d, INICIO, FIN);
-    expect(sql).toContain(
-      "DATEDIFF(e.encounter_datetime, p.birthdate) >= :min_dias",
-    );
-    expect(params["min_dias"]).toBe(1);
+  test("legacy edad_min_dias is rejected", () => {
+    expect(() =>
+      parseDefinicionIndicador({
+        tipo: "conteo_atenciones",
+        poblacion: { edad_min_dias: 1 },
+      }),
+    ).toThrow();
   });
 
-  test("legacy edad_max_anios through interpreter", () => {
-    const d = parseDefinicionIndicador({
-      tipo: "conteo_atenciones",
-      periodo: "mes_actual",
-      poblacion: { edad_max_anios: 5 },
-    });
-    const { sql, params } = buildQuery(d, INICIO, FIN);
-    expect(sql).toContain(
-      "DATE_ADD(p.birthdate, INTERVAL :max_anios_excl YEAR) > e.encounter_datetime",
-    );
-    expect(params["max_anios_excl"]).toBe(5);
+  test("legacy edad_max_anios is rejected", () => {
+    expect(() =>
+      parseDefinicionIndicador({
+        tipo: "conteo_atenciones",
+        poblacion: { edad_max_anios: 5 },
+      }),
+    ).toThrow();
   });
 });

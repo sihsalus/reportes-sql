@@ -8,6 +8,11 @@
  * Format validation lives here — existence checks (OpenMRS UUID resolution)
  * are deferred to the router/validator layer (I/O), keeping schemas
  * side-effect-free and testable in isolation.
+ *
+ * The definition contract is canonical only: no legacy normalization is
+ * performed. Pre-production, inbound payloads are expected to match the
+ * shape below exactly. `rejectPeriodoInPayload` is the one exception kept
+ * at the router level for explicit, clearer inbound-rejection errors.
  */
 
 import { z } from "zod";
@@ -17,6 +22,12 @@ import { z } from "zod";
 export const TipoIndicador = z.enum(["conteo_atenciones", "conteo_pacientes"]);
 export type TipoIndicador = z.infer<typeof TipoIndicador>;
 
+/**
+ * Period literal used to derive result periods at the engine layer
+ * (e.g. `calcularPeriodo`). It is NOT a field of the indicator
+ * definition — measurements are always monthly. Kept exported because
+ * `src/engine/periodo.ts` consumes it.
+ */
 export const PeriodoIndicador = z.enum([
   "mes_actual",
   "trimestre_actual",
@@ -79,6 +90,7 @@ export const FiltrosPoblacionSchema = z
       ),
     sexo: z.enum(["M", "F"]).optional(),
   })
+  .strict()
   .superRefine((data, ctx) => {
     // ── Mutual exclusivity per bound group ──
     const minCount = [data.min_dias, data.min_meses, data.min_anios].filter(
@@ -109,17 +121,21 @@ export const FiltrosPoblacionSchema = z
   });
 export type FiltrosPoblacion = z.infer<typeof FiltrosPoblacionSchema>;
 
-export const FiltroDiagnosticoSchema = z.object({
-  concepto_uuids: z.array(z.string()).default([]),
-  tipo_diagnostico: z
-    .enum(["definitivo", "presuntivo"])
-    .optional(),
-});
+export const FiltroDiagnosticoSchema = z
+  .object({
+    concepto_uuids: z.array(z.string()).default([]),
+    tipo_diagnostico: z
+      .enum(["definitivo", "presuntivo"])
+      .optional(),
+  })
+  .strict();
 export type FiltroDiagnostico = z.infer<typeof FiltroDiagnosticoSchema>;
 
-export const FiltroOrdenSchema = z.object({
-  concepto_uuid: z.string().min(1),
-});
+export const FiltroOrdenSchema = z
+  .object({
+    concepto_uuid: z.string().min(1),
+  })
+  .strict();
 export type FiltroOrden = z.infer<typeof FiltroOrdenSchema>;
 
 export const FiltrosEventoSchema = z
@@ -129,6 +145,7 @@ export const FiltrosEventoSchema = z
     diagnosticos: z.array(FiltroDiagnosticoSchema).optional(),
     ordenes: z.array(FiltroOrdenSchema).optional(),
   })
+  .strict()
   .superRefine((data, ctx) => {
     const hasDiag =
       data.diagnosticos !== undefined && data.diagnosticos.length > 0;
@@ -146,227 +163,44 @@ export type FiltrosEvento = z.infer<typeof FiltrosEventoSchema>;
 
 // ── Top-level definition ───────────────────────────────────────────────
 
+/**
+ * Canonical indicator definition.
+ *
+ * The definition contract is intentionally minimal: `tipo` is required,
+ * `poblacion` and `evento` are optional filter groups. Result periods
+ * are derived at the engine layer, not stored on the definition.
+ *
+ * `.strict()` rejects any unknown key (legacy or otherwise) so the
+ * canonical shape is enforced at the boundary.
+ */
 export const DefinicionIndicadorSchema = z
   .object({
     tipo: TipoIndicador,
-    periodo: PeriodoIndicador.optional(),
     poblacion: FiltrosPoblacionSchema.optional(),
     evento: FiltrosEventoSchema.optional(),
-  });
+  })
+  .strict();
 export type DefinicionIndicador = z.infer<typeof DefinicionIndicadorSchema>;
-
-// ── Legacy normalization ────────────────────────────────────────────────
-
-/**
- * Preprocess hook for FiltrosPoblacion: normalize legacy edad_* keys
- * to canonical min_* / max_* keys.
- */
-export function normalizePoblacionLegacy(
-  data: unknown,
-): unknown {
-  if (typeof data !== "object" || data === null) return data;
-
-  const d = data as Record<string, unknown>;
-
-  const legacyKeys = new Set([
-    "edad_min_anios",
-    "edad_min_meses",
-    "edad_min_dias",
-    "edad_max_anios",
-    "edad_max_meses",
-    "edad_max_dias",
-  ]);
-
-  const canonicalKeys = new Set([
-    "min_anios",
-    "min_meses",
-    "min_dias",
-    "max_anios_excl",
-    "max_meses_excl",
-    "max_dias",
-  ]);
-
-  const hasLegacy = Object.keys(d).some((k) => legacyKeys.has(k));
-  const hasCanonical = Object.keys(d).some((k) => canonicalKeys.has(k));
-
-  if (hasLegacy && hasCanonical) {
-    throw new Error(
-      "Cannot mix legacy age fields (edad_*) with canonical age fields (min_*/max_*). Use one naming convention only.",
-    );
-  }
-
-  if (!hasLegacy) return data;
-
-  const mapping: Record<string, string> = {
-    edad_min_anios: "min_anios",
-    edad_min_meses: "min_meses",
-    edad_min_dias: "min_dias",
-    edad_max_anios: "max_anios_excl",
-    edad_max_meses: "max_meses_excl",
-    edad_max_dias: "max_dias",
-  };
-
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(d)) {
-    if (key in mapping) {
-      result[mapping[key]] = value;
-    } else if (!legacyKeys.has(key)) {
-      result[key] = value;
-    }
-  }
-  return result;
-}
-
-/**
- * Preprocess hook for FiltrosEvento: normalize legacy encounter_type_uuids
- * to location_uuids.
- */
-export function normalizeEventoLegacy(data: unknown): unknown {
-  if (typeof data !== "object" || data === null) return data;
-
-  const d = data as Record<string, unknown>;
-
-  if ("location_uuids" in d) {
-    // Already has new field — strip legacy if present
-    const { encounter_type_uuids: _, ...rest } = d;
-    return rest;
-  }
-
-  if ("encounter_type_uuids" in d) {
-    const { encounter_type_uuids, ...rest } = d;
-    return { ...rest, location_uuids: encounter_type_uuids };
-  }
-
-  return data;
-}
-
-/**
- * Remove `periodo` from a stored definition for backward compatibility.
- * Legacy definitions may have a `periodo` field that is no longer meaningful;
- * this function strips it so downstream parsers see a clean shape.
- */
-export function stripPeriodoFromDefinicion(data: unknown): unknown {
-  if (typeof data !== "object" || data === null) return data;
-  const d = data as Record<string, unknown>;
-  if ("periodo" in d) {
-    const { periodo: _, ...rest } = d;
-    return rest;
-  }
-  return data;
-}
-
-/**
- * Preprocess hook for DefinicionIndicador: normalize flat JSONB shapes
- * (old diagnostico, observaciones, eventos[]) into nested evento structure.
- * Also strips legacy `periodo` from stored JSONB for backward compatibility.
- */
-export function normalizeDefinicionFlat(data: unknown): unknown {
-  if (typeof data !== "object" || data === null) return data;
-
-  let d = { ...(data as Record<string, unknown>) };
-
-  // ── Strip legacy periodo (stored JSONB backward compat) ──
-  d = stripPeriodoFromDefinicion(d) as Record<string, unknown>;
-
-  // ── Normalize nested poblacion first (legacy edad_* keys) ──
-  if ("poblacion" in d && typeof d["poblacion"] === "object" && d["poblacion"] !== null) {
-    d["poblacion"] = normalizePoblacionLegacy(d["poblacion"]);
-  }
-
-  // ── Normalize old eventos array → singular evento ──
-  if (!("evento" in d) && "eventos" in d) {
-    const eventos = d["eventos"] as unknown;
-    delete d["eventos"];
-    if (Array.isArray(eventos) && eventos.length > 0) {
-      d["evento"] = { ...(eventos[0] as Record<string, unknown>) };
-    }
-  }
-
-  const evento = d["evento"];
-  if (typeof evento !== "object" || evento === null || Array.isArray(evento)) {
-    // No evento or non-object — strip flat keys
-    delete d["diagnostico"];
-    delete d["observaciones"];
-    return d;
-  }
-
-  const ev = evento as Record<string, unknown>;
-
-  if ("diagnosticos" in ev || "ordenes" in ev) {
-    // Already nested — pass through
-    delete d["diagnostico"];
-    delete d["observaciones"];
-    return d;
-  }
-
-  const oldDiag = d["diagnostico"];
-  const oldObs = d["observaciones"];
-  delete d["diagnostico"];
-  delete d["observaciones"];
-
-  // ── Old diagnostico → evento.diagnosticos ──
-  if (typeof oldDiag === "object" && oldDiag !== null) {
-    const diag = oldDiag as Record<string, unknown>;
-    const tipo = diag["tipo_diagnostico"];
-    if (tipo !== undefined && tipo !== null) {
-      ev["diagnosticos"] = [
-        {
-          concepto_uuids: [],
-          tipo_diagnostico: tipo,
-        },
-      ];
-    }
-  }
-
-  // ── Old observaciones → evento.ordenes ──
-  if (Array.isArray(oldObs)) {
-    const ordenes: unknown[] = [];
-    for (const obs of oldObs) {
-      if (
-        typeof obs === "object" &&
-        obs !== null &&
-        (obs as Record<string, unknown>)["concepto_uuid"]
-      ) {
-        ordenes.push({
-          concepto_uuid: (obs as Record<string, unknown>)["concepto_uuid"],
-        });
-      }
-    }
-    if (ordenes.length > 0) {
-      ev["ordenes"] = ordenes;
-    }
-  }
-
-  d["evento"] = ev;
-
-  // ── Normalize evento legacy encounter_type_uuids ──
-  if (typeof d["evento"] === "object" && d["evento"] !== null) {
-    d["evento"] = normalizeEventoLegacy(d["evento"]);
-  }
-
-  return d;
-}
 
 // ── Parsing helpers ─────────────────────────────────────────────────────
 
 /**
- * Parse and validate a DefinicionIndicador with full legacy normalization.
+ * Parse and validate a DefinicionIndicador against the canonical schema.
  *
- * Use this for stored JSONB reads (which may contain legacy `periodo`).
- * For API request bodies, call `rejectPeriodoInPayload` first to reject
- * inbound payloads that still include `periodo`.
+ * Performs strict shape validation only — no legacy normalization, no
+ * field rewrites. For inbound API payloads, call `rejectPeriodoInPayload`
+ * first to reject old contracts with a clear error.
  */
 export function parseDefinicionIndicador(
   data: unknown,
 ): DefinicionIndicador {
-  const step1 = normalizeDefinicionFlat(data);
-  return DefinicionIndicadorSchema.parse(step1);
+  return DefinicionIndicadorSchema.parse(data);
 }
 
 /**
- * Check whether a raw definition payload contains a `periodo` field and
- * throw a validation error if it does. Call this BEFORE parseDefinicionIndicador
- * on inbound API payloads to reject the old contract.
+ * Reject a raw inbound payload that still carries the legacy top-level
+ * `periodo` field. Kept as a separate helper so routers can return a
+ * precise 422 error before the main schema runs.
  */
 export function rejectPeriodoInPayload(data: unknown): void {
   if (typeof data === "object" && data !== null && "periodo" in (data as Record<string, unknown>)) {
@@ -377,21 +211,19 @@ export function rejectPeriodoInPayload(data: unknown): void {
 }
 
 /**
- * Parse FiltrosPoblacion with legacy age-field normalization.
+ * Parse FiltrosPoblacion against the canonical schema.
  */
 export function parseFiltrosPoblacion(
   data: unknown,
 ): FiltrosPoblacion {
-  const normalized = normalizePoblacionLegacy(data);
-  return FiltrosPoblacionSchema.parse(normalized);
+  return FiltrosPoblacionSchema.parse(data);
 }
 
 /**
- * Parse FiltrosEvento with legacy encounter_type_uuids normalization.
+ * Parse FiltrosEvento against the canonical schema.
  */
 export function parseFiltrosEvento(data: unknown): FiltrosEvento {
-  const normalized = normalizeEventoLegacy(data);
-  return FiltrosEventoSchema.parse(normalized);
+  return FiltrosEventoSchema.parse(data);
 }
 
 // ── Helper: has_age_filter ──────────────────────────────────────────────

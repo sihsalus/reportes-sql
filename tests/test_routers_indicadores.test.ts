@@ -280,6 +280,25 @@ describe("Indicadores Router", () => {
       expect(mockVersionCreate).not.toHaveBeenCalled();
     });
 
+    test("rejects definicion with periodo field", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .put(`/indicadores/${UUID}`)
+        .send({
+          nombre: "Test",
+          definicion: {
+            tipo: "conteo_atenciones",
+            periodo: "mes_actual",
+          },
+        });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toContain("periodo");
+      expect(mockVersionCreate).not.toHaveBeenCalled();
+    });
+
     test("returns 404 for unknown indicator", async () => {
       mockIndicadorFindByPk.mockResolvedValue(null);
 
