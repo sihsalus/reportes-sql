@@ -197,6 +197,54 @@ describe("Resultados Router", () => {
       expect(res.body.granularity).toBe("trimestral");
     });
 
+    test("annual SQL uses an aggregate-safe period label (regression: 500 on /series?granularity=anual)", async () => {
+      // PostgreSQL rejects SELECT TO_CHAR(mes_referencia, 'YYYY') when the
+      // query only groups by EXTRACT(YEAR FROM mes_referencia) — the column
+      // must appear inside an aggregate (e.g. MIN(mes_referencia)) to match
+      // the GROUP BY clause. This test pins the contract to the same pattern
+      // used in src/database/views.ts (vw_resultado_anual).
+      mockSequelizeQuery.mockResolvedValue([
+        { periodo_label: "2026", valor: "1500", meses_disponibles: 12, anio: 2026 },
+      ]);
+
+      const app = createTestApp();
+      await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=anual",
+      );
+
+      expect(mockSequelizeQuery).toHaveBeenCalledTimes(1);
+      const sqlArg = mockSequelizeQuery.mock.calls[0]?.[0];
+      expect(typeof sqlArg).toBe("string");
+
+      // Aggregate-safe: period label derived from MIN(mes_referencia) like the view.
+      expect(sqlArg as string).toMatch(/TO_CHAR\(\s*MIN\(\s*mes_referencia\s*\)\s*,\s*'YYYY'\s*\)/i);
+
+      // Regression guard: the unaggregated form that triggered the 500 must not
+      // be present (TO_CHAR(mes_referencia, 'YYYY') without MIN/Max/Sum wrapper).
+      expect(sqlArg as string).not.toMatch(/TO_CHAR\(\s*mes_referencia\s*,\s*'YYYY'\s*\)/i);
+    });
+
+    test("returns annual rollup rows", async () => {
+      mockSequelizeQuery.mockResolvedValue([
+        { periodo_label: "2026", valor: "1500.5", meses_disponibles: 12, anio: 2026 },
+      ]);
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=anual",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.items).toHaveLength(1);
+      expect(res.body.items[0].periodo_label).toBe("2026");
+      expect(res.body.items[0].valor).toBe(1500.5);
+      expect(res.body.items[0].meses_disponibles).toBe(12);
+      expect(res.body.items[0].anio).toBe(2026);
+      expect(res.body.granularity).toBe("anual");
+      expect(res.body.anio).toBe(2026);
+      expect(res.body.indicador_id).toBe("uuid-x");
+    });
+
     test("returns empty series when no data", async () => {
       mockSequelizeQuery.mockResolvedValue([]);
 

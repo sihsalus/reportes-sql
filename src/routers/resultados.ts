@@ -194,7 +194,7 @@ const GRANULARITY_SQL: Record<Granularity, string> = {
   anual: `
     SELECT
       EXTRACT(YEAR FROM mes_referencia)::int AS anio,
-      TO_CHAR(mes_referencia, 'YYYY') AS periodo_label,
+      TO_CHAR(MIN(mes_referencia), 'YYYY') AS periodo_label,
       SUM(valor)::numeric AS valor,
       COUNT(*)::int AS meses_disponibles
     FROM indicador_resultado ir
