@@ -207,7 +207,7 @@ describe("Metas Router", () => {
       );
 
       expect(res.status).toBe(404);
-      expect(res.body.detail).toMatch(/Meta no encontrada/);
+      expect(res.body.detail.message).toMatch(/Meta no encontrada/);
     });
 
     test("SC-12: returns 422 when both indicador_version_id and indicador_id are provided", async () => {
@@ -266,7 +266,7 @@ describe("Metas Router", () => {
       );
 
       expect(res.status).toBe(404);
-      expect(res.body.detail).toMatch(/Meta no encontrada/);
+      expect(res.body.detail.message).toMatch(/Meta no encontrada/);
     });
   });
 });

@@ -136,7 +136,10 @@ metasRouter.get(
 
       if (!latestVersion) {
         res.status(404).json({
-          detail: "No se encontró una versión activa para el indicador",
+          detail: {
+            field: "indicador_id",
+            message: "No se encontró una versión activa para el indicador",
+          },
         });
         return;
       }
@@ -152,7 +155,10 @@ metasRouter.get(
 
     if (!meta) {
       res.status(404).json({
-        detail: "Meta no encontrada",
+        detail: {
+          field: "indicador_version_id",
+          message: "Meta no encontrada",
+        },
       });
       return;
     }
@@ -196,7 +202,10 @@ metasRouter.delete(
 
     if (deleted === 0) {
       res.status(404).json({
-        detail: "Meta no encontrada",
+        detail: {
+          field: "indicador_version_id",
+          message: "Meta no encontrada",
+        },
       });
       return;
     }
