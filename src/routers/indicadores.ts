@@ -12,11 +12,13 @@
 
 import { Router, type Request, type Response } from "express";
 import { v4 as uuidv4 } from "uuid";
+import { QueryTypes } from "sequelize";
 import {
   Indicador,
   IndicadorVersion,
   IndicadorResultado,
 } from "../models/indicador.js";
+import { sequelize } from "../database/postgres.js";
 import {
   parseDefinicionIndicador,
   rejectPeriodoInPayload,
@@ -413,6 +415,26 @@ indicadoresRouter.post(
         definicion: definicion as unknown as Record<string, unknown>,
         creado_en: new Date(),
       });
+
+      // Auto-copy metas from previous version (non-fatal)
+      try {
+        const previousVersion = await IndicadorVersion.findOne({
+          where: { indicador_id: indicador.id, version: nextVersion - 1 },
+          attributes: ["id"],
+        });
+        if (previousVersion) {
+          await sequelize.query(
+            `INSERT INTO indicador_meta (id, indicador_version_id, anio, valor_meta, creado_en)
+             SELECT gen_random_uuid(), :newVersionId, anio, valor_meta, NOW()
+             FROM indicador_meta
+             WHERE indicador_version_id = :oldVersionId
+             ON CONFLICT (indicador_version_id, anio) DO NOTHING`,
+            { replacements: { newVersionId: nuevaVersion.id, oldVersionId: previousVersion.id } },
+          );
+        }
+      } catch (copyErr) {
+        console.warn("Failed to auto-copy metas to new version:", copyErr);
+      }
 
       res.status(201).json(nuevaVersion.toJSON());
     } catch (err: unknown) {

@@ -213,6 +213,7 @@ resultadosRouter.get(
     const indicadorId = req.query["indicador_id"] as string | undefined;
     const anioStr = req.query["anio"] as string | undefined;
     const granularity = (req.query["granularity"] as string) || "mensual";
+    const includeMeta = req.query["include_meta"] === "true";
 
     if (!indicadorId) {
       res.status(422).json({
@@ -281,6 +282,30 @@ resultadosRouter.get(
 
       return item;
     });
+
+    // Enrich with meta values when requested
+    if (includeMeta && indicadorId) {
+      const distinctYears = [...new Set(items.map((r) => r.anio as number))];
+      const [latestVersion] = await sequelize.query<{ id: string }>(
+        `SELECT iv.id FROM indicador_version iv
+         JOIN indicador i ON i.id = iv.indicador_id
+         WHERE iv.indicador_id = :iId AND i.activo = true
+         ORDER BY iv.version DESC LIMIT 1`,
+        { replacements: { iId: indicadorId }, type: QueryTypes.SELECT },
+      );
+      const metaMap = new Map<number, number | null>();
+      if (latestVersion && distinctYears.length > 0) {
+        const metaRows = await sequelize.query<{ anio: number; valor_meta: string }>(
+          `SELECT anio, valor_meta::float8 FROM indicador_meta
+           WHERE indicador_version_id = :vId AND anio = ANY(:years)`,
+          { replacements: { vId: latestVersion.id, years: distinctYears }, type: QueryTypes.SELECT },
+        );
+        for (const m of metaRows) metaMap.set(m.anio, parseFloat(String(m.valor_meta)));
+      }
+      for (const item of items) {
+        item["meta"] = metaMap.get(item.anio as number) ?? null;
+      }
+    }
 
     res.json({
       items,

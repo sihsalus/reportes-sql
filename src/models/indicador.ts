@@ -185,6 +185,61 @@ IndicadorResultado.init(
   },
 );
 
+// ── IndicadorMeta ──────────────────────────────────────────────────────
+
+export class IndicadorMeta extends Model<
+  InferAttributes<IndicadorMeta>,
+  InferCreationAttributes<IndicadorMeta>
+> {
+  declare id: CreationOptional<string>;
+  declare indicador_version_id: string;
+  declare anio: number;
+  declare valor_meta: number;
+  declare creado_en: CreationOptional<Date>;
+}
+
+IndicadorMeta.init(
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    indicador_version_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      references: {
+        model: IndicadorVersion,
+        key: "id",
+      },
+    },
+    anio: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    valor_meta: {
+      type: DataTypes.DECIMAL(18, 6),
+      allowNull: false,
+    },
+    creado_en: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+      allowNull: false,
+    },
+  },
+  {
+    sequelize,
+    tableName: "indicador_meta",
+    timestamps: false,
+    indexes: [
+      {
+        unique: true,
+        fields: ["indicador_version_id", "anio"],
+      },
+    ],
+  },
+);
+
 // ── Associations ───────────────────────────────────────────────────────
 
 Indicador.hasMany(IndicadorVersion, {
@@ -206,6 +261,18 @@ IndicadorVersion.hasMany(IndicadorResultado, {
 });
 
 IndicadorResultado.belongsTo(IndicadorVersion, {
+  targetKey: "id",
+  foreignKey: "indicador_version_id",
+  as: "indicador_version",
+});
+
+IndicadorVersion.hasMany(IndicadorMeta, {
+  sourceKey: "id",
+  foreignKey: "indicador_version_id",
+  as: "metas",
+});
+
+IndicadorMeta.belongsTo(IndicadorVersion, {
   targetKey: "id",
   foreignKey: "indicador_version_id",
   as: "indicador_version",

@@ -257,6 +257,60 @@ describe("Resultados Router", () => {
       expect(res.body.items).toHaveLength(0);
     });
 
+    test("SC-06: series without include_meta has no meta field and issues one query", async () => {
+      mockSequelizeQuery.mockResolvedValue([
+        { periodo_label: "2026-01", valor: "100", meses_disponibles: 1, anio: 2026, mes_referencia: "2026-01-01" },
+      ]);
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=mensual",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.items[0]).not.toHaveProperty("meta");
+      expect(mockSequelizeQuery).toHaveBeenCalledTimes(1);
+    });
+
+    test("SC-07: series with include_meta=true populates meta for matching year", async () => {
+      mockSequelizeQuery
+        .mockResolvedValueOnce([
+          { periodo_label: "2026-01", valor: "100", meses_disponibles: 1, anio: 2026, mes_referencia: "2026-01-01" },
+          { periodo_label: "2026-02", valor: "200", meses_disponibles: 1, anio: 2026, mes_referencia: "2026-02-01" },
+        ])
+        .mockResolvedValueOnce([{ id: VERSION_UUID }])
+        .mockResolvedValueOnce([{ anio: 2026, valor_meta: "1500" }]);
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=mensual&include_meta=true",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.items).toHaveLength(2);
+      expect(res.body.items[0].meta).toBe(1500);
+      expect(res.body.items[1].meta).toBe(1500);
+      expect(mockSequelizeQuery).toHaveBeenCalledTimes(3);
+    });
+
+    test("SC-08: series with include_meta=true returns null when no meta for year", async () => {
+      mockSequelizeQuery
+        .mockResolvedValueOnce([
+          { periodo_label: "2024-01", valor: "50", meses_disponibles: 1, anio: 2024, mes_referencia: "2024-01-01" },
+        ])
+        .mockResolvedValueOnce([{ id: VERSION_UUID }])
+        .mockResolvedValueOnce([]);
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x&anio=2024&granularity=mensual&include_meta=true",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.items[0]).toHaveProperty("meta");
+      expect(res.body.items[0].meta).toBeNull();
+    });
+
     test("rejects missing anio", async () => {
       const app = createTestApp();
       const res = await supertest(app).get(

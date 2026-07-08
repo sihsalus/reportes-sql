@@ -24,6 +24,7 @@ import { backfillResultadoCanonical, createRollupViews } from "./database/views.
 import { indicadoresRouter } from "./routers/indicadores.js";
 import { resultadosRouter } from "./routers/resultados.js";
 import { conceptosRouter } from "./routers/conceptos.js";
+import { metasRouter } from "./routers/metas.js";
 import { buildOpenapiSpec } from "./docs/openapi.js";
 import { seedDefaultIndicador } from "./seed/default-indicador.js";
 
@@ -58,6 +59,7 @@ export function createApp(basePath: string): Express {
   publicRouter.use("/indicadores", indicadoresRouter);
   publicRouter.use("/resultados", resultadosRouter);
   publicRouter.use("/conceptos", conceptosRouter);
+  publicRouter.use("/metas", metasRouter);
   // Explicit GET route MUST precede swaggerUi.serve middleware, which
   // otherwise intercepts all /docs/* requests including /docs/openapi.json.
   publicRouter.get("/docs/openapi.json", (_req: Request, res: Response) => {

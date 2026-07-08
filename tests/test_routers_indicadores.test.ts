@@ -16,6 +16,13 @@ const mockVersionCreate = jest.fn();
 const mockVersionFindOne = jest.fn();
 const mockVersionFindAll = jest.fn();
 const mockVersionMax = jest.fn();
+const mockSequelizeQuery = jest.fn();
+
+jest.mock("../src/database/postgres.js", () => ({
+  sequelize: {
+    query: (...args: unknown[]) => mockSequelizeQuery(...args),
+  },
+}));
 
 jest.mock("../src/models/indicador.js", () => ({
   Indicador: Object.assign(
@@ -51,11 +58,13 @@ import express from "express";
 import type { Request, Response } from "express";
 import supertest from "supertest";
 import { indicadoresRouter } from "../src/routers/indicadores.js";
+import { metasRouter } from "../src/routers/metas.js";
 
 function createTestApp() {
   const app = express();
   app.use(express.json());
   app.use("/indicadores", indicadoresRouter);
+  app.use("/metas", metasRouter);
   app.use(
     (
       err: unknown,
@@ -382,6 +391,103 @@ describe("Indicadores Router", () => {
 
       expect(res.status).toBe(422);
       expect(res.body.detail.field).toContain("periodo");
+    });
+
+    test("SC-15: new version auto-copies metas from previous version", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      mockVersionMax.mockResolvedValue(1);
+      mockVersionCreate.mockResolvedValue(
+        makeVersionRow({ version: 2, id: UUID2 }),
+      );
+      mockVersionFindOne.mockResolvedValue({ id: VERSION_UUID });
+      mockSequelizeQuery.mockResolvedValue([]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post(`/indicadores/${UUID}/versiones`)
+        .send({
+          definicion: {
+            tipo: "conteo_pacientes",
+          },
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.version).toBe(2);
+      expect(mockSequelizeQuery).toHaveBeenCalledTimes(1);
+      const sqlArg = mockSequelizeQuery.mock.calls[0]?.[0];
+      expect(typeof sqlArg).toBe("string");
+      expect(sqlArg as string).toMatch(/INSERT INTO indicador_meta/);
+      expect(sqlArg as string).toMatch(/ON CONFLICT \(indicador_version_id, anio\) DO NOTHING/);
+
+      const replacements = mockSequelizeQuery.mock.calls[0]?.[1] as { replacements?: Record<string, unknown> };
+      expect(replacements?.replacements?.newVersionId).toBe(UUID2);
+      expect(replacements?.replacements?.oldVersionId).toBe(VERSION_UUID);
+    });
+
+    test("SC-16: new version with no previous metas starts empty", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      mockVersionMax.mockResolvedValue(1);
+      mockVersionCreate.mockResolvedValue(
+        makeVersionRow({ version: 2, id: UUID2 }),
+      );
+      mockVersionFindOne.mockResolvedValue({ id: VERSION_UUID });
+      mockSequelizeQuery.mockResolvedValue([]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post(`/indicadores/${UUID}/versiones`)
+        .send({
+          definicion: {
+            tipo: "conteo_pacientes",
+          },
+        });
+
+      expect(res.status).toBe(201);
+      expect(mockSequelizeQuery).toHaveBeenCalledTimes(1);
+    });
+
+    test("SC-17: operator can override inherited meta via PUT /metas", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      mockVersionMax.mockResolvedValue(1);
+      mockVersionCreate.mockResolvedValue(
+        makeVersionRow({ version: 2, id: UUID2 }),
+      );
+      mockVersionFindOne
+        .mockResolvedValueOnce({ id: VERSION_UUID }) // previous version lookup
+        .mockResolvedValueOnce({ id: UUID2 }); // version existence check on PUT
+      mockSequelizeQuery
+        .mockResolvedValueOnce([]) // copy SQL
+        .mockResolvedValueOnce([
+          {
+            id: "00000000-0000-0000-bbbb-000000000002",
+            indicador_version_id: UUID2,
+            anio: 2025,
+            valor_meta: 2000,
+            creado_en: new Date("2026-01-01"),
+          },
+        ]);
+
+      const app = createTestApp();
+      const versionRes = await supertest(app)
+        .post(`/indicadores/${UUID}/versiones`)
+        .send({
+          definicion: {
+            tipo: "conteo_pacientes",
+          },
+        });
+
+      expect(versionRes.status).toBe(201);
+      expect(versionRes.body.version).toBe(2);
+
+      const metaRes = await supertest(app).put("/metas").send({
+        indicador_version_id: UUID2,
+        anio: 2025,
+        valor_meta: 2000,
+      });
+
+      expect(metaRes.status).toBe(200);
+      expect(metaRes.body.indicador_version_id).toBe(UUID2);
+      expect(metaRes.body.valor_meta).toBe(2000);
     });
   });
 
