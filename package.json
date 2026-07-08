@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Microservicio para definición, versionado y cálculo de indicadores clínicos (TypeScript)",
   "private": true,
-  "packageManager": "pnpm@11.2.2",
+  "packageManager": "yarn@4.13.0",
   "type": "module",
   "scripts": {
     "build": "tsc",

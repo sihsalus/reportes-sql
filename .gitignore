@@ -23,6 +23,13 @@ coverage/
 # Node
 node_modules/
 
+# Yarn Berry
+.yarn/*
+!.yarn/releases
+!.yarn/patches
+!.yarn/plugins
+!.yarn/sdks
+
 # Local databases
 *.db
 *.sqlite
