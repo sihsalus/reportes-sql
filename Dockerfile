@@ -23,14 +23,21 @@ EXPOSE 8000
 CMD ["yarn", "tsx", "watch", "src/main.ts"]
 
 # ── Production stage ─────────────────────────────────────────────────────
-# Install only production dependencies so the image is lean.
-FROM node:22-alpine AS prod-builder
+# Reuse builder's node_modules and prune devDependencies.
+FROM builder AS prod-builder
 
 WORKDIR /build
 
-COPY package.json yarn.lock .yarnrc.yml ./
-ENV NODE_ENV=production
-RUN corepack enable && yarn install --immutable
+# Remove devDependencies by deleting their directories
+RUN node -e "
+  const pkg = require('./package.json');
+  const devDeps = Object.keys(pkg.devDependencies || {});
+  const fs = require('fs');
+  for (const dep of devDeps) {
+    const dir = './node_modules/' + dep;
+    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+  }
+"
 
 COPY --from=builder /build/dist ./dist
 
