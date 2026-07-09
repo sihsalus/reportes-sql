@@ -3,14 +3,12 @@ FROM node:22-alpine AS builder
 
 WORKDIR /build
 
-RUN npm install -g pnpm@11.2.2
-
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --ignore-scripts
+COPY package.json yarn.lock ./
+RUN corepack enable && yarn install --immutable
 
 COPY tsconfig.json ./
 COPY src ./src
-RUN pnpm build
+RUN yarn build
 
 # ── Dev stage (docker compose target) ────────────────────────────────────
 # Includes dev dependencies so `tsx watch` and other dev tooling work.
@@ -22,12 +20,19 @@ COPY --from=builder /build/dist ./dist
 COPY --from=builder /build/package.json ./
 
 EXPOSE 8000
-CMD ["pnpm", "exec", "tsx", "watch", "src/main.ts"]
+CMD ["yarn", "tsx", "watch", "src/main.ts"]
 
 # ── Production stage ─────────────────────────────────────────────────────
-# Prune dev dependencies after build so the production image is lean.
-FROM builder AS prod-builder
-RUN pnpm prune --prod --ignore-scripts
+# Install only production dependencies so the image is lean.
+FROM node:22-alpine AS prod-builder
+
+WORKDIR /build
+
+COPY package.json yarn.lock ./
+ENV NODE_ENV=production
+RUN corepack enable && yarn install --immutable
+
+COPY --from=builder /build/dist ./dist
 
 FROM node:22-alpine
 

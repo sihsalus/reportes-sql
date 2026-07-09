@@ -146,12 +146,32 @@ metasRouter.get(
       versionId = latestVersion.id;
     }
 
-    const meta = await IndicadorMeta.findOne({
-      where: {
-        indicador_version_id: versionId,
-        anio: query.anio,
+    const [meta] = await sequelize.query<{
+      id: string;
+      indicador_version_id: string;
+      anio: number;
+      valor_meta: string;
+      creado_en: Date;
+      indicador_nombre: string;
+      version_numero: number;
+    }>(
+      `SELECT m.id,
+              m.indicador_version_id,
+              m.anio,
+              m.valor_meta::float8,
+              m.creado_en,
+              i.nombre AS indicador_nombre,
+              iv.version AS version_numero
+       FROM indicador_meta m
+       JOIN indicador_version iv ON iv.id = m.indicador_version_id
+       JOIN indicador i ON i.id = iv.indicador_id
+       WHERE m.indicador_version_id = :versionId
+         AND m.anio = :anio`,
+      {
+        replacements: { versionId, anio: query.anio },
+        type: QueryTypes.SELECT,
       },
-    });
+    );
 
     if (!meta) {
       res.status(404).json({
@@ -169,6 +189,8 @@ metasRouter.get(
       anio: meta.anio,
       valor_meta: parseFloat(String(meta.valor_meta)),
       creado_en: meta.creado_en,
+      indicador_nombre: meta.indicador_nombre,
+      version_numero: meta.version_numero,
     });
   }),
 );

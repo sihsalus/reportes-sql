@@ -9,14 +9,14 @@ almacena resultados en PostgreSQL.
 
 ```bash
 cp .env.example .env        # edit DB credentials as needed
-pnpm install --frozen-lockfile
-pnpm dev                     # http://localhost:8000
+yarn install --frozen-lockfile
+yarn dev                     # http://localhost:8000
 ```
 
 ## Requirements
 
 - Node.js 22+
-- pnpm 11+
+- yarn 4+
 - PostgreSQL 12+ (for indicator storage)
 - Access to an OpenMRS instance (MySQL + REST API)
 
@@ -65,7 +65,7 @@ automatically adjusted to include the prefix when BASE_PATH is set.
 ### Standalone local (no prefix)
 
 ```bash
-pnpm dev
+yarn dev
 # API at http://localhost:8000
 # Swagger at http://localhost:8000/docs
 ```
@@ -73,7 +73,7 @@ pnpm dev
 ### Integrated local (with OpenMRS gateway prefix)
 
 ```bash
-BASE_PATH=/openmrs/services/reportes-sql pnpm dev
+BASE_PATH=/openmrs/services/reportes-sql yarn dev
 # API at http://localhost:8000/openmrs/services/reportes-sql
 # Swagger at http://localhost:8000/openmrs/services/reportes-sql/docs
 # Health probe at http://localhost:8000/health
@@ -101,7 +101,7 @@ Notes:
 ### Production (compiled)
 
 ```bash
-pnpm build && pnpm start
+yarn build && yarn start
 ```
 
 ### Docker (dev stack)
@@ -199,9 +199,9 @@ Solo se permite una cota mínima y una cota máxima a la vez.
 ## Tests
 
 ```bash
-pnpm test              # run all tests
-pnpm test:watch        # watch mode
-pnpm test:coverage     # with coverage report
+yarn test              # run all tests
+yarn test:watch        # watch mode
+yarn test:coverage     # with coverage report
 ```
 
 ## Container image (GHCR)

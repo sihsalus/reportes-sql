@@ -43,6 +43,9 @@ const VERSION_UUID = "00000000-0000-0000-aaaa-000000000001";
 const INDICADOR_UUID = "00000000-0000-0000-0000-000000000001";
 const META_UUID = "00000000-0000-0000-bbbb-000000000001";
 
+const INDICADOR_NOMBRE = "Mortalidad materna";
+const VERSION_NUMERO = 3;
+
 function makeMetaRow(overrides: Record<string, unknown> = {}) {
   return {
     id: META_UUID,
@@ -50,6 +53,8 @@ function makeMetaRow(overrides: Record<string, unknown> = {}) {
     anio: 2025,
     valor_meta: 1500,
     creado_en: new Date("2026-01-01"),
+    indicador_nombre: INDICADOR_NOMBRE,
+    version_numero: VERSION_NUMERO,
     ...overrides,
   };
 }
@@ -162,7 +167,7 @@ describe("Metas Router", () => {
 
   describe("GET /metas — fetch", () => {
     test("SC-03: returns meta by indicador_version_id + anio", async () => {
-      mockMetaFindOne.mockResolvedValue(makeMetaRow());
+      mockSequelizeQuery.mockResolvedValue([makeMetaRow()]);
 
       const app = createTestApp();
       const res = await supertest(app).get(
@@ -175,17 +180,17 @@ describe("Metas Router", () => {
         indicador_version_id: VERSION_UUID,
         anio: 2025,
         valor_meta: 1500,
+        indicador_nombre: INDICADOR_NOMBRE,
+        version_numero: VERSION_NUMERO,
       });
-      expect(mockMetaFindOne).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { indicador_version_id: VERSION_UUID, anio: 2025 },
-        }),
-      );
+      expect(mockSequelizeQuery).toHaveBeenCalledTimes(1);
     });
 
     test("SC-04: returns meta by indicador_id + anio resolving latest version", async () => {
-      mockSequelizeQuery.mockResolvedValue([{ id: VERSION_UUID }]);
-      mockMetaFindOne.mockResolvedValue(makeMetaRow());
+      // First call: resolve latest version; second call: fetch meta with JOINs
+      mockSequelizeQuery
+        .mockResolvedValueOnce([{ id: VERSION_UUID }])
+        .mockResolvedValueOnce([makeMetaRow()]);
 
       const app = createTestApp();
       const res = await supertest(app).get(
@@ -195,11 +200,13 @@ describe("Metas Router", () => {
       expect(res.status).toBe(200);
       expect(res.body.indicador_version_id).toBe(VERSION_UUID);
       expect(res.body.valor_meta).toBe(1500);
-      expect(mockSequelizeQuery).toHaveBeenCalledTimes(1);
+      expect(res.body.indicador_nombre).toBe(INDICADOR_NOMBRE);
+      expect(res.body.version_numero).toBe(VERSION_NUMERO);
+      expect(mockSequelizeQuery).toHaveBeenCalledTimes(2);
     });
 
     test("SC-14: returns 404 when meta not found by version", async () => {
-      mockMetaFindOne.mockResolvedValue(null);
+      mockSequelizeQuery.mockResolvedValue([]);
 
       const app = createTestApp();
       const res = await supertest(app).get(
