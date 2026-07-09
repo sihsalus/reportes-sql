@@ -3742,7 +3742,7 @@ __metadata:
     ts-node: "npm:^10.9.2"
     tsx: "npm:^4.19.0"
     typescript: "npm:^5.5.4"
-    uuid: "npm:^10.0.0"
+    uuid: "npm:^14.0.1"
     zod: "npm:^3.23.8"
     zod-to-json-schema: "npm:^3.25.2"
   languageName: unknown
@@ -5030,12 +5030,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"uuid@npm:^10.0.0":
-  version: 10.0.0
-  resolution: "uuid@npm:10.0.0"
+"uuid@npm:^14.0.1":
+  version: 14.0.1
+  resolution: "uuid@npm:14.0.1"
   bin:
-    uuid: dist/bin/uuid
-  checksum: 10c0/eab18c27fe4ab9fb9709a5d5f40119b45f2ec8314f8d4cf12ce27e4c6f4ffa4a6321dc7db6c515068fa373c075b49691ba969f0010bf37f44c37ca40cd6bf7fe
+    uuid: dist-node/bin/uuid
+  checksum: 10c0/2d961289097cb68c37d93d1da0b5c3aafc1eb9948a455cca8d0ae53a099b2fe583b8933254a84097f700e6bac2e23033364904df0467c22551d5d9611febcaf6
   languageName: node
   linkType: hard
 
