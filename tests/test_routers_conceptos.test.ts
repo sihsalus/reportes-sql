@@ -233,15 +233,15 @@ describe("Conceptos Router", () => {
     test("resolves UUIDs in parallel", async () => {
       (globalThis.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetchRes(200, { uuid: "a", display: "Loc A" }),
+          mockFetchRes(200, { uuid: "00000000-0000-0000-0000-000000000001", display: "Loc A" }),
         )
         .mockResolvedValueOnce(
-          mockFetchRes(200, { uuid: "b", display: "Loc B" }),
+          mockFetchRes(200, { uuid: "00000000-0000-0000-0000-000000000002", display: "Loc B" }),
         );
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/conceptos/locations/resolve?uuids=a,b",
+        "/conceptos/locations/resolve?uuids=00000000-0000-0000-0000-000000000001,00000000-0000-0000-0000-000000000002",
       );
 
       expect(res.status).toBe(200);
@@ -252,17 +252,17 @@ describe("Conceptos Router", () => {
       (globalThis.fetch as jest.Mock)
         .mockResolvedValueOnce(mockFetchRes(404, {}))
         .mockResolvedValueOnce(
-          mockFetchRes(200, { uuid: "b", display: "Loc B" }),
+          mockFetchRes(200, { uuid: "00000000-0000-0000-0000-000000000002", display: "Loc B" }),
         );
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/conceptos/locations/resolve?uuids=a,b",
+        "/conceptos/locations/resolve?uuids=00000000-0000-0000-0000-000000000001,00000000-0000-0000-0000-000000000002",
       );
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveLength(1);
-      expect(res.body[0].uuid).toBe("b");
+      expect(res.body[0].uuid).toBe("00000000-0000-0000-0000-000000000002");
     });
 
     test("returns 400 for empty uuids", async () => {
@@ -273,13 +273,23 @@ describe("Conceptos Router", () => {
 
       expect(res.status).toBe(400);
     });
+
+    test("returns 400 for invalid UUID format", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/locations/resolve?uuids=../../admin/session",
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.body.detail).toMatch(/inválido/);
+    });
   });
 
   describe("GET /conceptos/diagnosticos/resolve", () => {
     test("resolves diagnosis with CIE-10 extraction", async () => {
       (globalThis.fetch as jest.Mock).mockResolvedValue(
         mockFetchRes(200, {
-          uuid: "d1",
+          uuid: "00000000-0000-0000-0000-000000000001",
           display: "J00.X Nasofaringitis",
           names: [
             { display: "J00.X" },
@@ -290,7 +300,7 @@ describe("Conceptos Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/conceptos/diagnosticos/resolve?uuids=d1",
+        "/conceptos/diagnosticos/resolve?uuids=00000000-0000-0000-0000-000000000001",
       );
 
       expect(res.status).toBe(200);
@@ -311,19 +321,22 @@ describe("Conceptos Router", () => {
     test("resolves concept UUIDs to display labels as a map", async () => {
       (globalThis.fetch as jest.Mock)
         .mockResolvedValueOnce(
-          mockFetchRes(200, { uuid: "c1", display: "Malaria" }),
+          mockFetchRes(200, { uuid: "00000000-0000-0000-0000-000000000001", display: "Malaria" }),
         )
         .mockResolvedValueOnce(
-          mockFetchRes(200, { uuid: "c2", display: "Cefalea" }),
+          mockFetchRes(200, { uuid: "00000000-0000-0000-0000-000000000002", display: "Cefalea" }),
         );
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/conceptos/buscar/resolve?uuids=c1,c2",
+        "/conceptos/buscar/resolve?uuids=00000000-0000-0000-0000-000000000001,00000000-0000-0000-0000-000000000002",
       );
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ c1: "Malaria", c2: "Cefalea" });
+      expect(res.body).toEqual({
+        "00000000-0000-0000-0000-000000000001": "Malaria",
+        "00000000-0000-0000-0000-000000000002": "Cefalea",
+      });
     });
 
     test("returns empty object when no uuids found (silent skip)", async () => {
@@ -333,7 +346,7 @@ describe("Conceptos Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/conceptos/buscar/resolve?uuids=unknown1,unknown2",
+        "/conceptos/buscar/resolve?uuids=00000000-0000-0000-0000-000000000001,00000000-0000-0000-0000-000000000002",
       );
 
       expect(res.status).toBe(200);
@@ -344,17 +357,17 @@ describe("Conceptos Router", () => {
       (globalThis.fetch as jest.Mock)
         .mockResolvedValueOnce(mockFetchRes(404, {}))
         .mockResolvedValueOnce(
-          mockFetchRes(200, { uuid: "c2", display: "Found" }),
+          mockFetchRes(200, { uuid: "00000000-0000-0000-0000-000000000002", display: "Found" }),
         );
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/conceptos/buscar/resolve?uuids=unknown,c2",
+        "/conceptos/buscar/resolve?uuids=00000000-0000-0000-0000-000000000001,00000000-0000-0000-0000-000000000002",
       );
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ c2: "Found" });
-      expect(res.body).not.toHaveProperty("unknown");
+      expect(res.body).toEqual({ "00000000-0000-0000-0000-000000000002": "Found" });
+      expect(res.body).not.toHaveProperty("00000000-0000-0000-0000-000000000001");
     });
 
     test("returns 400 for empty uuids", async () => {
@@ -373,10 +386,20 @@ describe("Conceptos Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/conceptos/buscar/resolve?uuids=c1",
+        "/conceptos/buscar/resolve?uuids=00000000-0000-0000-0000-000000000001",
       );
 
       expect(res.status).toBe(502);
+    });
+
+    test("returns 400 for invalid UUID format (SSRF protection)", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/buscar/resolve?uuids=../../admin/session",
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.body.detail).toMatch(/inválido/);
     });
   });
 });

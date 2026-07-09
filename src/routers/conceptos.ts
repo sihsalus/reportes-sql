@@ -123,8 +123,16 @@ conceptosRouter.get(
     await proxyWithErrorHandling(res, async () => {
       const uuidParam = (req.query["uuids"] as string) ?? "";
       const uuidList = parseUuidList(uuidParam);
+      const { valid, invalid } = validateUuids(uuidList);
 
-      if (uuidList.length === 0) {
+      if (invalid.length > 0) {
+        res.status(400).json({
+          detail: `UUIDs con formato inválido: ${invalid.join(", ")}`,
+        });
+        return;
+      }
+
+      if (valid.length === 0) {
         res.status(400).json({
           detail:
             "El parámetro 'uuids' debe contener al menos un UUID válido",
@@ -134,7 +142,7 @@ conceptosRouter.get(
 
       const result: Record<string, string> = {};
 
-      const fetches = uuidList.map(async (uid) => {
+      const fetches = valid.map(async (uid) => {
         const url = openmrsUrl(`concept/${uid}`);
         try {
           const resp = await fetch(
@@ -359,6 +367,8 @@ conceptosRouter.get("/locations", async (req: Request, res: Response) => {
 
 // ── Batch Resolve Endpoints ────────────────────────────────────────────
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function parseUuidList(raw: string): string[] {
   return [
     ...new Set(
@@ -370,6 +380,19 @@ function parseUuidList(raw: string): string[] {
   ];
 }
 
+function validateUuids(uuids: string[]): { valid: string[]; invalid: string[] } {
+  const valid: string[] = [];
+  const invalid: string[] = [];
+  for (const uuid of uuids) {
+    if (UUID_RE.test(uuid)) {
+      valid.push(uuid);
+    } else {
+      invalid.push(uuid);
+    }
+  }
+  return { valid, invalid };
+}
+
 // GET /conceptos/locations/resolve?uuids=...
 conceptosRouter.get(
   "/locations/resolve",
@@ -377,8 +400,16 @@ conceptosRouter.get(
     await proxyWithErrorHandling(res, async () => {
       const uuidParam = (req.query["uuids"] as string) ?? "";
       const uuidList = parseUuidList(uuidParam);
+      const { valid, invalid } = validateUuids(uuidList);
 
-      if (uuidList.length === 0) {
+      if (invalid.length > 0) {
+        res.status(400).json({
+          detail: `UUIDs con formato inválido: ${invalid.join(", ")}`,
+        });
+        return;
+      }
+
+      if (valid.length === 0) {
         res.status(400).json({
           detail:
             "El parámetro 'uuids' debe contener al menos un UUID válido",
@@ -388,7 +419,7 @@ conceptosRouter.get(
 
       const results: Array<{ uuid: string; display: string }> = [];
 
-      const fetches = uuidList.map(async (uid) => {
+      const fetches = valid.map(async (uid) => {
         const url = openmrsUrl(`location/${uid}`);
         try {
           const resp = await fetch(
@@ -431,8 +462,16 @@ conceptosRouter.get(
     await proxyWithErrorHandling(res, async () => {
       const uuidParam = (req.query["uuids"] as string) ?? "";
       const uuidList = parseUuidList(uuidParam);
+      const { valid, invalid } = validateUuids(uuidList);
 
-      if (uuidList.length === 0) {
+      if (invalid.length > 0) {
+        res.status(400).json({
+          detail: `UUIDs con formato inválido: ${invalid.join(", ")}`,
+        });
+        return;
+      }
+
+      if (valid.length === 0) {
         res.status(400).json({
           detail:
             "El parámetro 'uuids' debe contener al menos un UUID válido",
@@ -446,7 +485,7 @@ conceptosRouter.get(
         nombre: string;
       }> = [];
 
-      const fetches = uuidList.map(async (uid) => {
+      const fetches = valid.map(async (uid) => {
         const url = openmrsUrl(`concept/${uid}`);
         try {
           const resp = await fetch(

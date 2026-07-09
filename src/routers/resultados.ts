@@ -26,6 +26,46 @@ import { resolveConceptMap } from "../validators/openmrs.js";
 
 export const resultadosRouter: Router = Router();
 
+// ── Rate limiter for expensive batch endpoints ─────────────────────────
+
+const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+function rateLimit(
+  key: string,
+  maxRequests: number,
+  windowMs: number,
+): boolean {
+  const now = Date.now();
+  const entry = rateLimitStore.get(key);
+
+  if (!entry || now > entry.resetAt) {
+    rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+
+  if (entry.count >= maxRequests) {
+    return false;
+  }
+
+  entry.count++;
+  return true;
+}
+
+// Cleanup stale entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of rateLimitStore) {
+    if (now > entry.resetAt) {
+      rateLimitStore.delete(key);
+    }
+  }
+}, 5 * 60 * 1000);
+
+// Exported for testing only
+export function resetRateLimitStore(): void {
+  rateLimitStore.clear();
+}
+
 // ── Helper: async handler wrapper ──────────────────────────────────────
 
 function asyncHandler(
@@ -320,7 +360,15 @@ resultadosRouter.get(
 
 resultadosRouter.post(
   "/calcular-ahora",
-  asyncHandler(async (_req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
+    const clientIp = req.ip ?? req.socket.remoteAddress ?? "unknown";
+    if (!rateLimit(`calcular-ahora:${clientIp}`, 3, 60_000)) {
+      res.status(429).json({
+        detail: "Demasiadas solicitudes. Intentá de nuevo en un minuto.",
+      });
+      return;
+    }
+
     const indicadores = await Indicador.findAll({
       where: { activo: true },
     });
@@ -428,6 +476,14 @@ resultadosRouter.post(
 resultadosRouter.post(
   "/recalcular-anio",
   asyncHandler(async (req: Request, res: Response) => {
+    const clientIp = req.ip ?? req.socket.remoteAddress ?? "unknown";
+    if (!rateLimit(`recalcular-anio:${clientIp}`, 2, 300_000)) {
+      res.status(429).json({
+        detail: "Demasiadas solicitudes. Intentá de nuevo en 5 minutos.",
+      });
+      return;
+    }
+
     const { anio, indicador_id } = req.body as {
       anio?: number;
       indicador_id?: string;

@@ -46,7 +46,7 @@ jest.mock("../src/validators/openmrs.js", () => ({
 
 import express from "express";
 import supertest from "supertest";
-import { resultadosRouter } from "../src/routers/resultados.js";
+import { resultadosRouter, resetRateLimitStore } from "../src/routers/resultados.js";
 
 function createTestApp() {
   const app = express();
@@ -104,6 +104,7 @@ function makeResultadoRow(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  resetRateLimitStore();
   mockResolveConceptMap.mockResolvedValue({});
   mockExecuteAndPersist.mockResolvedValue([]);
 });
