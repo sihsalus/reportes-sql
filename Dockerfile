@@ -3,7 +3,7 @@ FROM node:22-alpine AS builder
 
 WORKDIR /build
 
-COPY package.json yarn.lock ./
+COPY package.json yarn.lock .yarnrc.yml ./
 RUN corepack enable && yarn install --immutable
 
 COPY tsconfig.json ./
@@ -28,7 +28,7 @@ FROM node:22-alpine AS prod-builder
 
 WORKDIR /build
 
-COPY package.json yarn.lock ./
+COPY package.json yarn.lock .yarnrc.yml ./
 ENV NODE_ENV=production
 RUN corepack enable && yarn install --immutable
 
