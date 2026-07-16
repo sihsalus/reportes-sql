@@ -38,3 +38,5 @@ node_modules/
 # Logs
 *.log
 
+# Local Pi runtime state
+.atl/

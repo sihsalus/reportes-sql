@@ -12,6 +12,7 @@ import type {
   FiltroOrden,
   FiltrosPoblacion,
 } from "../types/definicion.js";
+import { hasAgeFilter } from "../types/definicion.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -481,17 +482,4 @@ function buildDiagnosticosFilter(
     "JOIN concept c ON c.concept_id = ed.diagnosis_coded";
   const clause = conditions.join(" AND ");
   return { joins, clause, params };
-}
-
-// ── Re-exported helper ─────────────────────────────────────────────────
-
-function hasAgeFilter(poblacion: FiltrosPoblacion): boolean {
-  return (
-    poblacion.min_dias !== undefined ||
-    poblacion.min_meses !== undefined ||
-    poblacion.min_anios !== undefined ||
-    poblacion.max_dias !== undefined ||
-    poblacion.max_meses_excl !== undefined ||
-    poblacion.max_anios_excl !== undefined
-  );
 }

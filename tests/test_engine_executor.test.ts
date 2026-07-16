@@ -16,6 +16,11 @@ jest.mock("../src/database/mysql.js", () => ({
   getMysqlPool: () => ({
     query: mockMysqlQuery,
   }),
+  queryMysql: jest.fn(async (sql: string, params: unknown) => {
+    // Forward to mockMysqlQuery preserving the call shape that tests expect
+    const [rows] = await mockMysqlQuery({ sql, namedPlaceholders: true, values: params });
+    return rows;
+  }),
 }));
 
 jest.mock("../src/database/postgres.js", () => ({

@@ -12,7 +12,7 @@
  */
 
 import { sequelize } from "../database/postgres.js";
-import { getMysqlPool } from "../database/mysql.js";
+import { queryMysql } from "../database/mysql.js";
 import { IndicadorResultado } from "../models/indicador.js";
 import { QueryTypes } from "sequelize";
 
@@ -36,14 +36,7 @@ export async function executeAndPersist(
   periodoFin: Date,
   mesReferencia?: Date,
 ): Promise<IndicadorResultado[]> {
-  const pool = getMysqlPool();
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [rows] = await (pool as any).query({
-    sql: querySql,
-    namedPlaceholders: true,
-    values: params,
-  }) as [Array<{ valor: number | string }>, unknown];
+  const rows = await queryMysql<{ valor: number | string }>(querySql, params);
 
   const now = new Date();
   const results: IndicadorResultado[] = [];

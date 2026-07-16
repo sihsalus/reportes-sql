@@ -11,6 +11,7 @@
 
 import { sequelize } from "./postgres.js";
 import { QueryTypes } from "sequelize";
+import { logger } from "../config/logger.js";
 
 /**
  * Backfill `mes_referencia` and `es_canonico` for existing rows.
@@ -42,7 +43,7 @@ export async function backfillResultadoCanonical(): Promise<void> {
     { type: QueryTypes.UPDATE },
   );
 
-  console.log("Backfill: mes_referencia and es_canonico populated.");
+  logger.info("Backfill: mes_referencia and es_canonico populated.");
 }
 
 const ROLLUP_VIEWS = {
@@ -151,6 +152,6 @@ const ROLLUP_VIEWS = {
 export async function createRollupViews(): Promise<void> {
   for (const [viewName, sql] of Object.entries(ROLLUP_VIEWS)) {
     await sequelize.query(sql, { type: QueryTypes.RAW });
-    console.log(`View ${viewName} created/refreshed.`);
+    logger.info("View created/refreshed", { viewName });
   }
 }

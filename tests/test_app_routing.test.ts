@@ -43,6 +43,7 @@ jest.mock("../src/database/mysql.js", () => ({
     execute: jest.fn().mockResolvedValue([[]]),
     end: jest.fn().mockResolvedValue(undefined),
   })),
+  queryMysql: jest.fn().mockResolvedValue([]),
   disposeMysql: jest.fn().mockResolvedValue(undefined),
 }));
 

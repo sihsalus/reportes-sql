@@ -16,23 +16,9 @@ import {
   MetaDeleteSchema,
 } from "../types/meta.js";
 import { ZodError } from "zod";
+import { asyncHandler } from "../middleware/async-handler.js";
 
 export const metasRouter: Router = Router();
-
-// ── Helper: async handler wrapper ──────────────────────────────────────
-
-function asyncHandler(
-  fn: (req: Request, res: Response) => Promise<void>,
-) {
-  return (req: Request, res: Response) => {
-    fn(req, res).catch((err: unknown) => {
-      console.error("Unhandled error in metas router:", err);
-      res.status(500).json({
-        detail: "Error interno del servidor",
-      });
-    });
-  };
-}
 
 // ── PUT /metas ──────────────────────────────────────────────────────────
 

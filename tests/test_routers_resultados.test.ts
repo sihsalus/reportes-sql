@@ -489,7 +489,9 @@ describe("Resultados Router", () => {
 
     test("past year processes all 12 months", async () => {
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-      mockVersionFindOne.mockResolvedValue(makeVersion());
+      mockSequelizeQuery.mockResolvedValue([
+        { id: VERSION_UUID, indicador_id: UUID, version: 1, definicion: { tipo: "conteo_atenciones" } },
+      ]);
       mockExecuteAndPersist.mockResolvedValue([]);
 
       const app = createTestApp();
@@ -504,6 +506,11 @@ describe("Resultados Router", () => {
       expect(res.body.recalculados).toBe(12);
       expect(res.body.errores).toHaveLength(0);
       expect(mockExecuteAndPersist).toHaveBeenCalledTimes(12);
+      // Batch version query was used (not per-month findOne)
+      expect(mockSequelizeQuery).toHaveBeenCalledWith(
+        expect.stringContaining("DISTINCT ON"),
+        expect.objectContaining({ type: expect.any(String) }),
+      );
     });
 
     test("current year processes only up to current month", async () => {
@@ -511,7 +518,9 @@ describe("Resultados Router", () => {
       jest.setSystemTime(new Date("2026-04-15T00:00:00.000Z"));
 
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-      mockVersionFindOne.mockResolvedValue(makeVersion());
+      mockSequelizeQuery.mockResolvedValue([
+        { id: VERSION_UUID, indicador_id: UUID, version: 1, definicion: { tipo: "conteo_atenciones" } },
+      ]);
       mockExecuteAndPersist.mockResolvedValue([]);
 
       const app = createTestApp();
@@ -543,7 +552,9 @@ describe("Resultados Router", () => {
         }
         return [];
       });
-      mockVersionFindOne.mockResolvedValue(makeVersion({ indicador_id: "uuid-inactive" }));
+      mockSequelizeQuery.mockResolvedValue([
+        { id: VERSION_UUID, indicador_id: "uuid-inactive", version: 1, definicion: { tipo: "conteo_atenciones" } },
+      ]);
       mockExecuteAndPersist.mockResolvedValue([]);
 
       const app = createTestApp();
@@ -557,6 +568,15 @@ describe("Resultados Router", () => {
       expect(res.body.recalculados).toBe(12);
       expect(mockIndicadorFindAll).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: "uuid-inactive" } }),
+      );
+      // Batch query received the right indicador_ids
+      expect(mockSequelizeQuery).toHaveBeenCalledWith(
+        expect.stringContaining("DISTINCT ON"),
+        expect.objectContaining({
+          replacements: expect.objectContaining({
+            indicador_ids: ["uuid-inactive"],
+          }),
+        }),
       );
     });
 
@@ -574,16 +594,18 @@ describe("Resultados Router", () => {
 
     test("isolates failures per month and continues", async () => {
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-      mockVersionFindOne
-        .mockResolvedValueOnce(makeVersion())
-        .mockResolvedValueOnce(makeVersion())
-        .mockResolvedValueOnce(makeVersion())
-        .mockResolvedValueOnce(makeVersion())
-        .mockResolvedValueOnce(makeVersion())
-        .mockResolvedValueOnce(null) // fail month 6
-        .mockResolvedValue(makeVersion());
-
-      mockExecuteAndPersist.mockResolvedValue([]);
+      mockSequelizeQuery.mockResolvedValue([
+        { id: VERSION_UUID, indicador_id: UUID, version: 1, definicion: { tipo: "conteo_atenciones" } },
+      ]);
+      // Fail month 6 (6th call to executeAndPersist)
+      mockExecuteAndPersist
+        .mockResolvedValueOnce([])  // month 1 ok
+        .mockResolvedValueOnce([])  // month 2 ok
+        .mockResolvedValueOnce([])  // month 3 ok
+        .mockResolvedValueOnce([])  // month 4 ok
+        .mockResolvedValueOnce([])  // month 5 ok
+        .mockRejectedValueOnce(new Error("DB error")) // month 6 fails
+        .mockResolvedValue([]);     // months 7-12 ok
 
       const app = createTestApp();
       const res = await supertest(app)
@@ -594,9 +616,11 @@ describe("Resultados Router", () => {
       expect(res.body.recalculados).toBe(11);
       expect(res.body.errores).toHaveLength(1);
       expect(res.body.errores[0].mes).toBe(6);
-      expect(res.body.errores[0].error).toBe("Sin versiones definidas");
-      expect(mockExecuteAndPersist).toHaveBeenCalledTimes(11);
+      expect(res.body.errores[0].error).toBe("DB error");
+      expect(mockExecuteAndPersist).toHaveBeenCalledTimes(12);
     });
+
+
 
     test("handles empty indicator list", async () => {
       mockIndicadorFindAll.mockResolvedValue([]);

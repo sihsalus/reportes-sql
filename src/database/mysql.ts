@@ -41,3 +41,23 @@ export async function disposeMysql(): Promise<void> {
     pool = null;
   }
 }
+
+/**
+ * Typed wrapper around mysql2 pool.query() with namedPlaceholders.
+ *
+ * Avoids `(pool as any).query(...)` casts in callers while preserving the
+ * object-style call signature that `namedPlaceholders: true` requires.
+ */
+export async function queryMysql<T>(
+  sql: string,
+  params: Record<string, unknown>,
+): Promise<T[]> {
+  const p = getMysqlPool();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [rows] = await (p as any).query({
+    sql,
+    namedPlaceholders: true,
+    values: params,
+  });
+  return rows as T[];
+}

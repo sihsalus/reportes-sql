@@ -12,7 +12,6 @@
 
 import { Router, type Request, type Response } from "express";
 import { v4 as uuidv4 } from "uuid";
-import { QueryTypes } from "sequelize";
 import {
   Indicador,
   IndicadorVersion,
@@ -30,23 +29,11 @@ import {
   validarDefinicionLocationUuids,
   resolveConceptMap,
 } from "../validators/openmrs.js";
+import { resolveOrcenesConceptMapOrNull } from "../engine/concept-resolver.js";
+import { asyncHandler } from "../middleware/async-handler.js";
+import { logger } from "../config/logger.js";
 
 export const indicadoresRouter: Router = Router();
-
-// ── Helper: async handler wrapper ──────────────────────────────────────
-
-function asyncHandler(
-  fn: (req: Request, res: Response) => Promise<void>,
-) {
-  return (req: Request, res: Response) => {
-    fn(req, res).catch((err: unknown) => {
-      console.error("Unhandled error in indicadores router:", err);
-      res.status(500).json({
-        detail: "Error interno del servidor",
-      });
-    });
-  };
-}
 
 // ── POST /indicadores ──────────────────────────────────────────────────
 
@@ -433,7 +420,7 @@ indicadoresRouter.post(
           );
         }
       } catch (copyErr) {
-        console.warn("Failed to auto-copy metas to new version:", copyErr);
+        logger.warn("Failed to auto-copy metas to new version", { error: String(copyErr) });
       }
 
       res.status(201).json(nuevaVersion.toJSON());
@@ -505,24 +492,9 @@ indicadoresRouter.get(
     const { inicio: periodoInicio, fin: periodoFin } = calcularMesActual();
 
     // Resolve concept_map for ordenes from OpenMRS MySQL
-    let conceptMap: Record<string, number> | null = null;
     const ordenes = definicion.evento?.ordenes;
-    if (ordenes && ordenes.length > 0) {
-      const uuids = ordenes.map((f) => f.concepto_uuid);
-      try {
-        const resolved = await resolveConceptMap(uuids);
-        conceptMap = {};
-        for (const f of ordenes) {
-          const cid = resolved[f.concepto_uuid];
-          if (cid !== undefined) {
-            conceptMap[f.concepto_uuid] = cid;
-          }
-        }
-      } catch {
-        // Concept resolution failed — proceed without it (ordenes filter omitted)
-        conceptMap = null;
-      }
-    }
+    const conceptMap = await resolveOrcenesConceptMapOrNull(ordenes);
+
 
     // Build query
     const { sql, params } = buildQuery(

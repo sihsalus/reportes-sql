@@ -30,11 +30,11 @@ Copy `.env.example` to `.env` and adjust for your environment.
 | `BASE_PATH` | _(empty)_ | Path prefix when behind a gateway (see below) |
 | `CORS_ORIGINS` | `localhost:5173,localhost:8080` | Comma-separated allowed CORS origins |
 | `AUTO_SEED_DEFAULT_INDICATOR` | `true` | Seed a default indicator on startup |
-| `INDICADORES_DB_HOST` | `localhost` | PostgreSQL host |
-| `INDICADORES_DB_PORT` | `5432` | PostgreSQL port |
-| `INDICADORES_DB_NAME` | `indicators` | PostgreSQL database name |
-| `INDICADORES_DB_USER` | `postgres` | PostgreSQL user |
-| `INDICADORES_DB_PASSWORD` | `postgres` | PostgreSQL password |
+| `INDICATORS_DB_HOST` | `localhost` | PostgreSQL host |
+| `INDICATORS_DB_PORT` | `5432` | PostgreSQL port |
+| `INDICATORS_DB_NAME` | `indicators` | PostgreSQL database name |
+| `INDICATORS_DB_USER` | `postgres` | PostgreSQL user |
+| `INDICATORS_DB_PASSWORD` | `postgres` | PostgreSQL password |
 | `OPENMRS_DB_HOST` | `localhost` | OpenMRS MySQL host |
 | `OPENMRS_DB_PORT` | `3306` | OpenMRS MySQL port |
 | `OPENMRS_DB_NAME` | `openmrs` | OpenMRS MySQL database |
@@ -234,8 +234,8 @@ docker pull ghcr.io/<owner-or-org>/reportes-sql:latest
 
 ```bash
 docker run -p 8000:8000 \
-  -e INDICADORES_DB_HOST=your-pg-host \
-  -e INDICADORES_DB_PASSWORD=... \
+  -e INDICATORS_DB_HOST=your-pg-host \
+  -e INDICATORS_DB_PASSWORD=... \
   -e OPENMRS_DB_HOST=your-openmrs-host \
   -e OPENMRS_API_URL=https://your-openmrs/openmrs \
   ghcr.io/<owner-or-org>/reportes-sql:latest

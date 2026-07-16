@@ -23,11 +23,11 @@ services:
     environment:
       PORT: 8000
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080
-      INDICADORES_DB_HOST: indicators-postgres
-      INDICADORES_DB_PORT: 5432
-      INDICADORES_DB_NAME: ${INDICATORS_DB_NAME:-indicators}
-      INDICADORES_DB_USER: ${INDICATORS_DB_USER:-postgres}
-      INDICADORES_DB_PASSWORD: ${INDICATORS_DB_PASSWORD:-postgres}
+      INDICATORS_DB_HOST: indicators-postgres
+      INDICATORS_DB_PORT: 5432
+      INDICATORS_DB_NAME: ${INDICATORS_DB_NAME:-indicators}
+      INDICATORS_DB_USER: ${INDICATORS_DB_USER:-postgres}
+      INDICATORS_DB_PASSWORD: ${INDICATORS_DB_PASSWORD:-postgres}
       OPENMRS_DB_HOST: ${OPENMRS_DB_HOST:-host.docker.internal}
       OPENMRS_DB_PORT: ${OPENMRS_DB_PORT:-3306}
       OPENMRS_DB_NAME: ${OPENMRS_DB_NAME:-openmrs}

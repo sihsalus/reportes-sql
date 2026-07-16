@@ -7,6 +7,7 @@
  */
 
 import dotenv from "dotenv";
+import { logger } from "./logger.js";
 
 dotenv.config();
 
@@ -95,12 +96,20 @@ export function normalizeBasePath(value: string | undefined): string {
   return path;
 }
 
+/**
+ * Read an env var, trying a primary name first, then a legacy alias.
+ * Returns undefined if neither is set.
+ */
+function envEither(primary: string, alias: string): string | undefined {
+  return process.env[primary] ?? process.env[alias];
+}
+
 export const settings: Settings = {
-  indicadores_db_host: process.env["INDICADORES_DB_HOST"] ?? "localhost",
-  indicadores_db_port: parsePort(process.env["INDICADORES_DB_PORT"], 5432),
-  indicadores_db_name: process.env["INDICADORES_DB_NAME"] ?? "indicators",
-  indicadores_db_user: process.env["INDICADORES_DB_USER"] ?? "postgres",
-  indicadores_db_password: process.env["INDICADORES_DB_PASSWORD"] ?? "postgres",
+  indicadores_db_host: envEither("INDICATORS_DB_HOST", "INDICADORES_DB_HOST") ?? "localhost",
+  indicadores_db_port: parsePort(envEither("INDICATORS_DB_PORT", "INDICADORES_DB_PORT"), 5432),
+  indicadores_db_name: envEither("INDICATORS_DB_NAME", "INDICADORES_DB_NAME") ?? "indicators",
+  indicadores_db_user: envEither("INDICATORS_DB_USER", "INDICADORES_DB_USER") ?? "postgres",
+  indicadores_db_password: envEither("INDICATORS_DB_PASSWORD", "INDICADORES_DB_PASSWORD") ?? "postgres",
 
   openmrs_db_host: process.env["OPENMRS_DB_HOST"] ?? "localhost",
   openmrs_db_port: parsePort(process.env["OPENMRS_DB_PORT"], 3306),
@@ -126,4 +135,25 @@ export const settings: Settings = {
 /** PostgreSQL connection URL for Sequelize */
 export function getIndicadoresDatabaseUrl(): string {
   return `postgres://${settings.indicadores_db_user}:${encodeURIComponent(settings.indicadores_db_password)}@${settings.indicadores_db_host}:${settings.indicadores_db_port}/${settings.indicadores_db_name}`;
+}
+
+/**
+ * Log warnings for any credential that is using its hardcoded default.
+ * Called once at startup to surface misconfigured production deployments.
+ */
+export function warnDefaultCredentials(): void {
+  const checks: Array<{ env: string; defaultVal: string }> = [
+    { env: "INDICATORS_DB_PASSWORD", defaultVal: "postgres" },
+    { env: "OPENMRS_DB_PASSWORD", defaultVal: "openmrs" },
+    { env: "OPENMRS_API_PASSWORD", defaultVal: "Admin123" },
+  ];
+
+  for (const { env, defaultVal } of checks) {
+    if (!process.env[env]) {
+      logger.warn(
+        `[config] ${env} no está definida — usando valor por defecto (${defaultVal}). ` +
+        `En producción, definila explícitamente.`,
+      );
+    }
+  }
 }

@@ -23,6 +23,9 @@ import { buildQuery } from "../engine/interpreter.js";
 import { executeAndPersist } from "../engine/executor.js";
 import { calcularMesActual, calcularMesEspecifico } from "../engine/periodo.js";
 import { resolveConceptMap } from "../validators/openmrs.js";
+import { resolveOrcenesConceptMap } from "../engine/concept-resolver.js";
+
+import { asyncHandler } from "../middleware/async-handler.js";
 
 export const resultadosRouter: Router = Router();
 
@@ -64,21 +67,6 @@ setInterval(() => {
 // Exported for testing only
 export function resetRateLimitStore(): void {
   rateLimitStore.clear();
-}
-
-// ── Helper: async handler wrapper ──────────────────────────────────────
-
-function asyncHandler(
-  fn: (req: Request, res: Response) => Promise<void>,
-) {
-  return (req: Request, res: Response) => {
-    fn(req, res).catch((err: unknown) => {
-      console.error("Unhandled error in resultados router:", err);
-      res.status(500).json({
-        detail: "Error interno del servidor",
-      });
-    });
-  };
 }
 
 // ── GET /resultados ────────────────────────────────────────────────────
@@ -405,33 +393,10 @@ resultadosRouter.post(
         const definicion = parseDefinicionIndicador(latest.definicion);
 
         // Resolve ordenes concept UUIDs to OpenMRS concept_ids
-        let conceptMap: Record<string, number> | null = null;
         const ordenes = definicion.evento?.ordenes;
-        if (ordenes && ordenes.length > 0) {
-          const uuids = ordenes.map((f) => f.concepto_uuid);
-          try {
-            const resolved = await resolveConceptMap(uuids);
-            conceptMap = {};
-            const missing: string[] = [];
-            for (const f of ordenes) {
-              const cid = resolved[f.concepto_uuid];
-              if (cid !== undefined) {
-                conceptMap[f.concepto_uuid] = cid;
-              } else {
-                missing.push(f.concepto_uuid);
-              }
-            }
-            if (missing.length > 0) {
-              throw new Error(
-                `Conceptos de órdenes no encontrados: ${missing.join(", ")}`,
-              );
-            }
-          } catch (err: unknown) {
-            const message =
-              err instanceof Error ? err.message : "Error resolviendo conceptos";
-            throw new Error(message);
-          }
-        }
+        const conceptMap = ordenes && ordenes.length > 0
+          ? await resolveOrcenesConceptMap(ordenes)
+          : null;
 
         // Build query with month boundaries
         const { sql, params } = buildQuery(
@@ -534,6 +499,97 @@ resultadosRouter.post(
     const meses: number[] = [];
     for (let m = 1; m <= maxMes; m++) meses.push(m);
 
+    // ── Phase 1: Batch version lookup (single DISTINCT ON query) ──
+    const indicadorIds = indicadores.map((i) => i.id);
+
+    interface VersionRow {
+      id: string;
+      indicador_id: string;
+      version: number;
+      definicion: Record<string, unknown>;
+    }
+
+    const versionRows: VersionRow[] =
+      indicadorIds.length > 0
+        ? await sequelize.query<VersionRow>(
+            `SELECT DISTINCT ON (indicador_id)
+               id, indicador_id, version, definicion
+             FROM indicador_version
+             WHERE indicador_id = ANY(:indicador_ids)
+             ORDER BY indicador_id, version DESC`,
+            {
+              replacements: { indicador_ids: indicadorIds },
+              type: QueryTypes.SELECT,
+            },
+          )
+        : [];
+
+    const versionMap = new Map<string, VersionRow>();
+    for (const row of versionRows) {
+      versionMap.set(row.indicador_id, row);
+    }
+
+    // ── Phase 2: Parse definitions + collect all concept UUIDs ──
+    const definicionMap = new Map<string, ReturnType<typeof parseDefinicionIndicador>>();
+    const allConceptUuids = new Set<string>();
+    const indicatorsWithoutVersion: string[] = [];
+
+    for (const indicador of indicadores) {
+      const version = versionMap.get(indicador.id);
+      if (!version) {
+        indicatorsWithoutVersion.push(indicador.id);
+        continue;
+      }
+      const definicion = parseDefinicionIndicador(version.definicion);
+      definicionMap.set(indicador.id, definicion);
+
+      const ordenes = definicion.evento?.ordenes;
+      if (ordenes && ordenes.length > 0) {
+        for (const o of ordenes) {
+          allConceptUuids.add(o.concepto_uuid);
+        }
+      }
+    }
+
+    // ── Phase 3: Batch concept resolution (single call) ──
+    let globalConceptMap: Record<string, number> = {};
+    if (allConceptUuids.size > 0) {
+      globalConceptMap = await resolveConceptMap(Array.from(allConceptUuids));
+    }
+
+    // ── Phase 4: Per-indicator concept validation ──
+    const conceptMapByIndicador = new Map<string, Record<string, number>>();
+    const conceptErrorByIndicador = new Map<string, string>();
+
+    for (const indicador of indicadores) {
+      if (indicatorsWithoutVersion.includes(indicador.id)) continue;
+
+      const definicion = definicionMap.get(indicador.id)!;
+      const ordenes = definicion.evento?.ordenes;
+      if (!ordenes || ordenes.length === 0) continue;
+
+      const conceptMap: Record<string, number> = {};
+      const missing: string[] = [];
+      for (const o of ordenes) {
+        const cid = globalConceptMap[o.concepto_uuid];
+        if (cid !== undefined) {
+          conceptMap[o.concepto_uuid] = cid;
+        } else {
+          missing.push(o.concepto_uuid);
+        }
+      }
+
+      if (missing.length > 0) {
+        conceptErrorByIndicador.set(
+          indicador.id,
+          `Conceptos de órdenes no encontrados: ${missing.join(", ")}`,
+        );
+      } else {
+        conceptMapByIndicador.set(indicador.id, conceptMap);
+      }
+    }
+
+    // ── Phase 5: Per-indicator × per-month execution ──
     let recalculados = 0;
     const errores: Array<{
       indicador_id: string;
@@ -544,47 +600,40 @@ resultadosRouter.post(
     const total = indicadores.length * meses.length;
 
     for (const indicador of indicadores) {
+      // No version → error for ALL months
+      if (indicatorsWithoutVersion.includes(indicador.id)) {
+        for (const mes of meses) {
+          errores.push({
+            indicador_id: indicador.id,
+            indicador_nombre: indicador.nombre,
+            mes,
+            error: "Sin versiones definidas",
+          });
+        }
+        continue;
+      }
+
+      // Concept resolution failure → error for ALL months
+      if (conceptErrorByIndicador.has(indicador.id)) {
+        const errorMsg = conceptErrorByIndicador.get(indicador.id)!;
+        for (const mes of meses) {
+          errores.push({
+            indicador_id: indicador.id,
+            indicador_nombre: indicador.nombre,
+            mes,
+            error: errorMsg,
+          });
+        }
+        continue;
+      }
+
+      const conceptMap =
+        conceptMapByIndicador.get(indicador.id) ?? null;
+      const definicion = definicionMap.get(indicador.id)!;
+      const version = versionMap.get(indicador.id)!;
+
       for (const mes of meses) {
         try {
-          const latest = await IndicadorVersion.findOne({
-            where: { indicador_id: indicador.id },
-            order: [["version", "DESC"]],
-          });
-
-          if (!latest) {
-            errores.push({
-              indicador_id: indicador.id,
-              indicador_nombre: indicador.nombre,
-              mes,
-              error: "Sin versiones definidas",
-            });
-            continue;
-          }
-
-          const definicion = parseDefinicionIndicador(latest.definicion);
-
-          let conceptMap: Record<string, number> | null = null;
-          const ordenes = definicion.evento?.ordenes;
-          if (ordenes && ordenes.length > 0) {
-            const uuids = ordenes.map((f) => f.concepto_uuid);
-            const resolved = await resolveConceptMap(uuids);
-            conceptMap = {};
-            const missing: string[] = [];
-            for (const f of ordenes) {
-              const cid = resolved[f.concepto_uuid];
-              if (cid !== undefined) {
-                conceptMap[f.concepto_uuid] = cid;
-              } else {
-                missing.push(f.concepto_uuid);
-              }
-            }
-            if (missing.length > 0) {
-              throw new Error(
-                `Conceptos de órdenes no encontrados: ${missing.join(", ")}`,
-              );
-            }
-          }
-
           const { inicio, fin, mes_referencia } = calcularMesEspecifico(anio, mes);
           const { sql, params } = buildQuery(
             definicion,
@@ -596,7 +645,7 @@ resultadosRouter.post(
           await executeAndPersist(
             sql,
             params as Record<string, unknown>,
-            latest.id,
+            version.id,
             inicio,
             fin,
             mes_referencia,
@@ -625,5 +674,6 @@ resultadosRouter.post(
       errores,
       total,
     });
+
   }),
 );

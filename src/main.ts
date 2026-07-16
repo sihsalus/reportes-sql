@@ -17,7 +17,8 @@ import express, {
 } from "express";
 import cors from "cors";
 import swaggerUi from "swagger-ui-express";
-import { settings } from "./config/index.js";
+import { settings, warnDefaultCredentials } from "./config/index.js";
+import { logger } from "./config/logger.js";
 import { sequelize } from "./database/postgres.js";
 import { disposeMysql } from "./database/mysql.js";
 import { backfillResultadoCanonical, createRollupViews } from "./database/views.js";
@@ -49,7 +50,7 @@ export function createApp(basePath: string): Express {
     }),
   );
 
-  app.use(express.json());
+  app.use(express.json({ limit: "1mb" }));
 
   // ── Compose public router ─────────────────────────────────────────────
 
@@ -102,9 +103,9 @@ export function createApp(basePath: string): Express {
       }
 
       // Generic 500
-      console.error("Unhandled error:", err);
+      logger.error("Unhandled error", { err });
       res.status(500).json({
-        detail: "Error interno del servidor",
+        detail: { message: "Error interno del servidor" },
       });
     },
   );
@@ -119,9 +120,22 @@ const app = createApp(settings.base_path);
 // ── Lifecycle ───────────────────────────────────────────────────────────
 
 async function start(): Promise<void> {
+  // Warn about default credentials in non-dev environments
+  warnDefaultCredentials();
+
+  // Verify database connectivity before syncing models
+  try {
+    await sequelize.authenticate();
+    logger.info("PostgreSQL connection established.");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    logger.error("Failed to connect to PostgreSQL", { error: message });
+    process.exit(1);
+  }
+
   // Sync Sequelize models with PostgreSQL (safe — does not drop data)
   await sequelize.sync();
-  console.log("PostgreSQL models synced.");
+  logger.info("PostgreSQL models synced.");
 
   // Backfill canonical fields for existing rows
   await backfillResultadoCanonical();
@@ -131,25 +145,21 @@ async function start(): Promise<void> {
 
   if (settings.auto_seed_default_indicator) {
     const seeded = await seedDefaultIndicador();
-    console.log(
-      "Default indicator seeding finished:",
-      JSON.stringify(seeded),
-    );
+    logger.info("Default indicator seeding finished", { seeded });
   }
 
   const server = app.listen(settings.port, () => {
-    console.log(
-      `Motor de Indicadores SIH.SALUS running on port ${settings.port}`,
-    );
+    logger.info("Motor de Indicadores SIH.SALUS running", { port: settings.port });
   });
 
   // Graceful shutdown
   const shutdown = async () => {
-    console.log("\nShutting down...");
+    logger.info("Shutting down...");
+    server.closeIdleConnections?.();
     server.close();
     await disposeMysql();
     await sequelize.close();
-    console.log("Shutdown complete.");
+    logger.info("Shutdown complete.");
     process.exit(0);
   };
 
@@ -165,7 +175,7 @@ const isMainModule =
 
 if (isMainModule) {
   start().catch((err) => {
-    console.error("Failed to start:", err);
+    logger.error("Failed to start", { err });
     process.exit(1);
   });
 }

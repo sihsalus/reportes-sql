@@ -6,7 +6,7 @@
  * keeping schemas side-effect-free and testable in isolation.
  */
 
-import { getMysqlPool } from "../database/mysql.js";
+import { queryMysql } from "../database/mysql.js";
 import type { DefinicionIndicador } from "../types/definicion.js";
 
 /**
@@ -24,7 +24,6 @@ export async function validarLocations(
 ): Promise<string[]> {
   if (uuids.size === 0) return [];
 
-  const pool = getMysqlPool();
 
   try {
     const uuidArray = Array.from(uuids);
@@ -34,11 +33,7 @@ export async function validarLocations(
       params[`uuid_${i}`] = u;
     });
 
-    const [rows] = await (pool as any).query({
-      sql: `SELECT uuid FROM location WHERE uuid IN (${placeholders})`,
-      namedPlaceholders: true,
-      values: params,
-    }) as [Array<{ uuid: string }>, unknown];
+    const rows = await queryMysql<{ uuid: string }>(`SELECT uuid FROM location WHERE uuid IN (${placeholders})`, params);
 
     const encontrados = new Set(rows.map((r) => r.uuid));
     const desconocidos = uuidArray.filter((u) => !encontrados.has(u));
@@ -84,7 +79,6 @@ export async function resolveConceptMap(
 ): Promise<Record<string, number>> {
   if (uuids.length === 0) return {};
 
-  const pool = getMysqlPool();
 
   try {
     const placeholders = uuids.map((_, i) => `:uuid_${i}`).join(", ");
@@ -93,11 +87,7 @@ export async function resolveConceptMap(
       params[`uuid_${i}`] = u;
     });
 
-    const [rows] = await (pool as any).query({
-      sql: `SELECT uuid, concept_id FROM concept WHERE uuid IN (${placeholders}) AND retired = 0`,
-      namedPlaceholders: true,
-      values: params,
-    }) as [Array<{ uuid: string; concept_id: number }>, unknown];
+    const rows = await queryMysql<{ uuid: string; concept_id: number }>(`SELECT uuid, concept_id FROM concept WHERE uuid IN (${placeholders}) AND retired = 0`, params);
 
     const result: Record<string, number> = {};
     for (const row of rows) {
