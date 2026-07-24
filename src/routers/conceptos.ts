@@ -7,81 +7,30 @@
  * - GET /conceptos/locations?q= → proxy OpenMRS location search
  * - GET /conceptos/locations/resolve?uuids=... → batch resolve location UUIDs
  * - GET /conceptos/diagnosticos/resolve?uuids=... → batch resolve diagnosis UUIDs
- * - GET /conceptos/buscar/resolve?uuids=... → batch resolve concept UUID -> display label
+ * - GET /conceptos/buscar/resolve?uuids=... → batch resolve concept UUID → display label
  *
  * All communication uses fetch with Basic Auth. Connection errors
  * return 502 Bad Gateway with a descriptive message.
  */
 
 import { Router, type Request, type Response } from "express";
-import { settings } from "../config/index.js";
+import {
+  authHeader,
+  openmrsUrl,
+  extractCie10FromNames,
+  extractNombreFromNames,
+  proxyWithErrorHandling,
+} from "./conceptos/helpers.js";
+import {
+  handleBuscarResolve,
+  handleLocationsResolve,
+  handleDiagnosticosResolve,
+} from "./conceptos/resolve.js";
 
 export const conceptosRouter: Router = Router();
 
-// ── Auth helpers ───────────────────────────────────────────────────────
+// ── GET /conceptos/encounter-types ─────────────────────────────────────────
 
-function authHeader(): string {
-  const creds = Buffer.from(
-    `${settings.openmrs_api_user}:${settings.openmrs_api_password}`,
-  ).toString("base64");
-  return `Basic ${creds}`;
-}
-
-function openmrsUrl(path: string): string {
-  const base = settings.openmrs_api_url.replace(/\/+$/, "");
-  return `${base}/ws/rest/v1/${path.replace(/^\/+/, "")}`;
-}
-
-// ── CIE-10 extraction helpers ───────────────────────────────────────────
-
-const CIE10_RE = /^[A-Z]\d/i;
-
-function extractCie10FromNames(
-  names: Array<{ display: string }>,
-): string | null {
-  for (const entry of names) {
-    if (CIE10_RE.test(entry.display ?? "")) {
-      return entry.display;
-    }
-  }
-  return null;
-}
-
-function extractNombreFromNames(
-  names: Array<{ display: string }>,
-): string | null {
-  for (const entry of names) {
-    if (!CIE10_RE.test(entry.display ?? "")) {
-      return entry.display;
-    }
-  }
-  return null;
-}
-
-// ── Error handler helper ────────────────────────────────────────────────
-
-async function proxyWithErrorHandling(
-  res: Response,
-  fn: () => Promise<void>,
-): Promise<void> {
-  try {
-    await fn();
-  } catch (err: unknown) {
-    if (err instanceof Error) {
-      res.status(502).json({
-        detail: `Error conectando a OpenMRS: ${err.message}`,
-      });
-    } else {
-      res.status(502).json({
-        detail: "Error conectando a OpenMRS",
-      });
-    }
-  }
-}
-
-// ── Endpoints ──────────────────────────────────────────────────────────
-
-// GET /conceptos/encounter-types
 conceptosRouter.get(
   "/encounter-types",
   async (_req: Request, res: Response) => {
@@ -115,70 +64,18 @@ conceptosRouter.get(
   },
 );
 
-// GET /conceptos/buscar/resolve?uuids=...
+// ── GET /conceptos/buscar/resolve?uuids=... ────────────────────────────────
 // Must be registered before /buscar to avoid route ambiguity.
+
 conceptosRouter.get(
   "/buscar/resolve",
   async (req: Request, res: Response) => {
-    await proxyWithErrorHandling(res, async () => {
-      const uuidParam = (req.query["uuids"] as string) ?? "";
-      const uuidList = parseUuidList(uuidParam);
-      const { valid, invalid } = validateUuids(uuidList);
-
-      if (invalid.length > 0) {
-        res.status(400).json({
-          detail: `UUIDs con formato inválido: ${invalid.join(", ")}`,
-        });
-        return;
-      }
-
-      if (valid.length === 0) {
-        res.status(400).json({
-          detail:
-            "El parámetro 'uuids' debe contener al menos un UUID válido",
-        });
-        return;
-      }
-
-      const result: Record<string, string> = {};
-
-      const fetches = valid.map(async (uid) => {
-        const url = openmrsUrl(`concept/${uid}`);
-        try {
-          const resp = await fetch(
-            `${url}?v=custom:(uuid,display)`,
-            {
-              headers: { Authorization: authHeader() },
-              signal: AbortSignal.timeout(10_000),
-            },
-          );
-          if (resp.status === 404) return null;
-          if (!resp.ok) {
-            throw new Error(`OpenMRS respondió con error: ${resp.status}`);
-          }
-          const data = (await resp.json()) as {
-            uuid: string;
-            display: string;
-          };
-          return { uuid: data.uuid, display: data.display };
-        } catch {
-          throw new Error("Error conectando a OpenMRS");
-        }
-      });
-
-      const fetched = await Promise.all(fetches);
-      for (const item of fetched) {
-        if (item !== null) {
-          result[item.uuid] = item.display;
-        }
-      }
-
-      res.json(result);
-    });
+    await handleBuscarResolve(req, res);
   },
 );
 
-// GET /conceptos/buscar?q=...&clase=...
+// ── GET /conceptos/buscar?q=...&clase=... ──────────────────────────────────
+
 conceptosRouter.get("/buscar", async (req: Request, res: Response) => {
   await proxyWithErrorHandling(res, async () => {
     const q = (req.query["q"] as string) ?? "";
@@ -223,7 +120,8 @@ conceptosRouter.get("/buscar", async (req: Request, res: Response) => {
   });
 });
 
-// GET /conceptos/diagnosticos/buscar?q=...
+// ── GET /conceptos/diagnosticos/buscar?q=... ───────────────────────────────
+
 conceptosRouter.get(
   "/diagnosticos/buscar",
   async (req: Request, res: Response) => {
@@ -284,7 +182,8 @@ conceptosRouter.get(
   },
 );
 
-// GET /conceptos/locations?q=...
+// ── GET /conceptos/locations?q=... ─────────────────────────────────────────
+
 conceptosRouter.get("/locations", async (req: Request, res: Response) => {
   await proxyWithErrorHandling(res, async () => {
     const q = ((req.query["q"] as string) ?? "").trim();
@@ -365,170 +264,20 @@ conceptosRouter.get("/locations", async (req: Request, res: Response) => {
   });
 });
 
-// ── Batch Resolve Endpoints ────────────────────────────────────────────
+// ── GET /conceptos/locations/resolve?uuids=... ─────────────────────────────
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function parseUuidList(raw: string): string[] {
-  return [
-    ...new Set(
-      raw
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean),
-    ),
-  ];
-}
-
-function validateUuids(uuids: string[]): { valid: string[]; invalid: string[] } {
-  const valid: string[] = [];
-  const invalid: string[] = [];
-  for (const uuid of uuids) {
-    if (UUID_RE.test(uuid)) {
-      valid.push(uuid);
-    } else {
-      invalid.push(uuid);
-    }
-  }
-  return { valid, invalid };
-}
-
-// GET /conceptos/locations/resolve?uuids=...
 conceptosRouter.get(
   "/locations/resolve",
   async (req: Request, res: Response) => {
-    await proxyWithErrorHandling(res, async () => {
-      const uuidParam = (req.query["uuids"] as string) ?? "";
-      const uuidList = parseUuidList(uuidParam);
-      const { valid, invalid } = validateUuids(uuidList);
-
-      if (invalid.length > 0) {
-        res.status(400).json({
-          detail: `UUIDs con formato inválido: ${invalid.join(", ")}`,
-        });
-        return;
-      }
-
-      if (valid.length === 0) {
-        res.status(400).json({
-          detail:
-            "El parámetro 'uuids' debe contener al menos un UUID válido",
-        });
-        return;
-      }
-
-      const results: Array<{ uuid: string; display: string }> = [];
-
-      const fetches = valid.map(async (uid) => {
-        const url = openmrsUrl(`location/${uid}`);
-        try {
-          const resp = await fetch(
-            `${url}?v=custom:(uuid,display)`,
-            {
-              headers: { Authorization: authHeader() },
-              signal: AbortSignal.timeout(10_000),
-            },
-          );
-          if (resp.status === 404) return null;
-          if (!resp.ok) {
-            throw new Error(`OpenMRS respondió con error: ${resp.status}`);
-          }
-          const data = (await resp.json()) as {
-            uuid: string;
-            display: string;
-          };
-          return { uuid: data.uuid, display: data.display };
-        } catch {
-          throw new Error("Error conectando a OpenMRS");
-        }
-      });
-
-      const fetched = await Promise.all(fetches);
-      for (const item of fetched) {
-        if (item !== null) {
-          results.push(item);
-        }
-      }
-
-      res.json(results);
-    });
+    await handleLocationsResolve(req, res);
   },
 );
 
-// GET /conceptos/diagnosticos/resolve?uuids=...
+// ── GET /conceptos/diagnosticos/resolve?uuids=... ──────────────────────────
+
 conceptosRouter.get(
   "/diagnosticos/resolve",
   async (req: Request, res: Response) => {
-    await proxyWithErrorHandling(res, async () => {
-      const uuidParam = (req.query["uuids"] as string) ?? "";
-      const uuidList = parseUuidList(uuidParam);
-      const { valid, invalid } = validateUuids(uuidList);
-
-      if (invalid.length > 0) {
-        res.status(400).json({
-          detail: `UUIDs con formato inválido: ${invalid.join(", ")}`,
-        });
-        return;
-      }
-
-      if (valid.length === 0) {
-        res.status(400).json({
-          detail:
-            "El parámetro 'uuids' debe contener al menos un UUID válido",
-        });
-        return;
-      }
-
-      const results: Array<{
-        uuid: string;
-        codigo?: string;
-        nombre: string;
-      }> = [];
-
-      const fetches = valid.map(async (uid) => {
-        const url = openmrsUrl(`concept/${uid}`);
-        try {
-          const resp = await fetch(
-            `${url}?v=full`,
-            {
-              headers: { Authorization: authHeader() },
-              signal: AbortSignal.timeout(10_000),
-            },
-          );
-          if (resp.status === 404) return null;
-          if (!resp.ok) {
-            throw new Error(`OpenMRS respondió con error: ${resp.status}`);
-          }
-          const item = (await resp.json()) as {
-            uuid: string;
-            display: string;
-            names?: Array<{ display: string }>;
-          };
-          const names = item.names ?? [];
-          const codigo = extractCie10FromNames(names);
-          const nombre =
-            extractNombreFromNames(names) ??
-            item.display ??
-            "Sin nombre";
-          const out: { uuid: string; codigo?: string; nombre: string } = {
-            uuid: item.uuid,
-            nombre,
-          };
-          if (codigo) out.codigo = codigo;
-          return out;
-        } catch {
-          throw new Error("Error conectando a OpenMRS");
-        }
-      });
-
-      const fetched = await Promise.all(fetches);
-      for (const item of fetched) {
-        if (item !== null) {
-          results.push(item);
-        }
-      }
-
-      res.json(results);
-    });
+    await handleDiagnosticosResolve(req, res);
   },
 );

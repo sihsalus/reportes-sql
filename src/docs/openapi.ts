@@ -925,6 +925,109 @@ export const openapiSpec = {
         },
       },
     },
+
+    // ── Metas ────────────────────────────────────────────────────────
+
+    "/metas": {
+      put: {
+        tags: ["Metas"],
+        summary: "Crear o actualizar una meta anual",
+        operationId: "upsertMeta",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["indicador_version_id", "anio", "valor_meta"],
+                properties: {
+                  indicador_version_id: { type: "string", format: "uuid" },
+                  anio: { type: "integer", minimum: 2000, maximum: 2100 },
+                  valor_meta: { type: "number", minimum: 0 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "Meta creada o actualizada" },
+          "422": {
+            description: "Error de validación",
+            content: { "application/json": { schema: Error422 } },
+          },
+        },
+      },
+      get: {
+        tags: ["Metas"],
+        summary: "Listar metas por versión o indicador (última versión)",
+        operationId: "listMetas",
+        parameters: [
+          {
+            name: "indicador_version_id",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description: "UUID de la versión del indicador",
+          },
+          {
+            name: "indicador_id",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description: "UUID del indicador (usa la última versión)",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Lista de metas",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string" },
+                      indicador_version_id: { type: "string" },
+                      anio: { type: "integer" },
+                      valor_meta: { type: "number" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "422": {
+            description: "Error de validación",
+            content: { "application/json": { schema: Error422 } },
+          },
+        },
+      },
+      delete: {
+        tags: ["Metas"],
+        summary: "Eliminar una meta específica",
+        operationId: "deleteMeta",
+        parameters: [
+          {
+            name: "indicador_version_id",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "anio",
+            in: "query",
+            required: true,
+            schema: { type: "integer" },
+          },
+        ],
+        responses: {
+          "204": { description: "Meta eliminada" },
+          "422": {
+            description: "Error de validación",
+            content: { "application/json": { schema: Error422 } },
+          },
+        },
+      },
+    },
   },
 
   components: {
