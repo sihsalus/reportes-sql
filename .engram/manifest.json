@@ -56,6 +56,14 @@
       "sessions": 6,
       "memories": 13,
       "prompts": 28
+    },
+    {
+      "id": "b3fd93e3",
+      "created_by": "ander",
+      "created_at": "2026-07-24T21:01:56Z",
+      "sessions": 7,
+      "memories": 22,
+      "prompts": 85
     }
   ]
 }
