@@ -403,7 +403,7 @@ export const openapiSpec = {
       get: {
         tags: ["Resultados"],
         summary:
-          "Listar resultados pre-calculados (filtrable por indicador y período)",
+          "Listar resultados pre-calculados (filtrable por indicador y período; por defecto solo filas canónicas)",
         operationId: "listResultados",
         parameters: [
           {
@@ -411,6 +411,19 @@ export const openapiSpec = {
             in: "query",
             schema: { type: "string", format: "uuid" },
             description: "Filtrar por indicador",
+          },
+          {
+            name: "include_historicos",
+            in: "query",
+            schema: { type: "boolean" },
+            description:
+              "Si es exactamente 'true', incluye también resultados superseded. Por defecto (ausente o cualquier otro valor) solo se devuelven filas canónicas.",
+          },
+          {
+            name: "version_id",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description: "Filtrar por una versión específica del indicador",
           },
           {
             name: "periodo_inicio",
@@ -437,7 +450,7 @@ export const openapiSpec = {
         ],
         responses: {
           "200": {
-            description: "Lista paginada de resultados",
+            description: "Lista paginada de resultados (solo canónicos por defecto)",
             content: { "application/json": { schema: PaginatedResponse } },
           },
         },
@@ -519,7 +532,7 @@ export const openapiSpec = {
         responses: {
           "200": {
             description:
-              "Series temporales con `periodo_label`, `valor` y `meses_disponibles`",
+              "Series temporales con `periodo_label`, `valor` y `meses_disponibles`. Granularidad mensual incluye `version_num`/`version_id` (versión con la que se calculó cada punto); trimestral/semestral/anual incluyen `versiones` (versiones presentes en el grupo).",
             content: {
               "application/json": {
                 schema: {
@@ -541,6 +554,17 @@ export const openapiSpec = {
                           },
                           trimestre: { type: "integer", nullable: true },
                           semestre: { type: "integer", nullable: true },
+                          version_num: { type: "integer", nullable: true },
+                          version_id: {
+                            type: "string",
+                            format: "uuid",
+                            nullable: true,
+                          },
+                          versiones: {
+                            type: "array",
+                            items: { type: "integer" },
+                            nullable: true,
+                          },
                         },
                       },
                     },

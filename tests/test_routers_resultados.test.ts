@@ -152,6 +152,68 @@ describe("Resultados Router", () => {
 
       expect(res.status).toBe(200);
     });
+
+    test("defaults to canonical-only rows (where includes es_canonico: true)", async () => {
+      mockResultadoFindAndCountAll.mockResolvedValue({
+        count: 1,
+        rows: [makeResultadoRow()],
+      });
+
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados");
+
+      expect(res.status).toBe(200);
+      const firstCall = mockResultadoFindAndCountAll.mock.calls[0]?.[0] as {
+        where?: Record<string, unknown>;
+      };
+      expect(firstCall?.where).toEqual(
+        expect.objectContaining({ es_canonico: true }),
+      );
+    });
+
+    test("include_historicos=true skips the canonical filter", async () => {
+      mockResultadoFindAndCountAll.mockResolvedValue({
+        count: 2,
+        rows: [makeResultadoRow(), makeResultadoRow({ id: "r-2" })],
+      });
+
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?include_historicos=true");
+
+      expect(res.status).toBe(200);
+      const firstCall = mockResultadoFindAndCountAll.mock.calls[0]?.[0] as {
+        where?: Record<string, unknown>;
+      };
+      expect(firstCall?.where).toBeDefined();
+      expect(firstCall?.where).not.toHaveProperty("es_canonico");
+    });
+
+    test("version_id filters by indicador_version_id", async () => {
+      mockResultadoFindAndCountAll.mockResolvedValue({
+        count: 1,
+        rows: [makeResultadoRow()],
+      });
+
+      const app = createTestApp();
+      const res = await supertest(app).get(`/resultados?version_id=${VERSION_UUID}`);
+
+      expect(res.status).toBe(200);
+      expect(mockResultadoFindAndCountAll).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ indicador_version_id: VERSION_UUID }),
+        }),
+      );
+    });
+
+    test("rejects invalid version_id with 422", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?version_id=no-es-uuid");
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("version_id");
+      expect(res.body.detail.message).toMatch(/UUID/);
+      expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
+    });
   });
 
   describe("GET /resultados/series — time-series rollups", () => {
@@ -207,6 +269,50 @@ describe("Resultados Router", () => {
       expect(res.body.items).toHaveLength(2);
       expect(res.body.items[0].periodo_label).toBe("Q1");
       expect(res.body.granularity).toBe("trimestral");
+    });
+
+    test("monthly series rows expose version_num and version_id", async () => {
+      mockSequelizeQuery.mockResolvedValue([
+        {
+          periodo_label: "2026-01",
+          valor: "100",
+          meses_disponibles: 1,
+          anio: 2026,
+          mes_referencia: "2026-01-01",
+          version_num: 2,
+          version_id: VERSION_UUID,
+        },
+      ]);
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=mensual",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.items[0].version_num).toBe(2);
+      expect(res.body.items[0].version_id).toBe(VERSION_UUID);
+    });
+
+    test("quarterly series rows expose versiones array", async () => {
+      mockSequelizeQuery.mockResolvedValue([
+        {
+          periodo_label: "Q1",
+          valor: "300",
+          meses_disponibles: 3,
+          anio: 2026,
+          trimestre: 1,
+          versiones: [1, 2],
+        },
+      ]);
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=trimestral",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.items[0].versiones).toEqual([1, 2]);
     });
 
     test("annual SQL uses an aggregate-safe period label (regression: 500 on /series?granularity=anual)", async () => {

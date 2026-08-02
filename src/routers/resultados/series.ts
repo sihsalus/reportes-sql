@@ -20,6 +20,9 @@ interface SeriesRow {
   trimestre?: number;
   semestre?: number;
   anio: number;
+  version_num?: number;
+  version_id?: string;
+  versiones?: number[];
 }
 
 // ── SQL templates ──────────────────────────────────────────────────────────
@@ -31,13 +34,15 @@ const GRANULARITY_SQL: Record<Granularity, string> = {
       mes_referencia,
       EXTRACT(YEAR FROM mes_referencia)::int AS anio,
       SUM(valor)::numeric AS valor,
-      COUNT(*)::int AS meses_disponibles
+      COUNT(*)::int AS meses_disponibles,
+      iv.version AS version_num,
+      iv.id AS version_id
     FROM indicador_resultado ir
     JOIN indicador_version iv ON iv.id = ir.indicador_version_id
     WHERE iv.indicador_id = :indicador_id
       AND ir.es_canonico = true
       AND EXTRACT(YEAR FROM ir.mes_referencia) = :anio
-    GROUP BY mes_referencia
+    GROUP BY mes_referencia, iv.version, iv.id
     ORDER BY mes_referencia
   `,
   trimestral: `
@@ -46,7 +51,8 @@ const GRANULARITY_SQL: Record<Granularity, string> = {
       EXTRACT(QUARTER FROM mes_referencia)::int AS trimestre,
       'Q' || EXTRACT(QUARTER FROM mes_referencia)::int AS periodo_label,
       SUM(valor)::numeric AS valor,
-      COUNT(*)::int AS meses_disponibles
+      COUNT(*)::int AS meses_disponibles,
+      ARRAY_AGG(DISTINCT iv.version ORDER BY iv.version)::int[] AS versiones
     FROM indicador_resultado ir
     JOIN indicador_version iv ON iv.id = ir.indicador_version_id
     WHERE iv.indicador_id = :indicador_id
@@ -65,7 +71,8 @@ const GRANULARITY_SQL: Record<Granularity, string> = {
         WHEN EXTRACT(MONTH FROM mes_referencia) <= 6 THEN 1 ELSE 2
       END AS periodo_label,
       SUM(valor)::numeric AS valor,
-      COUNT(*)::int AS meses_disponibles
+      COUNT(*)::int AS meses_disponibles,
+      ARRAY_AGG(DISTINCT iv.version ORDER BY iv.version)::int[] AS versiones
     FROM indicador_resultado ir
     JOIN indicador_version iv ON iv.id = ir.indicador_version_id
     WHERE iv.indicador_id = :indicador_id
@@ -81,7 +88,8 @@ const GRANULARITY_SQL: Record<Granularity, string> = {
       EXTRACT(YEAR FROM mes_referencia)::int AS anio,
       TO_CHAR(MIN(mes_referencia), 'YYYY') AS periodo_label,
       SUM(valor)::numeric AS valor,
-      COUNT(*)::int AS meses_disponibles
+      COUNT(*)::int AS meses_disponibles,
+      ARRAY_AGG(DISTINCT iv.version ORDER BY iv.version)::int[] AS versiones
     FROM indicador_resultado ir
     JOIN indicador_version iv ON iv.id = ir.indicador_version_id
     WHERE iv.indicador_id = :indicador_id
@@ -163,6 +171,15 @@ export async function handleSeries(req: Request, res: Response): Promise<void> {
     }
     if ("semestre" in r && r.semestre != null) {
       item["semestre"] = r.semestre;
+    }
+    if ("version_num" in r && r.version_num != null) {
+      item["version_num"] = Number(r.version_num);
+    }
+    if ("version_id" in r && r.version_id != null) {
+      item["version_id"] = String(r.version_id);
+    }
+    if ("versiones" in r && r.versiones != null) {
+      item["versiones"] = r.versiones;
     }
 
     return item;

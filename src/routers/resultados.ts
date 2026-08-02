@@ -2,7 +2,9 @@
  * Resultados router — query and trigger indicator calculations.
  *
  * - GET  /resultados?indicador_id=X&periodo_inicio=...&periodo_fin=...
- *        → filterable, paginated list of pre-computed results.
+ *        → filterable, paginated list of pre-computed results; by default
+ *          only canonical rows are returned, include_historicos=true also
+ *          returns superseded rows, version_id filters by specific version.
  * - GET  /resultados/series?indicador_id=X&anio=YYYY&granularity=mensual|...
  *        → time-series rollups from canonical monthly results.
  * - POST /resultados/calcular-ahora
@@ -73,11 +75,30 @@ resultadosRouter.get(
     const indicadorId = req.query["indicador_id"] as string | undefined;
     const periodoInicioStr = req.query["periodo_inicio"] as string | undefined;
     const periodoFinStr = req.query["periodo_fin"] as string | undefined;
+    const versionId = req.query["version_id"] as string | undefined;
+    const includeHistoricos = req.query["include_historicos"] === "true";
     const page = Math.max(1, parseInt((req.query["page"] as string) ?? "1", 10) || 1);
     const size = Math.min(100, Math.max(1, parseInt((req.query["size"] as string) ?? "20", 10) || 20));
 
-    // Build where clause
+    if (
+      versionId !== undefined &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(versionId)
+    ) {
+      res.status(422).json({
+        detail: { field: "version_id", message: "version_id debe ser un UUID válido" },
+      });
+      return;
+    }
+
+    // Build where clause. Default: canonical rows only (one per
+    // indicador+month); include_historicos=true also returns superseded rows.
     const where: Record<string, unknown> = {};
+    if (!includeHistoricos) {
+      where["es_canonico"] = true;
+    }
+    if (versionId) {
+      where["indicador_version_id"] = versionId;
+    }
     if (periodoInicioStr) {
       where["periodo_inicio"] = { [Op.gte]: periodoInicioStr };
     }
