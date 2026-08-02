@@ -9,7 +9,7 @@
  */
 import type { Request, Response } from "express";
 import { QueryTypes } from "sequelize";
-import { Indicador, IndicadorVersion } from "../../models/indicador.js";
+import { Indicador, IndicadorVersion, IndicadorCalculoLog } from "../../models/indicador.js";
 import { sequelize } from "../../database/postgres.js";
 import { parseDefinicionIndicador } from "../../types/definicion.js";
 import { buildQuery } from "../../engine/interpreter.js";
@@ -17,6 +17,35 @@ import { executeAndPersist } from "../../engine/executor.js";
 import { calcularMesEspecifico } from "../../engine/periodo.js";
 import { resolveConceptMap, OpenMRSUnavailableError } from "../../validators/openmrs.js";
 import { rateLimit } from "./rate-limit.js";
+
+/**
+ * Best-effort ledger write for a failed calculation. Must never mask the
+ * original error, so the create is wrapped in a silent try/catch.
+ */
+async function tryLogCalculoError(entry: {
+  indicador_id: string;
+  indicador_version_id: string | null;
+  mes_referencia: Date;
+  error: string;
+  fuente: string;
+}): Promise<void> {
+  try {
+    await IndicadorCalculoLog.create({
+      status: "error",
+      indicador_id: entry.indicador_id,
+      indicador_version_id: entry.indicador_version_id,
+      mes_referencia: entry.mes_referencia,
+      filas_devueltas: null,
+      filas_persistidas: null,
+      duracion_ms: null,
+      error: entry.error,
+      fuente: entry.fuente,
+      creado_en: new Date(),
+    });
+  } catch {
+    // Ledger must not mask the original error.
+  }
+}
 
 export async function handleRecalcularAnio(
   req: Request,
@@ -196,11 +225,19 @@ export async function handleRecalcularAnio(
     // No version → error for ALL months
     if (indicatorsWithoutVersion.includes(indicador.id)) {
       for (const mes of meses) {
+        const { mes_referencia } = calcularMesEspecifico(anio, mes);
         errores.push({
           indicador_id: indicador.id,
           indicador_nombre: indicador.nombre,
           mes,
           error: "Sin versiones definidas",
+        });
+        await tryLogCalculoError({
+          indicador_id: indicador.id,
+          indicador_version_id: null,
+          mes_referencia,
+          error: "Sin versiones definidas",
+          fuente: "recalcular-anio",
         });
       }
       continue;
@@ -209,12 +246,21 @@ export async function handleRecalcularAnio(
     // Concept resolution failure → error for ALL months
     if (conceptErrorByIndicador.has(indicador.id)) {
       const errorMsg = conceptErrorByIndicador.get(indicador.id)!;
+      const versionId = versionMap.get(indicador.id)?.id ?? null;
       for (const mes of meses) {
+        const { mes_referencia } = calcularMesEspecifico(anio, mes);
         errores.push({
           indicador_id: indicador.id,
           indicador_nombre: indicador.nombre,
           mes,
           error: errorMsg,
+        });
+        await tryLogCalculoError({
+          indicador_id: indicador.id,
+          indicador_version_id: versionId,
+          mes_referencia,
+          error: errorMsg,
+          fuente: "recalcular-anio",
         });
       }
       continue;
@@ -242,6 +288,11 @@ export async function handleRecalcularAnio(
           inicio,
           fin,
           mes_referencia,
+          {
+            indicadorId: indicador.id,
+            fuente: "recalcular-anio",
+            persistirCeroSiVacio: true,
+          },
         );
 
         recalculados += 1;
@@ -253,6 +304,13 @@ export async function handleRecalcularAnio(
           indicador_nombre: indicador.nombre,
           mes,
           error: message,
+        });
+        await tryLogCalculoError({
+          indicador_id: indicador.id,
+          indicador_version_id: version.id,
+          mes_referencia: calcularMesEspecifico(anio, mes).mes_referencia,
+          error: message,
+          fuente: "recalcular-anio",
         });
       }
     }

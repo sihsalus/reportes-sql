@@ -18,6 +18,7 @@ import {
   Indicador,
   IndicadorVersion,
   IndicadorResultado,
+  IndicadorCalculoLog,
 } from "../models/indicador.js";
 import { parseDefinicionIndicador } from "../types/definicion.js";
 import { buildQuery } from "../engine/interpreter.js";
@@ -34,6 +35,35 @@ export const resultadosRouter: Router = Router();
 
 // Re-export for testing
 export { resetRateLimitStore };
+
+/**
+ * Best-effort ledger write for a failed calculation. Must never mask the
+ * original error, so the create is wrapped in a silent try/catch.
+ */
+async function tryLogCalculoError(entry: {
+  indicador_id: string;
+  indicador_version_id: string | null;
+  mes_referencia: Date;
+  error: string;
+  fuente: string;
+}): Promise<void> {
+  try {
+    await IndicadorCalculoLog.create({
+      status: "error",
+      indicador_id: entry.indicador_id,
+      indicador_version_id: entry.indicador_version_id,
+      mes_referencia: entry.mes_referencia,
+      filas_devueltas: null,
+      filas_persistidas: null,
+      duracion_ms: null,
+      error: entry.error,
+      fuente: entry.fuente,
+      creado_en: new Date(),
+    });
+  } catch {
+    // Ledger must not mask the original error.
+  }
+}
 
 // ── GET /resultados ────────────────────────────────────────────────────────
 
@@ -166,6 +196,7 @@ resultadosRouter.post(
     const total = indicadores.length;
 
     for (const indicador of indicadores) {
+      let latestVersionId: string | null = null;
       try {
         // Get latest version
         const latest = await IndicadorVersion.findOne({
@@ -179,8 +210,16 @@ resultadosRouter.post(
             indicador_nombre: indicador.nombre,
             error: "Sin versiones definidas",
           });
+          await tryLogCalculoError({
+            indicador_id: indicador.id,
+            indicador_version_id: null,
+            mes_referencia,
+            error: "Sin versiones definidas",
+            fuente: "calcular-ahora",
+          });
           continue;
         }
+        latestVersionId = latest.id;
 
         // Parse definicion (no longer uses periodo)
         const definicion = parseDefinicionIndicador(latest.definicion);
@@ -206,6 +245,11 @@ resultadosRouter.post(
           inicio,
           fin,
           mes_referencia,
+          {
+            indicadorId: indicador.id,
+            fuente: "calcular-ahora",
+            persistirCeroSiVacio: true,
+          },
         );
 
         calculados += 1;
@@ -216,6 +260,13 @@ resultadosRouter.post(
           indicador_id: indicador.id,
           indicador_nombre: indicador.nombre,
           error: message,
+        });
+        await tryLogCalculoError({
+          indicador_id: indicador.id,
+          indicador_version_id: latestVersionId,
+          mes_referencia,
+          error: message,
+          fuente: "calcular-ahora",
         });
       }
     }

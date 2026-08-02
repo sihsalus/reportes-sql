@@ -14,6 +14,7 @@ const mockExecuteAndPersist = jest.fn();
 const mockResolveConceptMap = jest.fn();
 const mockQueryMysql = jest.fn();
 const mockSequelizeQuery = jest.fn();
+const mockCalculoLogCreate = jest.fn();
 
 jest.mock("../src/database/postgres.js", () => ({
   sequelize: {
@@ -35,6 +36,9 @@ jest.mock("../src/models/indicador.js", () => ({
   IndicadorResultado: {
     findAndCountAll: (...args: unknown[]) =>
       mockResultadoFindAndCountAll(...args),
+  },
+  IndicadorCalculoLog: {
+    create: (...args: unknown[]) => mockCalculoLogCreate(...args),
   },
 }));
 
@@ -113,6 +117,7 @@ beforeEach(() => {
   mockResolveConceptMap.mockResolvedValue({});
   mockQueryMysql.mockResolvedValue([]);
   mockExecuteAndPersist.mockResolvedValue([]);
+  mockCalculoLogCreate.mockResolvedValue(undefined);
 });
 
 describe("Resultados Router", () => {
@@ -400,7 +405,9 @@ describe("Resultados Router", () => {
       expect(res.body.total).toBe(1);
       // Verify mes_referencia is included in response
       expect(res.body.mes_referencia).toBeDefined();
-      // Verify executeAndPersist was called with mesReferencia
+      // Verify executeAndPersist was called with mesReferencia and the
+      // calcular-ahora execution options (indicadorId enables cross-version
+      // canonical supersede; zero-fill persists 0-valued months).
       expect(mockExecuteAndPersist).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(Object),
@@ -408,6 +415,11 @@ describe("Resultados Router", () => {
         expect.any(Date),
         expect.any(Date),
         expect.any(Date), // mes_referencia
+        expect.objectContaining({
+          indicadorId: UUID,
+          fuente: "calcular-ahora",
+          persistirCeroSiVacio: true,
+        }),
       );
     });
 
@@ -439,6 +451,58 @@ describe("Resultados Router", () => {
       expect(res.body.calculados).toBe(0);
       expect(res.body.errores).toHaveLength(1);
       expect(res.body.errores[0].error).toBe("Sin versiones definidas");
+      // Ledger records the failure with no version resolved
+      expect(mockCalculoLogCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "error",
+          indicador_id: UUID,
+          indicador_version_id: null,
+          mes_referencia: expect.any(Date),
+          error: "Sin versiones definidas",
+          fuente: "calcular-ahora",
+        }),
+      );
+    });
+
+    test("records an error ledger entry when the calculation fails", async () => {
+      mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+      mockVersionFindOne.mockResolvedValue(makeVersion());
+      mockExecuteAndPersist.mockRejectedValue(new Error("query failed"));
+
+      const app = createTestApp();
+      const res = await supertest(app).post(
+        "/resultados/calcular-ahora",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.calculados).toBe(0);
+      expect(res.body.errores).toHaveLength(1);
+      expect(res.body.errores[0].error).toBe("query failed");
+      expect(mockCalculoLogCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "error",
+          indicador_id: UUID,
+          indicador_version_id: VERSION_UUID,
+          mes_referencia: expect.any(Date),
+          error: "query failed",
+          fuente: "calcular-ahora",
+        }),
+      );
+    });
+
+    test("ledger write failure does not break the calculation response", async () => {
+      mockCalculoLogCreate.mockRejectedValue(new Error("ledger db down"));
+      mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+      mockVersionFindOne.mockResolvedValue(makeVersion());
+
+      const app = createTestApp();
+      const res = await supertest(app).post(
+        "/resultados/calcular-ahora",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.calculados).toBe(1);
+      expect(res.body.errores).toHaveLength(0);
     });
 
     test("isolates failures — one fails, others succeed", async () => {
@@ -536,6 +600,20 @@ describe("Resultados Router", () => {
       expect(res.body.recalculados).toBe(12);
       expect(res.body.errores).toHaveLength(0);
       expect(mockExecuteAndPersist).toHaveBeenCalledTimes(12);
+      // recalcular-anio execution options on every month
+      expect(mockExecuteAndPersist).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Object),
+        VERSION_UUID,
+        expect.any(Date),
+        expect.any(Date),
+        expect.any(Date),
+        expect.objectContaining({
+          indicadorId: UUID,
+          fuente: "recalcular-anio",
+          persistirCeroSiVacio: true,
+        }),
+      );
       // Batch version query was used (not per-month findOne)
       expect(mockSequelizeQuery).toHaveBeenCalledWith(
         expect.stringContaining("DISTINCT ON"),
@@ -656,6 +734,57 @@ describe("Resultados Router", () => {
       expect(res.body.errores[0].mes).toBe(6);
       expect(res.body.errores[0].error).toBe("DB error");
       expect(mockExecuteAndPersist).toHaveBeenCalledTimes(12);
+    });
+
+    test("records an error ledger per month when execute fails", async () => {
+      mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+      mockSequelizeQuery.mockResolvedValue([
+        { id: VERSION_UUID, indicador_id: UUID, version: 1, definicion: { tipo: "conteo_atenciones" } },
+      ]);
+      mockExecuteAndPersist.mockRejectedValue(new Error("DB error"));
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({ anio: 2025 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.errores).toHaveLength(12);
+      expect(mockCalculoLogCreate).toHaveBeenCalledTimes(12);
+      expect(mockCalculoLogCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "error",
+          indicador_id: UUID,
+          indicador_version_id: VERSION_UUID,
+          mes_referencia: new Date("2025-06-01T00:00:00.000Z"),
+          error: "DB error",
+          fuente: "recalcular-anio",
+        }),
+      );
+    });
+
+    test("records an error ledger per month when the indicator has no version", async () => {
+      mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+      mockSequelizeQuery.mockResolvedValue([]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({ anio: 2025 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.errores).toHaveLength(12);
+      expect(mockCalculoLogCreate).toHaveBeenCalledTimes(12);
+      expect(mockCalculoLogCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "error",
+          indicador_id: UUID,
+          indicador_version_id: null,
+          mes_referencia: new Date("2025-01-01T00:00:00.000Z"),
+          error: "Sin versiones definidas",
+          fuente: "recalcular-anio",
+        }),
+      );
     });
 
 
