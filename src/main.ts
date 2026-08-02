@@ -149,7 +149,11 @@ async function start(): Promise<void> {
   }
 
   const server = app.listen(settings.port, () => {
-    logger.info("Motor de Indicadores SIH.SALUS running", { port: settings.port });
+    logger.info("Motor de Indicadores SIH.SALUS running", {
+      url: `http://localhost:${settings.port}${settings.base_path || ""}`,
+      port: settings.port,
+      basePath: settings.base_path || "/",
+    });
   });
 
   // Graceful shutdown
