@@ -2,12 +2,19 @@
  * Shared helper: resolve OpenMRS concept UUIDs from ordenes filters into
  * a conceptMap (uuid → concept_id) suitable for buildQuery.
  *
- * Used by calcular-ahora, recalcular-anio, and preview-sql to avoid
- * duplicating the resolve → map → missing-validation pattern.
+ * Used by calcular-ahora and preview-sql to avoid duplicating the
+ * resolve → map → missing-validation pattern.
+ *
+ * Failures are loud and differentiated:
+ * - OpenMRS unreachable → OpenMRSUnavailableError (routers map to 502)
+ * - UUIDs absent from OpenMRS → Error listing the missing UUIDs (422)
  */
 
 import type { FiltroOrden } from "../types/definicion.js";
-import { resolveConceptMap } from "../validators/openmrs.js";
+import {
+  resolveConceptMap,
+  OpenMRSUnavailableError,
+} from "../validators/openmrs.js";
 
 export async function resolveOrcenesConceptMap(
   ordenes: FiltroOrden[] | null | undefined,
@@ -15,7 +22,13 @@ export async function resolveOrcenesConceptMap(
   if (!ordenes || ordenes.length === 0) return null;
 
   const uuids = ordenes.map((f) => f.concepto_uuid);
-  const resolved = await resolveConceptMap(uuids);
+
+  let resolved: Record<string, number>;
+  try {
+    resolved = await resolveConceptMap(uuids);
+  } catch {
+    throw new OpenMRSUnavailableError();
+  }
 
   const conceptMap: Record<string, number> = {};
   const missing: string[] = [];
@@ -36,18 +49,4 @@ export async function resolveOrcenesConceptMap(
   }
 
   return conceptMap;
-}
-
-/**
- * Non-throwing variant used by preview-sql which silently skips ordenes
- * when concept resolution fails.
- */
-export async function resolveOrcenesConceptMapOrNull(
-  ordenes: FiltroOrden[] | null | undefined,
-): Promise<Record<string, number> | null> {
-  try {
-    return await resolveOrcenesConceptMap(ordenes);
-  } catch {
-    return null;
-  }
 }

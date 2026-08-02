@@ -10,6 +10,17 @@ import { queryMysql } from "../database/mysql.js";
 import type { DefinicionIndicador } from "../types/definicion.js";
 
 /**
+ * Raised when the OpenMRS MySQL database cannot be reached.
+ * Routers map this to HTTP 502 (same convention as validarLocations).
+ */
+export class OpenMRSUnavailableError extends Error {
+  constructor() {
+    super("OpenMRS no disponible");
+    this.name = "OpenMRSUnavailableError";
+  }
+}
+
+/**
  * Validate all UUID strings exist in the OpenMRS location table.
  *
  * Queries the sync MySQL database with a single parameterized SELECT
@@ -40,7 +51,7 @@ export async function validarLocations(
 
     return desconocidos;
   } catch (err: unknown) {
-    throw new Error("OpenMRS no disponible");
+    throw new OpenMRSUnavailableError();
   }
 }
 
@@ -95,6 +106,6 @@ export async function resolveConceptMap(
     }
     return result;
   } catch {
-    return {};
+    throw new OpenMRSUnavailableError();
   }
 }

@@ -1,7 +1,7 @@
 /**
  * Unit tests for src/engine/concept-resolver.ts
  *
- * Covers resolveOrcenesConceptMap and resolveOrcenesConceptMapOrNull.
+ * Covers resolveOrcenesConceptMap.
  * resolveConceptMap from validators/openmrs is mocked via jest.mock.
  */
 import { jest } from "@jest/globals";
@@ -12,14 +12,13 @@ const mockResolveConceptMap = jest.fn<
 >();
 
 jest.mock("../src/validators/openmrs.js", () => ({
+  // Keep the real OpenMRSUnavailableError class so instanceof checks work.
+  ...jest.requireActual("../src/validators/openmrs.js"),
   resolveConceptMap: (...args: unknown[]) =>
     mockResolveConceptMap(...(args as [string[]])),
 }));
 
-import {
-  resolveOrcenesConceptMap,
-  resolveOrcenesConceptMapOrNull,
-} from "../src/engine/concept-resolver.js";
+import { resolveOrcenesConceptMap } from "../src/engine/concept-resolver.js";
 
 function orden(...uuids: string[]): FiltroOrden[] {
   return uuids.map((uuid) => ({ concepto_uuid: uuid }));
@@ -83,27 +82,12 @@ describe("resolveOrcenesConceptMap", () => {
       resolveOrcenesConceptMap(orden("uuid-x", "uuid-y")),
     ).rejects.toThrow("uuid-x, uuid-y");
   });
-});
 
-describe("resolveOrcenesConceptMapOrNull", () => {
-  test("returns map on success", async () => {
-    mockResolveConceptMap.mockResolvedValue({ "uuid-a": 42 });
+  test("throws 'OpenMRS no disponible' when concept resolution fails", async () => {
+    mockResolveConceptMap.mockRejectedValue(new Error("ECONNREFUSED"));
 
-    const result = await resolveOrcenesConceptMapOrNull(orden("uuid-a"));
-
-    expect(result).toEqual({ "uuid-a": 42 });
-  });
-
-  test("returns null on missing conceptos instead of throwing", async () => {
-    mockResolveConceptMap.mockResolvedValue({});
-
-    const result = await resolveOrcenesConceptMapOrNull(orden("uuid-x"));
-
-    expect(result).toBeNull();
-  });
-
-  test("returns null for null input", async () => {
-    const result = await resolveOrcenesConceptMapOrNull(null);
-    expect(result).toBeNull();
+    await expect(
+      resolveOrcenesConceptMap(orden("uuid-a")),
+    ).rejects.toThrow("OpenMRS no disponible");
   });
 });

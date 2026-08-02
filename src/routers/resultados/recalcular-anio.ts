@@ -15,7 +15,7 @@ import { parseDefinicionIndicador } from "../../types/definicion.js";
 import { buildQuery } from "../../engine/interpreter.js";
 import { executeAndPersist } from "../../engine/executor.js";
 import { calcularMesEspecifico } from "../../engine/periodo.js";
-import { resolveConceptMap } from "../../validators/openmrs.js";
+import { resolveConceptMap, OpenMRSUnavailableError } from "../../validators/openmrs.js";
 import { rateLimit } from "./rate-limit.js";
 
 export async function handleRecalcularAnio(
@@ -96,7 +96,7 @@ export async function handleRecalcularAnio(
           `SELECT DISTINCT ON (indicador_id)
              id, indicador_id, version, definicion
            FROM indicador_version
-           WHERE indicador_id = ANY(:indicador_ids)
+           WHERE indicador_id IN (:indicador_ids)
            ORDER BY indicador_id, version DESC`,
           {
             replacements: { indicador_ids: indicadorIds },
@@ -135,7 +135,19 @@ export async function handleRecalcularAnio(
   // ── Phase 3: Batch concept resolution (single call) ──
   let globalConceptMap: Record<string, number> = {};
   if (allConceptUuids.size > 0) {
-    globalConceptMap = await resolveConceptMap(Array.from(allConceptUuids));
+    try {
+      globalConceptMap = await resolveConceptMap(
+        Array.from(allConceptUuids),
+      );
+    } catch (err) {
+      // Systemic OpenMRS outage: fail the batch with a clear 502 instead
+      // of reporting misleading per-month "concept not found" errors.
+      if (err instanceof OpenMRSUnavailableError) {
+        res.status(502).json({ detail: err.message });
+        return;
+      }
+      throw err;
+    }
   }
 
   // ── Phase 4: Per-indicator concept validation ──

@@ -29,7 +29,8 @@ export function rateLimit(
   return true;
 }
 
-// Cleanup stale entries every 5 minutes
+// Cleanup stale entries every 5 minutes.
+// .unref() keeps the timer from holding the process (and Jest workers) alive.
 setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of rateLimitStore) {
@@ -37,7 +38,7 @@ setInterval(() => {
       rateLimitStore.delete(key);
     }
   }
-}, 5 * 60 * 1000);
+}, 5 * 60 * 1000).unref();
 
 /** Exported for testing only. */
 export function resetRateLimitStore(): void {

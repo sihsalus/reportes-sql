@@ -9,7 +9,8 @@ import { Indicador, IndicadorVersion } from "../../models/indicador.js";
 import { parseDefinicionIndicador } from "../../types/definicion.js";
 import { buildQuery } from "../../engine/interpreter.js";
 import { calcularMesActual } from "../../engine/periodo.js";
-import { resolveOrcenesConceptMapOrNull } from "../../engine/concept-resolver.js";
+import { resolveOrcenesConceptMap } from "../../engine/concept-resolver.js";
+import { OpenMRSUnavailableError } from "../../validators/openmrs.js";
 
 export async function handlePreviewSql(
   req: Request,
@@ -60,9 +61,25 @@ export async function handlePreviewSql(
   const definicion = parseDefinicionIndicador(version.definicion);
   const { inicio: periodoInicio, fin: periodoFin } = calcularMesActual();
 
-  // Resolve concept_map for ordenes from OpenMRS MySQL
+  // Resolve concept_map for ordenes from OpenMRS MySQL.
+  // Fail loudly instead of previewing SQL that silently drops the filter.
   const ordenes = definicion.evento?.ordenes;
-  const conceptMap = await resolveOrcenesConceptMapOrNull(ordenes);
+  let conceptMap: Record<string, number> | null = null;
+  if (ordenes && ordenes.length > 0) {
+    try {
+      conceptMap = await resolveOrcenesConceptMap(ordenes);
+    } catch (err) {
+      if (err instanceof OpenMRSUnavailableError) {
+        res.status(502).json({ detail: err.message });
+        return;
+      }
+      if (err instanceof Error) {
+        res.status(422).json({ detail: err.message });
+        return;
+      }
+      throw err;
+    }
+  }
 
   // Build query
   const { sql, params } = buildQuery(

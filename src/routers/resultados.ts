@@ -22,6 +22,7 @@ import {
 import { parseDefinicionIndicador } from "../types/definicion.js";
 import { buildQuery } from "../engine/interpreter.js";
 import { executeAndPersist } from "../engine/executor.js";
+import { queryMysql } from "../database/mysql.js";
 import { calcularMesActual } from "../engine/periodo.js";
 import { resolveOrcenesConceptMap } from "../engine/concept-resolver.js";
 import { asyncHandler } from "../middleware/async-handler.js";
@@ -137,6 +138,15 @@ resultadosRouter.post(
       res.status(429).json({
         detail: "Demasiadas solicitudes. Intentá de nuevo en un minuto.",
       });
+      return;
+    }
+
+    // Preflight: fail fast with 502 when the OpenMRS MySQL database is
+    // unreachable, instead of returning a 200 with every indicator errored.
+    try {
+      await queryMysql("SELECT 1", {});
+    } catch {
+      res.status(502).json({ detail: "OpenMRS no disponible" });
       return;
     }
 

@@ -182,7 +182,7 @@ export async function handleSeries(req: Request, res: Response): Promise<void> {
     if (latestVersion && distinctYears.length > 0) {
       const metaRows = await sequelize.query<{ anio: number; valor_meta: string }>(
         `SELECT anio, valor_meta::float8 FROM indicador_meta
-         WHERE indicador_version_id = :vId AND anio = ANY(:years)`,
+         WHERE indicador_version_id = :vId AND anio IN (:years)`,
         { replacements: { vId: latestVersion.id, years: distinctYears }, type: QueryTypes.SELECT },
       );
       for (const m of metaRows) metaMap.set(m.anio, parseFloat(String(m.valor_meta)));

@@ -180,7 +180,7 @@ describe("BuildQuery", () => {
     expect(sql).toContain("orders o1");
   });
 
-  test("ordenes no concept_map omits", () => {
+  test("ordenes without concept_map throws instead of silently dropping", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
       evento: {
@@ -188,8 +188,9 @@ describe("BuildQuery", () => {
         ordenes: [{ concepto_uuid: UUID_ORD }],
       },
     });
-    const { sql } = buildQuery(definicion, INICIO, FIN);
-    expect(sql).not.toContain("orders");
+    expect(() => buildQuery(definicion, INICIO, FIN)).toThrow(
+      /conceptos de órdenes/i,
+    );
   });
 
   test("no obs table references", () => {
@@ -213,6 +214,46 @@ describe("BuildQuery", () => {
     });
     const { sql } = buildQuery(definicion, INICIO, FIN);
     expect(sql).toContain("JOIN");
+  });
+
+  test("conteo_atenciones applies sexo without age or minimo_ocurrencias", () => {
+    const definicion = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      evento: { location_uuids: [UUID_LOC] },
+      poblacion: { sexo: "F" },
+    });
+    const { sql, params } = buildQuery(definicion, INICIO, FIN);
+    expect(sql).toContain("JOIN person p");
+    expect(sql).toContain("p.gender = :sexo");
+    expect(params).toHaveProperty("sexo", "F");
+  });
+
+  test("conteo_atenciones applies age and sexo together", () => {
+    const definicion = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      evento: { location_uuids: [UUID_LOC] },
+      poblacion: { min_anios: 18, sexo: "M" },
+    });
+    const { sql, params } = buildQuery(definicion, INICIO, FIN);
+    expect(sql).toContain("p.gender = :sexo");
+    expect(sql).toContain(
+      "DATE_ADD(p.birthdate, INTERVAL :min_anios YEAR)",
+    );
+    expect(params).toHaveProperty("sexo", "M");
+  });
+
+  test("conteo_atenciones minimo_ocurrencias applies sexo via subquery", () => {
+    const definicion = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      evento: {
+        location_uuids: [UUID_LOC],
+        minimo_ocurrencias: 3,
+      },
+      poblacion: { sexo: "F" },
+    });
+    const { sql, params } = buildQuery(definicion, INICIO, FIN);
+    expect(sql).toContain("p.gender = :sexo");
+    expect(params).toHaveProperty("sexo", "F");
   });
 
   test("no evento returns valid SQL", () => {

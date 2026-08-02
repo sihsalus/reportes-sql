@@ -105,13 +105,26 @@ function buildConteoAtenciones(
     Object.assign(params, diagResult.params);
   }
 
-  // ── Poblacion (age filter) ──
-  if (d.poblacion != null && hasAgeFilter(d.poblacion) && !hasMinimo) {
-    joins += "\nJOIN person p ON e.patient_id = p.person_id";
-    conditions.push("p.voided = 0");
-    const ageResult = buildAgeFilter(d.poblacion);
-    conditions.push(ageResult.clause);
-    Object.assign(params, ageResult.params);
+  // ── Poblacion (age + sexo filters) ──
+  // JOIN person when either filter is present. sexo must never be
+  // silently dropped: a missing gender condition changes the population
+  // without any error (same contract as buildConteoPacientes).
+  if (d.poblacion != null && !hasMinimo) {
+    const necesitaPerson =
+      hasAgeFilter(d.poblacion) || d.poblacion.sexo != null;
+    if (necesitaPerson) {
+      joins += "\nJOIN person p ON e.patient_id = p.person_id";
+      conditions.push("p.voided = 0");
+      if (hasAgeFilter(d.poblacion)) {
+        const ageResult = buildAgeFilter(d.poblacion);
+        conditions.push(ageResult.clause);
+        Object.assign(params, ageResult.params);
+      }
+      if (d.poblacion.sexo != null) {
+        params["sexo"] = d.poblacion.sexo;
+        conditions.push("p.gender = :sexo");
+      }
+    }
   }
 
   // ── Ordenes filter ──
@@ -367,7 +380,12 @@ function buildOrdenesFilter(
   ordenes: FiltroOrden[] | null,
   conceptMap: Record<string, number> | null,
 ): { clause: string; params: Record<string, unknown> } {
-  if (!ordenes || !conceptMap) return { clause: "", params: {} };
+  if (!ordenes || ordenes.length === 0) return { clause: "", params: {} };
+  if (!conceptMap) {
+    throw new Error(
+      "No se pudo resolver el mapa de conceptos de órdenes - abortando para no calcular sin el filtro de órdenes",
+    );
+  }
 
   const clauses: string[] = [];
   const oparams: Record<string, unknown> = {};
@@ -375,7 +393,11 @@ function buildOrdenesFilter(
   for (let i = 0; i < ordenes.length; i++) {
     const f = ordenes[i];
     const conceptId = conceptMap[f.concepto_uuid];
-    if (conceptId == null) continue;
+    if (conceptId == null) {
+      throw new Error(
+        `Concepto de órdenes no resuelto: ${f.concepto_uuid}`,
+      );
+    }
 
     const paramKey = `ord_${i}`;
     oparams[paramKey] = conceptId;
@@ -388,8 +410,6 @@ function buildOrdenesFilter(
       `)`,
     );
   }
-
-  if (clauses.length === 0) return { clause: "", params: {} };
 
   return { clause: clauses.join("\nAND "), params: oparams };
 }

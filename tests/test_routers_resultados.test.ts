@@ -12,12 +12,17 @@ const mockIndicadorFindAll = jest.fn();
 const mockVersionFindOne = jest.fn();
 const mockExecuteAndPersist = jest.fn();
 const mockResolveConceptMap = jest.fn();
+const mockQueryMysql = jest.fn();
 const mockSequelizeQuery = jest.fn();
 
 jest.mock("../src/database/postgres.js", () => ({
   sequelize: {
     query: (...args: unknown[]) => mockSequelizeQuery(...args),
   },
+}));
+
+jest.mock("../src/database/mysql.js", () => ({
+  queryMysql: (...args: unknown[]) => mockQueryMysql(...args),
 }));
 
 jest.mock("../src/models/indicador.js", () => ({
@@ -106,6 +111,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   resetRateLimitStore();
   mockResolveConceptMap.mockResolvedValue({});
+  mockQueryMysql.mockResolvedValue([]);
   mockExecuteAndPersist.mockResolvedValue([]);
 });
 
@@ -292,6 +298,15 @@ describe("Resultados Router", () => {
       expect(res.body.items[0].meta).toBe(1500);
       expect(res.body.items[1].meta).toBe(1500);
       expect(mockSequelizeQuery).toHaveBeenCalledTimes(3);
+
+      // Regression: sequelize renders a single-element array replacement as a
+      // bare scalar, so `anio = ANY(:years)` produced `ANY(2026)` and
+      // PostgreSQL raised 42809. `IN (:years)` renders valid SQL for both
+      // single and multi-element arrays.
+      const metaSql = mockSequelizeQuery.mock.calls[2]?.[0];
+      expect(typeof metaSql).toBe("string");
+      expect(metaSql as string).toContain("anio IN (:years)");
+      expect(metaSql as string).not.toContain("ANY(");
     });
 
     test("SC-08: series with include_meta=true returns null when no meta for year", async () => {
@@ -394,6 +409,21 @@ describe("Resultados Router", () => {
         expect.any(Date),
         expect.any(Date), // mes_referencia
       );
+    });
+
+    test("returns 502 when OpenMRS MySQL is unreachable (preflight)", async () => {
+      mockQueryMysql.mockRejectedValue(new Error("ECONNREFUSED"));
+      mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+
+      const app = createTestApp();
+      const res = await supertest(app).post(
+        "/resultados/calcular-ahora",
+      );
+
+      expect(res.status).toBe(502);
+      expect(res.body.detail).toBe("OpenMRS no disponible");
+      // Nothing should have been executed or persisted.
+      expect(mockExecuteAndPersist).not.toHaveBeenCalled();
     });
 
     test("reports error for indicator without versions", async () => {
@@ -578,6 +608,14 @@ describe("Resultados Router", () => {
           }),
         }),
       );
+
+      // Regression: same single-element array rendering trap — `= ANY(:indicador_ids)`
+      // became `ANY(<uuid>)` for a single indicador_id. `IN (:indicador_ids)` is
+      // valid for 1..N ids.
+      const phase1Sql = mockSequelizeQuery.mock.calls[0]?.[0];
+      expect(typeof phase1Sql).toBe("string");
+      expect(phase1Sql as string).toContain("IN (:indicador_ids)");
+      expect(phase1Sql as string).not.toContain("ANY(");
     });
 
     test("returns 422 when indicador_id not found", async () => {
