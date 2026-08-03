@@ -106,7 +106,7 @@ export const FiltrosPoblacionSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "min_dias, min_meses, and min_anios are mutually exclusive — at most one may be set",
+          "min_dias, min_meses y min_anios son mutuamente excluyentes — solo puede definirse uno",
         path: ["min_dias"],
       });
     }
@@ -114,7 +114,7 @@ export const FiltrosPoblacionSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "max_dias, max_meses_excl, and max_anios_excl are mutually exclusive — at most one may be set",
+          "max_dias, max_meses_excl y max_anios_excl son mutuamente excluyentes — solo puede definirse uno",
         path: ["max_dias"],
       });
     }
@@ -154,7 +154,7 @@ export const FiltrosEventoSchema = z
     if (hasDiag && hasOrd) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "diagnosticos and ordenes are mutually exclusive",
+        message: "diagnosticos y ordenes son mutuamente excluyentes",
         path: ["diagnosticos"],
       });
     }

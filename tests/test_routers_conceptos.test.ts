@@ -132,9 +132,9 @@ describe("Conceptos Router", () => {
           results: [
             {
               uuid: "uuid-d1",
-              display: "J00.X Nasofaringitis aguda",
+              display: "J00.9 Nasofaringitis aguda",
               names: [
-                { display: "J00.X" },
+                { display: "J00.9" },
                 { display: "Nasofaringitis aguda" },
               ],
             },
@@ -148,8 +148,116 @@ describe("Conceptos Router", () => {
       );
 
       expect(res.status).toBe(200);
-      expect(res.body[0].codigo).toBe("J00.X");
+      expect(res.body[0].codigo).toBe("J00.9");
       expect(res.body[0].nombre).toBe("Nasofaringitis aguda");
+    });
+
+    test("extracts subcategory code with trailing digits (E11.9 Diabetes)", async () => {
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, {
+          results: [
+            {
+              uuid: "uuid-e11",
+              display: "E11.9 Diabetes mellitus no insulinodependiente",
+              names: [
+                { display: "E11.9 Diabetes" },
+                { display: "Diabetes mellitus no insulinodependiente" },
+              ],
+            },
+          ],
+        }),
+      );
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/diagnosticos/buscar?q=e11",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body[0].codigo).toBe("E11.9 Diabetes");
+      expect(res.body[0].nombre).toBe("Diabetes mellitus no insulinodependiente");
+    });
+
+    test("extracts bare category code (I10)", async () => {
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, {
+          results: [
+            {
+              uuid: "uuid-i10",
+              display: "I10 Hipertensión esencial",
+              names: [
+                { display: "I10" },
+                { display: "Hipertensión esencial" },
+              ],
+            },
+          ],
+        }),
+      );
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/diagnosticos/buscar?q=i10",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body[0].codigo).toBe("I10");
+      expect(res.body[0].nombre).toBe("Hipertensión esencial");
+    });
+
+    test("does not match single-digit prefixes (A1C test)", async () => {
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, {
+          results: [
+            {
+              uuid: "uuid-a1c",
+              display: "A1C test Hemoglobina glicosilada",
+              names: [
+                { display: "A1C test" },
+                { display: "Hemoglobina glicosilada" },
+              ],
+            },
+          ],
+        }),
+      );
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/diagnosticos/buscar?q=a1c",
+      );
+
+      expect(res.status).toBe(200);
+      // "A1C" starts with a single digit, so it is NOT a CIE-10 category
+      expect(res.body[0].codigo).toBeUndefined();
+      expect(res.body[0].nombre).toBe("A1C test");
+    });
+
+    test("known limitation: B12 deficiency still matches as a code", async () => {
+      // Without a CIE-10 catalog there is no perfect regex: "B12 deficiency"
+      // starts with B + two digits (B12), so it matches the category pattern.
+      // This test pins the documented behavior — the name is treated as code.
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, {
+          results: [
+            {
+              uuid: "uuid-b12",
+              display: "B12 deficiency Anemia por deficiencia de B12",
+              names: [
+                { display: "B12 deficiency" },
+                { display: "Anemia por deficiencia de B12" },
+              ],
+            },
+          ],
+        }),
+      );
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/diagnosticos/buscar?q=b12",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body[0].codigo).toBe("B12 deficiency");
+      expect(res.body[0].nombre).toBe("Anemia por deficiencia de B12");
     });
 
     test("omits codigo when no CIE-10 pattern found", async () => {
@@ -290,9 +398,9 @@ describe("Conceptos Router", () => {
       (globalThis.fetch as jest.Mock).mockResolvedValue(
         mockFetchRes(200, {
           uuid: "00000000-0000-0000-0000-000000000001",
-          display: "J00.X Nasofaringitis",
+          display: "J00.9 Nasofaringitis",
           names: [
-            { display: "J00.X" },
+            { display: "J00.9" },
             { display: "Nasofaringitis aguda" },
           ],
         }),
@@ -304,7 +412,7 @@ describe("Conceptos Router", () => {
       );
 
       expect(res.status).toBe(200);
-      expect(res.body[0].codigo).toBe("J00.X");
+      expect(res.body[0].codigo).toBe("J00.9");
     });
 
     test("returns 400 for empty uuids", async () => {

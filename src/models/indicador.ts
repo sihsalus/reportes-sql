@@ -334,6 +334,40 @@ IndicadorCalculoLog.init(
   },
 );
 
+// ── AppMetadata ────────────────────────────────────────────────────────
+
+export class AppMetadata extends Model<
+  InferAttributes<AppMetadata>,
+  InferCreationAttributes<AppMetadata>
+> {
+  declare key: string;
+  declare value: string;
+  declare updated_at: CreationOptional<Date>;
+}
+
+AppMetadata.init(
+  {
+    key: {
+      type: DataTypes.STRING,
+      primaryKey: true,
+    },
+    value: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    updated_at: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+      allowNull: false,
+    },
+  },
+  {
+    sequelize,
+    tableName: "app_metadata",
+    timestamps: false,
+  },
+);
+
 // ── Associations ───────────────────────────────────────────────────────
 
 Indicador.hasMany(IndicadorVersion, {

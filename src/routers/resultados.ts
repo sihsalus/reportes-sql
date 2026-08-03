@@ -77,8 +77,43 @@ resultadosRouter.get(
     const periodoFinStr = req.query["periodo_fin"] as string | undefined;
     const versionId = req.query["version_id"] as string | undefined;
     const includeHistoricos = req.query["include_historicos"] === "true";
-    const page = Math.max(1, parseInt((req.query["page"] as string) ?? "1", 10) || 1);
-    const size = Math.min(100, Math.max(1, parseInt((req.query["size"] as string) ?? "20", 10) || 20));
+    const pageRaw = req.query["page"] as string | undefined;
+    const sizeRaw = req.query["size"] as string | undefined;
+
+    let page = 1;
+    let size = 20;
+
+    if (pageRaw !== undefined && pageRaw !== "") {
+      if (!/^\d+$/.test(pageRaw)) {
+        res.status(422).json({
+          detail: { field: "page", message: "page debe ser un número entero" },
+        });
+        return;
+      }
+      page = parseInt(pageRaw, 10);
+      if (page < 1) {
+        res.status(422).json({
+          detail: { field: "page", message: "page debe ser mayor o igual a 1" },
+        });
+        return;
+      }
+    }
+
+    if (sizeRaw !== undefined && sizeRaw !== "") {
+      if (!/^\d+$/.test(sizeRaw)) {
+        res.status(422).json({
+          detail: { field: "size", message: "size debe ser un número entero" },
+        });
+        return;
+      }
+      size = parseInt(sizeRaw, 10);
+      if (size < 1 || size > 100) {
+        res.status(422).json({
+          detail: { field: "size", message: "size debe estar entre 1 y 100" },
+        });
+        return;
+      }
+    }
 
     if (
       versionId !== undefined &&

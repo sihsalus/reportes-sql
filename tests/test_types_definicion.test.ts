@@ -126,7 +126,7 @@ describe("MutualExclusivity", () => {
         diagnosticos: [{ concepto_uuids: ["uuid-d"] }],
         ordenes: [{ concepto_uuid: "uuid-o" }],
       }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("both inside definicion fails", () => {
@@ -139,7 +139,7 @@ describe("MutualExclusivity", () => {
           ordenes: [{ concepto_uuid: "uuid-o" }],
         },
       }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 });
 
@@ -350,7 +350,7 @@ describe("FiltrosPoblacionCanonical", () => {
   test("same group min exclusivity two", () => {
     expect(() =>
       FiltrosPoblacionSchema.parse({ min_dias: 10, min_meses: 1 }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("same group min exclusivity all three", () => {
@@ -360,25 +360,25 @@ describe("FiltrosPoblacionCanonical", () => {
         min_meses: 1,
         min_anios: 0,
       }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("same group min exclusivity dias anios", () => {
     expect(() =>
       FiltrosPoblacionSchema.parse({ min_dias: 30, min_anios: 1 }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("same group max exclusivity", () => {
     expect(() =>
       FiltrosPoblacionSchema.parse({ max_dias: 100, max_meses_excl: 6 }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("same group max exclusivity dias anios", () => {
     expect(() =>
       FiltrosPoblacionSchema.parse({ max_dias: 365, max_anios_excl: 1 }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("same group max exclusivity meses anios", () => {
@@ -387,7 +387,7 @@ describe("FiltrosPoblacionCanonical", () => {
         max_meses_excl: 6,
         max_anios_excl: 5,
       }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("cross group allowed min_anios max_anios", () => {
@@ -433,7 +433,7 @@ describe("FiltrosPoblacionCanonical", () => {
         tipo: "conteo_atenciones",
         poblacion: { min_dias: 10, min_meses: 1 },
       }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 });
 

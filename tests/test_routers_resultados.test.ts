@@ -214,6 +214,89 @@ describe("Resultados Router", () => {
       expect(res.body.detail.message).toMatch(/UUID/);
       expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
     });
+
+    test("rejects non-integer page with 422", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?page=abc");
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("page");
+      expect(res.body.detail.message).toMatch(/número entero/);
+      expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
+    });
+
+    test("rejects page 0 with 422", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?page=0");
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("page");
+      expect(res.body.detail.message).toMatch(/mayor o igual a 1/);
+      expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
+    });
+
+    test("rejects non-integer size with 422", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?size=xs");
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("size");
+      expect(res.body.detail.message).toMatch(/número entero/);
+      expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
+    });
+
+    test("rejects size 0 with 422", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?size=0");
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("size");
+      expect(res.body.detail.message).toMatch(/entre 1 y 100/);
+      expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
+    });
+
+    test("rejects size above 100 with 422", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?size=1000");
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("size");
+      expect(res.body.detail.message).toMatch(/entre 1 y 100/);
+      expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
+    });
+
+    test("valid page=2 is accepted and paginates from the offset", async () => {
+      mockResultadoFindAndCountAll.mockResolvedValue({
+        count: 25,
+        rows: [makeResultadoRow()],
+      });
+
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?page=2");
+
+      expect(res.status).toBe(200);
+      expect(res.body.page).toBe(2);
+      expect(res.body.size).toBe(20);
+      expect(mockResultadoFindAndCountAll).toHaveBeenCalledWith(
+        expect.objectContaining({ offset: 20, limit: 20 }),
+      );
+    });
+
+    test("valid size=50 is accepted and applied as limit", async () => {
+      mockResultadoFindAndCountAll.mockResolvedValue({
+        count: 25,
+        rows: [makeResultadoRow()],
+      });
+
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?size=50");
+
+      expect(res.status).toBe(200);
+      expect(res.body.size).toBe(50);
+      expect(mockResultadoFindAndCountAll).toHaveBeenCalledWith(
+        expect.objectContaining({ offset: 0, limit: 50 }),
+      );
+    });
   });
 
   describe("GET /resultados/series — time-series rollups", () => {

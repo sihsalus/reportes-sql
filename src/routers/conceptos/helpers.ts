@@ -22,7 +22,12 @@ export function openmrsUrl(path: string): string {
 
 // ── CIE-10 extraction ──────────────────────────────────────────────────────
 
-const CIE10_RE = /^[A-Z]\d/i;
+// CIE-10 categories always start with a letter + two digits (E11, I10, J06),
+// optionally followed by a dot + 1-2 digit subcategory (E11.9, J00.0), and a
+// word boundary (space or end of string).
+// Known limitation: without a CIE-10 catalog, displays like "B12 deficiency"
+// can still match (B + 12); a regex cannot distinguish them from real codes.
+const CIE10_RE = /^[A-Z]\d{2}(\.\d{1,2})?(\s|$)/i;
 
 export function extractCie10FromNames(
   names: Array<{ display: string }>,

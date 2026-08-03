@@ -129,7 +129,7 @@ describe("Metas Router", () => {
       });
 
       expect(res.status).toBe(422);
-      expect(res.body.detail.message).toMatch(/indicador_version_id not found/);
+      expect(res.body.detail.message).toMatch(/indicador_version_id no encontrado/);
     });
 
     test("SC-10: returns 422 when anio is out of range", async () => {

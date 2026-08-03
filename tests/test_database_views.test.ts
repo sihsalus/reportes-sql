@@ -7,6 +7,8 @@
 import { jest } from "@jest/globals";
 
 const mockQuery = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+const mockAppMetadataFindOne = jest.fn();
+const mockAppMetadataCreate = jest.fn();
 
 jest.mock("../src/database/postgres.js", () => ({
   sequelize: {
@@ -14,6 +16,13 @@ jest.mock("../src/database/postgres.js", () => ({
   },
   // Suppress PostgreSQL connection attempt
   initPostgres: jest.fn(),
+}));
+
+jest.mock("../src/models/indicador.js", () => ({
+  AppMetadata: {
+    findOne: (...args: unknown[]) => mockAppMetadataFindOne(...args),
+    create: (...args: unknown[]) => mockAppMetadataCreate(...args),
+  },
 }));
 
 // Suppress logger output
@@ -30,6 +39,10 @@ import {
 beforeEach(() => {
   mockQuery.mockReset();
   mockQuery.mockResolvedValue(undefined);
+  mockAppMetadataFindOne.mockReset();
+  mockAppMetadataFindOne.mockResolvedValue(null);
+  mockAppMetadataCreate.mockReset();
+  mockAppMetadataCreate.mockResolvedValue(undefined);
 });
 
 describe("backfillResultadoCanonical", () => {
@@ -54,6 +67,36 @@ describe("backfillResultadoCanonical", () => {
 
     const opts = mockQuery.mock.calls[0]?.[1] as Record<string, unknown> | undefined;
     expect(opts?.type).toBeDefined();
+  });
+
+  test("records the canonical_backfill_v1 marker after applying the UPDATEs", async () => {
+    await backfillResultadoCanonical();
+
+    expect(mockAppMetadataCreate).toHaveBeenCalledWith({
+      key: "canonical_backfill_v1",
+      value: "done",
+    });
+  });
+
+  test("skips the UPDATEs when the backfill was already applied", async () => {
+    mockAppMetadataFindOne.mockResolvedValue({
+      key: "canonical_backfill_v1",
+      value: "done",
+    });
+
+    await backfillResultadoCanonical();
+
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockAppMetadataCreate).not.toHaveBeenCalled();
+  });
+
+  test("marker write failure does not throw (re-runs on next boot)", async () => {
+    mockAppMetadataCreate.mockRejectedValue(new Error("db down"));
+
+    await expect(backfillResultadoCanonical()).resolves.toBeUndefined();
+
+    // Both UPDATEs still ran before the failed marker write
+    expect(mockQuery).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -48,7 +48,7 @@ metasRouter.put(
       res.status(422).json({
         detail: {
           field: "indicador_version_id",
-          message: "indicador_version_id not found",
+          message: "indicador_version_id no encontrado",
         },
       });
       return;

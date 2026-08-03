@@ -11,7 +11,10 @@
 
 import { sequelize } from "./postgres.js";
 import { QueryTypes } from "sequelize";
+import { AppMetadata } from "../models/indicador.js";
 import { logger } from "../config/logger.js";
+
+const CANONICAL_BACKFILL_KEY = "canonical_backfill_v1";
 
 /**
  * Backfill `mes_referencia` and `es_canonico` for existing rows.
@@ -19,8 +22,21 @@ import { logger } from "../config/logger.js";
  * - Sets `mes_referencia` from the first day of `periodo_inicio` when null.
  * - Marks existing rows as canonical when `es_canonico` is false and no
  *   canonical row already exists for the same version + month.
+ *
+ * Runs at most once: a marker row in `app_metadata` (canonical_backfill_v1)
+ * records that the full-table UPDATEs were already applied, so subsequent
+ * boots skip them. The marker write is best-effort — if it fails, the
+ * UPDATEs will re-run on the next boot, which is safe (idempotent).
  */
 export async function backfillResultadoCanonical(): Promise<void> {
+  const applied = await AppMetadata.findOne({
+    where: { key: CANONICAL_BACKFILL_KEY },
+  });
+  if (applied) {
+    logger.info("Backfill ya aplicado, skipping");
+    return;
+  }
+
   await sequelize.query(
     `UPDATE indicador_resultado
      SET mes_referencia = DATE_TRUNC('month', periodo_inicio)::DATE
@@ -42,6 +58,18 @@ export async function backfillResultadoCanonical(): Promise<void> {
        )`,
     { type: QueryTypes.UPDATE },
   );
+
+  try {
+    await AppMetadata.create({
+      key: CANONICAL_BACKFILL_KEY,
+      value: "done",
+    });
+  } catch (err) {
+    logger.warn(
+      "No se pudo registrar el backfill como aplicado; se re-ejecutará en el próximo arranque",
+      { error: err instanceof Error ? err.message : String(err) },
+    );
+  }
 
   logger.info("Backfill: mes_referencia and es_canonico populated.");
 }
