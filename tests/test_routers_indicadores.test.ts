@@ -154,6 +154,47 @@ describe("Indicadores Router", () => {
       expect(res.status).toBe(422);
     });
 
+    test("missing nombre → 422 with exact message 'nombre es obligatorio y no puede estar vacío'", async () => {
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/indicadores")
+        .send({ definicion: { tipo: "conteo_atenciones" } });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("nombre");
+      expect(res.body.detail.message).toBe(
+        "nombre es obligatorio y no puede estar vacío",
+      );
+    });
+
+    test("empty nombre string → 422 with exact message", async () => {
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/indicadores")
+        .send({
+          nombre: "   ",
+          definicion: { tipo: "conteo_atenciones" },
+        });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("nombre");
+      expect(res.body.detail.message).toBe(
+        "nombre es obligatorio y no puede estar vacío",
+      );
+    });
+
+    test("valid body passes through to the definicion step (missing definicion → 422)", async () => {
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/indicadores")
+        .send({ nombre: "Test" });
+
+      // nombre validation passes, falls through to 'definicion es obligatorio'
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("definicion");
+      expect(res.body.detail.message).toBe("definicion es obligatorio");
+    });
+
     test("rejects missing definicion with 422", async () => {
       const app = createTestApp();
       const res = await supertest(app)
@@ -317,6 +358,32 @@ describe("Indicadores Router", () => {
         .send({ nombre: "Updated" });
 
       expect(res.status).toBe(404);
+    });
+
+    test("missing nombre → 422 with exact message 'nombre es obligatorio'", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .put(`/indicadores/${UUID}`)
+        .send({ descripcion: "only metadata" });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("nombre");
+      expect(res.body.detail.message).toBe("nombre es obligatorio");
+    });
+
+    test("empty nombre → 422 with exact message 'nombre es obligatorio'", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .put(`/indicadores/${UUID}`)
+        .send({ nombre: "   " });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("nombre");
+      expect(res.body.detail.message).toBe("nombre es obligatorio");
     });
   });
 

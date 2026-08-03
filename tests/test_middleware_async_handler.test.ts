@@ -3,17 +3,7 @@
  */
 import { jest } from "@jest/globals";
 import { asyncHandler } from "../src/middleware/async-handler.js";
-import type { Request, Response } from "express";
-
-let consoleErrorSpy: jest.SpiedFunction<typeof console.error>;
-
-beforeAll(() => {
-  consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-});
-
-afterAll(() => {
-  consoleErrorSpy.mockRestore();
-});
+import type { Request, Response, NextFunction } from "express";
 
 function fakeReq(overrides?: Partial<Request>): Request {
   return {
@@ -34,8 +24,12 @@ function fakeRes(): Response {
   return res as Response;
 }
 
+function fakeNext(): NextFunction {
+  return jest.fn() as unknown as NextFunction;
+}
+
 describe("asyncHandler", () => {
-  test("calls through on success (no error)", async () => {
+  test("calls through on success (no error, next not invoked)", async () => {
     const handler = jest
       .fn<(_req: Request, _res: Response) => Promise<void>>()
       .mockResolvedValue(undefined);
@@ -43,29 +37,35 @@ describe("asyncHandler", () => {
 
     const req = fakeReq();
     const res = fakeRes();
+    const next = fakeNext();
 
-    await wrapped(req, res, jest.fn());
+    await wrapped(req, res, next);
 
     expect(handler).toHaveBeenCalledTimes(1);
+    expect(next).not.toHaveBeenCalled();
     expect(res.status).not.toHaveBeenCalled();
     expect(res.json).not.toHaveBeenCalled();
   });
 
-  test("returns 500 on rejected promise", async () => {
+  test("forwards rejected promise to next(err)", async () => {
+    const boom = new Error("boom");
     const handler = jest
       .fn<(_req: Request, _res: Response) => Promise<void>>()
-      .mockRejectedValue(new Error("boom"));
+      .mockRejectedValue(boom);
     const wrapped = asyncHandler(handler);
 
     const req = fakeReq();
     const res = fakeRes();
+    const next = fakeNext();
 
-    await wrapped(req, res, jest.fn());
+    await wrapped(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(500);
-    expect(res.json).toHaveBeenCalledWith({
-      detail: "Error interno del servidor",
-    });
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(next).toHaveBeenCalledWith(boom);
+    // asyncHandler must NOT respond directly — classification is the error
+    // middleware's job.
+    expect(res.status).not.toHaveBeenCalled();
+    expect(res.json).not.toHaveBeenCalled();
   });
 
   test("forwards req params to inner handler", async () => {
@@ -76,8 +76,9 @@ describe("asyncHandler", () => {
 
     const req = fakeReq({ params: { id: "42" }, query: { q: "test" } });
     const res = fakeRes();
+    const next = fakeNext();
 
-    await wrapped(req, res, jest.fn());
+    await wrapped(req, res, next);
 
     expect(handler).toHaveBeenCalledWith(req, res);
   });

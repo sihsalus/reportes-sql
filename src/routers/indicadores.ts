@@ -12,6 +12,7 @@
 
 import { Router, type Request, type Response } from "express";
 import { v4 as uuidv4 } from "uuid";
+import { ZodError } from "zod";
 import {
   Indicador,
   IndicadorVersion,
@@ -22,6 +23,10 @@ import {
   rejectPeriodoInPayload,
   type DefinicionIndicador,
 } from "../types/definicion.js";
+import {
+  IndicadorCreateSchema,
+  IndicadorUpdateSchema,
+} from "../types/indicador.js";
 import {
   validarDefinicionLocationUuids,
 } from "../validators/openmrs.js";
@@ -36,21 +41,24 @@ export const indicadoresRouter: Router = Router();
 indicadoresRouter.post(
   "/",
   asyncHandler(async (req: Request, res: Response) => {
-    const body = req.body as {
-      nombre?: string;
-      descripcion?: string | null;
-      definicion?: unknown;
-    };
-
-    if (!body.nombre || typeof body.nombre !== "string" || body.nombre.trim().length === 0) {
-      res.status(422).json({
-        detail: {
-          field: "nombre",
-          message: "nombre es obligatorio y no puede estar vacío",
-        },
-      });
-      return;
+    let body;
+    try {
+      body = IndicadorCreateSchema.parse(req.body);
+    } catch (err: unknown) {
+      if (err instanceof ZodError) {
+        const first = err.issues[0];
+        const field =
+          first && first.path.length > 0
+            ? String(first.path[first.path.length - 1])
+            : "nombre";
+        res.status(422).json({
+          detail: { field, message: first?.message ?? "Validation error" },
+        });
+        return;
+      }
+      throw err;
     }
+
     if (!body.definicion) {
       res.status(422).json({
         detail: {
@@ -62,16 +70,14 @@ indicadoresRouter.post(
     }
 
     // Reject inbound periodo (breaking contract change)
-    if (body.definicion) {
-      try {
-        rejectPeriodoInPayload(body.definicion);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "Validation error";
-        res.status(422).json({
-          detail: { field: "definicion.periodo", message },
-        });
-        return;
-      }
+    try {
+      rejectPeriodoInPayload(body.definicion);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Validation error";
+      res.status(422).json({
+        detail: { field: "definicion.periodo", message },
+      });
+      return;
     }
 
     // Parse and validate definicion
@@ -192,20 +198,22 @@ indicadoresRouter.put(
       return;
     }
 
-    const body = req.body as {
-      nombre?: string;
-      descripcion?: string | null;
-      definicion?: unknown;
-    };
-
-    if (!body.nombre || typeof body.nombre !== "string" || body.nombre.trim().length === 0) {
-      res.status(422).json({
-        detail: {
-          field: "nombre",
-          message: "nombre es obligatorio",
-        },
-      });
-      return;
+    let body;
+    try {
+      body = IndicadorUpdateSchema.parse(req.body);
+    } catch (err: unknown) {
+      if (err instanceof ZodError) {
+        const first = err.issues[0];
+        const field =
+          first && first.path.length > 0
+            ? String(first.path[first.path.length - 1])
+            : "nombre";
+        res.status(422).json({
+          detail: { field, message: first?.message ?? "Validation error" },
+        });
+        return;
+      }
+      throw err;
     }
 
     // ── Auto-versioning when definicion is present ──

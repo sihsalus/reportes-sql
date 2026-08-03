@@ -97,7 +97,9 @@ global.fetch = mockFetch as unknown as typeof fetch;
 
 import supertest from "supertest";
 import type { Express } from "express";
-import { createApp } from "../src/main.js";
+import express from "express";
+import { createApp, errorMiddleware } from "../src/main.js";
+import { asyncHandler } from "../src/middleware/async-handler.js";
 
 // Silence logger during tests
 beforeAll(() => {
@@ -267,6 +269,49 @@ describe("error handling", () => {
     // on the version. The important thing is the app doesn't crash.
     expect([400, 500]).toContain(res.status);
   });
+
+  test("propagated ZodError is classified as 422 by error middleware", async () => {
+    // Build a minimal app with a route that throws a ZodError WITHOUT a local
+    // catch, then the error middleware AFTER it (correct stack order). This
+    // verifies the asyncHandler → next(err) → errorMiddleware path classifies
+    // ZodError as 422 (not 500).
+    const { z } = await import("zod");
+    const app = express();
+    app.use(
+      "/__test/throw-zod",
+      asyncHandler(async () => {
+        z.object({ required: z.string() }).parse({});
+      }),
+    );
+    app.use(errorMiddleware);
+
+    const res = await supertest(app)
+      .get("/__test/throw-zod")
+      .set("Content-Type", "application/json");
+
+    expect(res.status).toBe(422);
+    expect(res.body).toHaveProperty("detail");
+    expect(res.body.detail).toHaveProperty("field");
+    expect(res.body.detail).toHaveProperty("message");
+  });
+
+  test("propagated generic Error is classified as 500 by error middleware", async () => {
+    const app = express();
+    app.use(
+      "/__test/throw-generic",
+      asyncHandler(async () => {
+        throw new Error("something broke");
+      }),
+    );
+    app.use(errorMiddleware);
+
+    const res = await supertest(app)
+      .get("/__test/throw-generic")
+      .set("Content-Type", "application/json");
+
+    expect(res.status).toBe(500);
+    expect(res.body).toHaveProperty("detail");
+  });
 });
 
 // ── Application structure ──────────────────────────────────────────────────
@@ -299,5 +344,51 @@ describe("createApp structure", () => {
 
     // Body was parsed (status is not 400/415)
     expect(res.status).not.toBe(400);
+  });
+});
+
+// ── HTTP access logging ─────────────────────────────────────────────────────
+
+describe("access log middleware", () => {
+  test("GET /health logs a line containing method, path, and status", async () => {
+    const { request } = makeApp();
+
+    const res = await request.get("/health");
+
+    expect(res.status).toBe(200);
+
+    const calls = (console.info as jest.Mock).mock.calls;
+    const lines = calls.map((c) => String(c[0]));
+    const accessLine = lines.find(
+      (l) => l.includes("request completed") && l.includes("GET") && l.includes("/health"),
+    );
+    expect(accessLine).toBeDefined();
+    expect(accessLine).toContain("200");
+  });
+
+  test("generates a request-id when no X-Request-Id header is sent", async () => {
+    const { request } = makeApp();
+
+    const res = await request.get("/health");
+
+    expect(res.status).toBe(200);
+    // The generated id is a UUID string surfaced in the access-log line.
+    const calls = (console.info as jest.Mock).mock.calls;
+    const lines = calls.map((c) => String(c[0]));
+    const accessLine = lines.find((l) => l.includes("requestId"));
+    expect(accessLine).toMatch(/requestId":"[0-9a-f-]{36}"/);
+  });
+
+  test("echoes the X-Request-Id header when present", async () => {
+    const { request } = makeApp();
+
+    const fixedId = "11111111-2222-3333-4444-555555555555";
+    const res = await request.get("/health").set("X-Request-Id", fixedId);
+
+    expect(res.status).toBe(200);
+    const calls = (console.info as jest.Mock).mock.calls;
+    const lines = calls.map((c) => String(c[0]));
+    const accessLine = lines.find((l) => l.includes("requestId"));
+    expect(accessLine).toContain(`requestId":"${fixedId}`);
   });
 });

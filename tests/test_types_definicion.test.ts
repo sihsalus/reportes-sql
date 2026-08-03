@@ -141,6 +141,62 @@ describe("MutualExclusivity", () => {
       }),
     ).toThrow(/mutuamente excluyentes/);
   });
+
+  test("all diagnosticos same tipo_diagnostico passes", () => {
+    const ev = FiltrosEventoSchema.parse({
+      location_uuids: ["uuid-x"],
+      diagnosticos: [
+        { concepto_uuids: ["uuid-d1"], tipo_diagnostico: "definitivo" },
+        { concepto_uuids: ["uuid-d2"], tipo_diagnostico: "definitivo" },
+      ],
+    });
+    expect(ev.diagnosticos!.length).toBe(2);
+    expect(ev.diagnosticos![0].tipo_diagnostico).toBe("definitivo");
+  });
+
+  test("all diagnosticos without tipo_diagnostico passes", () => {
+    const ev = FiltrosEventoSchema.parse({
+      location_uuids: ["uuid-x"],
+      diagnosticos: [
+        { concepto_uuids: ["uuid-d1"] },
+        { concepto_uuids: ["uuid-d2"] },
+      ],
+    });
+    expect(ev.diagnosticos!.length).toBe(2);
+    expect(ev.diagnosticos![0].tipo_diagnostico).toBeUndefined();
+  });
+
+  test("diagnosticos mixed tipos rejected", () => {
+    expect(() =>
+      FiltrosEventoSchema.parse({
+        location_uuids: ["uuid-x"],
+        diagnosticos: [
+          { concepto_uuids: ["uuid-d1"], tipo_diagnostico: "definitivo" },
+          { concepto_uuids: ["uuid-d2"], tipo_diagnostico: "presuntivo" },
+        ],
+      }),
+    ).toThrow(/mismo tipo_diagnostico/);
+  });
+
+  test("diagnosticos mixed typed/untyped rejected", () => {
+    expect(() =>
+      FiltrosEventoSchema.parse({
+        location_uuids: ["uuid-x"],
+        diagnosticos: [
+          { concepto_uuids: ["uuid-d1"], tipo_diagnostico: "definitivo" },
+          { concepto_uuids: ["uuid-d2"] },
+        ],
+      }),
+    ).toThrow(/o ninguno — no se puede mezclar/);
+  });
+
+  test("single diagnostico with tipo passes", () => {
+    const ev = FiltrosEventoSchema.parse({
+      location_uuids: ["uuid-x"],
+      diagnosticos: [{ concepto_uuids: ["uuid-d1"], tipo_diagnostico: "presuntivo" }],
+    });
+    expect(ev.diagnosticos![0].tipo_diagnostico).toBe("presuntivo");
+  });
 });
 
 describe("CanonicalContract", () => {

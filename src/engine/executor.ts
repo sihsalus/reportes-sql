@@ -19,9 +19,9 @@
 
 import { sequelize } from "../database/postgres.js";
 import { queryMysql } from "../database/mysql.js";
-import { IndicadorResultado, IndicadorCalculoLog } from "../models/indicador.js";
+import { IndicadorResultado } from "../models/indicador.js";
 import { QueryTypes } from "sequelize";
-import { logger } from "../config/logger.js";
+import { writeCalcLog } from "./calc-log.js";
 
 /** Extra execution options passed by callers that know the indicator context. */
 export interface ExecuteAndPersistOpts {
@@ -36,31 +36,6 @@ export interface ExecuteAndPersistOpts {
 /** Render a Date as a YYYY-MM-DD day (mes_referencia is a day, not a timestamp). */
 function formatDia(date: Date): string {
   return date.toISOString().slice(0, 10);
-}
-
-/**
- * Best-effort ledger write — must NEVER fail the calculation that triggered it.
- */
-async function tryWriteCalculoLog(entry: {
-  status: string;
-  indicador_id: string | null;
-  indicador_version_id: string;
-  mes_referencia: Date | null;
-  filas_devueltas: number | null;
-  filas_persistidas: number | null;
-  duracion_ms: number;
-  error: string | null;
-  fuente: string | null;
-}): Promise<void> {
-  try {
-    await IndicadorCalculoLog.create({
-      ...entry,
-      creado_en: new Date(),
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.warn("Failed to write indicador_calculo_log entry", { error: message });
-  }
 }
 
 /**
@@ -186,7 +161,7 @@ export async function executeAndPersist(
       }
     }
 
-    await tryWriteCalculoLog({
+    await writeCalcLog({
       ...ledgerBase,
       status: "success",
       filas_devueltas: rows.length,
@@ -198,7 +173,7 @@ export async function executeAndPersist(
     return results;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await tryWriteCalculoLog({
+    await writeCalcLog({
       ...ledgerBase,
       status: "error",
       filas_devueltas: null,

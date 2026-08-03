@@ -78,14 +78,9 @@ function buildConteoAtenciones(
       : [];
 
   if (locationUuids.length > 0) {
-    joins += "\nJOIN location l ON e.location_id = l.location_id";
-    const locPlaceholders = locationUuids
-      .map((_, i) => `:${paramName("loc", i)}`)
-      .join(", ");
-    conditions.push(`l.uuid IN (${locPlaceholders})`);
-    for (let i = 0; i < locationUuids.length; i++) {
-      params[paramName("loc", i)] = locationUuids[i];
-    }
+    const core = buildCoreFilterBlock(locationUuids, params);
+    joins += "\n" + core.joins;
+    conditions.push(core.clause);
   }
 
   const hasMinimo =
@@ -223,14 +218,9 @@ function buildConteoPacientes(
   ];
 
   if (locationUuids.length > 0) {
-    joins += "\nJOIN location l ON e.location_id = l.location_id";
-    const locPlaceholders = locationUuids
-      .map((_, i) => `:${paramName("loc", i)}`)
-      .join(", ");
-    conditions.push(`l.uuid IN (${locPlaceholders})`);
-    for (let i = 0; i < locationUuids.length; i++) {
-      params[paramName("loc", i)] = locationUuids[i];
-    }
+    const core = buildCoreFilterBlock(locationUuids, params);
+    joins += "\n" + core.joins;
+    conditions.push(core.clause);
   }
 
   // ── Diagnosticos filter ──
@@ -308,14 +298,9 @@ function buildMinimoOcurrenciasSubquery(
   ];
 
   if (locationUuids.length > 0) {
-    joins += "JOIN location l ON e.location_id = l.location_id";
-    const locPlaceholders = locationUuids
-      .map((_, i) => `:${paramName("loc", i)}`)
-      .join(", ");
-    conditions.push(`l.uuid IN (${locPlaceholders})`);
-    for (let i = 0; i < locationUuids.length; i++) {
-      params[paramName("loc", i)] = locationUuids[i];
-    }
+    const core = buildCoreFilterBlock(locationUuids, params);
+    joins += core.joins;
+    conditions.push(core.clause);
   }
 
   // ── Person join for poblacion filters ──
@@ -375,6 +360,41 @@ function buildMinimoOcurrenciasSubquery(
 }
 
 // ── Filter builders ───────────────────────────────────────────────────
+
+interface CoreFilterResult {
+  joins: string;
+  clause: string;
+  params: Record<string, unknown>;
+}
+
+/**
+ * Core location filter block shared by the two top-level builders and the
+ * min-occurrences subquery. Builds the `location l` join and the
+ * `l.uuid IN (...)` condition for a list of location UUIDs. Emits no joins
+ * or conditions when `locationUuids` is empty.
+ *
+ * Note: callers prepend their own newline (or none) when concatenating
+ * `joins`, preserving the existing SQL byte-for-byte.
+ */
+function buildCoreFilterBlock(
+  locationUuids: string[],
+  params: Record<string, unknown>,
+): CoreFilterResult {
+  if (locationUuids.length === 0) {
+    return { joins: "", clause: "", params: {} };
+  }
+  const locPlaceholders = locationUuids
+    .map((_, i) => `:${paramName("loc", i)}`)
+    .join(", ");
+  for (let i = 0; i < locationUuids.length; i++) {
+    params[paramName("loc", i)] = locationUuids[i];
+  }
+  return {
+    joins: "JOIN location l ON e.location_id = l.location_id",
+    clause: `l.uuid IN (${locPlaceholders})`,
+    params: {},
+  };
+}
 
 function buildOrdenesFilter(
   ordenes: FiltroOrden[] | null,

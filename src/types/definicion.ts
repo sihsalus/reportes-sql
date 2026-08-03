@@ -158,6 +158,36 @@ export const FiltrosEventoSchema = z
         path: ["diagnosticos"],
       });
     }
+
+    // ── Diagnostico tipo homogeneity ──
+    // The SQL builder emits a single shared `ed.certainty` filter that applies
+    // to the entire encounter_diagnosis JOIN. That is only correct when every
+    // diagnostico item carries the same certainty semantics: all omit
+    // tipo_diagnostico (any certainty) or all declare the same one. Any mix
+    // (different tipos, or some declared and some omitted) would make the
+    // shared filter silently miscount, so reject it at the boundary.
+    if (hasDiag) {
+      const items = data.diagnosticos!;
+      const claimed = items.filter((d) => d.tipo_diagnostico !== undefined);
+      if (claimed.length > 0 && claimed.length !== items.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "todos los diagnósticos deben declarar tipo_diagnostico, o ninguno — no se puede mezclar",
+          path: ["diagnosticos"],
+        });
+      } else if (claimed.length > 1) {
+        const first = claimed[0].tipo_diagnostico!;
+        if (!claimed.every((d) => d.tipo_diagnostico === first)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message:
+              "todos los diagnósticos deben tener el mismo tipo_diagnostico (definitivo o presuntivo), sin mezclar",
+            path: ["diagnosticos"],
+          });
+        }
+      }
+    }
   });
 export type FiltrosEvento = z.infer<typeof FiltrosEventoSchema>;
 
