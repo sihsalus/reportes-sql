@@ -11,6 +11,26 @@ const mockSequelizeSync = jest.fn().mockResolvedValue(undefined);
 const mockSequelizeClose = jest.fn().mockResolvedValue(undefined);
 const mockSequelizeAuthenticate = jest.fn().mockResolvedValue(undefined);
 
+// Mock config: same defaults as the real module, with a configured write
+// privilege so request validation tests reach the route handlers (a
+// fail-closed 403 is covered separately in test_app_routing).
+jest.mock("../src/config/index.js", () => ({
+  settings: {
+    openmrs_api_url: "http://fake-openmrs/openmrs",
+    openmrs_api_user: "admin",
+    openmrs_api_password: "test",
+    openmrs_required_privilege: "app:indicadores:write",
+    cors_origins: [
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+      "http://localhost:8080",
+      "http://127.0.0.1:8080",
+    ],
+    base_path: "",
+    port: 8000,
+  },
+}));
+
 const mockFindAndCountAll = jest.fn().mockResolvedValue({ count: 0, rows: [] });
 const mockFindByPk = jest.fn().mockResolvedValue(null);
 const mockModelCreate = jest
@@ -87,11 +107,42 @@ jest.mock("../src/seed/default-indicador.js", () => ({
   DEFAULT_DEFINICION: {},
 }));
 
-const mockFetch = jest.fn().mockResolvedValue({
-  ok: true,
-  status: 200,
-  json: jest.fn().mockResolvedValue({ results: [] }),
-  text: jest.fn().mockResolvedValue(""),
+const SESSION_COOKIE = ["Cookie", "JSESSIONID=test-session"] as const;
+
+// Mock global fetch: /ws/rest/v1/session returns an authenticated session
+// carrying the configured write privilege; other OpenMRS calls (conceptos
+// proxy) return an empty results list.
+const mockFetch = jest.fn((input: RequestInfo | URL) => {
+  const url =
+    typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url;
+  if (url.includes("/ws/rest/v1/session")) {
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        authenticated: true,
+        user: {
+          uuid: "user-uuid-1",
+          display: "Test User",
+          roles: [{ display: "System Developer", uuid: "role-uuid-1" }],
+          privileges: [
+            { display: "app:indicadores:write", uuid: "priv-uuid-1" },
+          ],
+        },
+      }),
+      text: async () => "",
+    }) as Promise<Response>;
+  }
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ results: [] }),
+    text: async () => "",
+  }) as Promise<Response>;
 });
 global.fetch = mockFetch as unknown as typeof fetch;
 
@@ -151,14 +202,59 @@ describe("CORS headers", () => {
     expect(res.headers["access-control-allow-credentials"]).toBe("true");
   });
 
-  test("OPTIONS preflight allows methods", async () => {
+  test("OPTIONS preflight allows explicit methods, never a wildcard", async () => {
     const { request } = makeApp();
 
     const res = await request
       .options("/indicadores")
-      .set("Origin", "http://localhost:5173");
+      .set("Origin", "http://localhost:5173")
+      .set("Access-Control-Request-Method", "POST");
 
     expect(res.headers["access-control-allow-methods"]).toBeDefined();
+    expect(res.headers["access-control-allow-methods"]).not.toContain("*");
+    for (const method of ["GET", "POST", "PUT", "DELETE", "OPTIONS"]) {
+      expect(res.headers["access-control-allow-methods"]).toContain(method);
+    }
+  });
+
+  test("rejects preflight from a non-allowlisted origin (no allow-origin header)", async () => {
+    const { request } = makeApp();
+
+    const res = await request
+      .options("/indicadores")
+      .set("Origin", "https://evil.example")
+      .set("Access-Control-Request-Method", "POST");
+
+    // The granting header is never sent for a non-allowlisted origin; without
+    // Access-Control-Allow-Origin the browser blocks the cross-origin request.
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  test("GET from a non-allowlisted origin gets no CORS headers", async () => {
+    const { request } = makeApp();
+
+    const res = await request
+      .get("/health")
+      .set("Origin", "https://evil.example");
+
+    // Route still serves (CORS is browser enforcement), but no allow-origin.
+    expect(res.status).toBe(200);
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  test("OPTIONS preflight from an allowlisted origin keeps credentials: true", async () => {
+    const { request } = makeApp();
+
+    const res = await request
+      .options("/metas")
+      .set("Origin", "http://localhost:8080")
+      .set("Access-Control-Request-Method", "PUT")
+      .set("Access-Control-Request-Headers", "content-type");
+
+    expect(res.headers["access-control-allow-origin"]).toBe(
+      "http://localhost:8080",
+    );
+    expect(res.headers["access-control-allow-credentials"]).toBe("true");
   });
 });
 
@@ -190,6 +286,7 @@ describe("body size limit (1MB)", () => {
 
     const res = await request
       .put("/metas")
+      .set(...SESSION_COOKIE)
       .send({
         indicador_version_id: "00000000-0000-0000-0000-000000000001",
         anio: 2026,
@@ -210,6 +307,7 @@ describe("ZodError response via metas endpoint", () => {
 
     const res = await request
       .put("/metas")
+      .set(...SESSION_COOKIE)
       .send({})
       .set("Content-Type", "application/json");
 
@@ -221,6 +319,7 @@ describe("ZodError response via metas endpoint", () => {
 
     const res = await request
       .put("/metas")
+      .set(...SESSION_COOKIE)
       .send({})
       .set("Content-Type", "application/json");
 
@@ -235,6 +334,7 @@ describe("ZodError response via metas endpoint", () => {
 
     const res = await request
       .put("/metas")
+      .set(...SESSION_COOKIE)
       .send({
         indicador_version_id: "00000000-0000-0000-0000-000000000001",
         anio: "not-a-number",
@@ -249,10 +349,12 @@ describe("ZodError response via metas endpoint", () => {
 // ── Error handling ─────────────────────────────────────────────────────────
 
 describe("error handling", () => {
-  test("unknown route returns 404", async () => {
+  test("unknown route returns 404 when authenticated", async () => {
     const { request } = makeApp();
 
-    const res = await request.get("/this-does-not-exist-xyz");
+    const res = await request
+      .get("/this-does-not-exist-xyz")
+      .set(...SESSION_COOKIE);
 
     expect(res.status).toBe(404);
   });
@@ -335,6 +437,7 @@ describe("createApp structure", () => {
 
     const res = await request
       .put("/metas")
+      .set(...SESSION_COOKIE)
       .send({
         indicador_version_id: "00000000-0000-0000-0000-000000000001",
         anio: 2026,

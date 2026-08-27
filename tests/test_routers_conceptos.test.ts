@@ -47,6 +47,21 @@ function mockFetchRes(status: number, body: unknown): Response {
   } as Response;
 }
 
+function makeUuid(index: number): string {
+  return `00000000-0000-0000-0000-${String(index).padStart(12, "0")}`;
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
+}
+
 // Mock global fetch
 const originalFetch = globalThis.fetch;
 
@@ -391,6 +406,71 @@ describe("Conceptos Router", () => {
       expect(res.status).toBe(400);
       expect(res.body.detail).toMatch(/inválido/);
     });
+
+    test("limits OpenMRS requests to 8 and preserves input order", async () => {
+      const uuids = Array.from({ length: 10 }, (_, index) => makeUuid(index + 1));
+      const pending: Array<{
+        uuid: string;
+        resolve: (response: Response) => void;
+      }> = [];
+      let inFlight = 0;
+      let maxInFlight = 0;
+      let firstBatchReady!: () => void;
+      let allRequestsStarted!: () => void;
+      const firstBatch = new Promise<void>((resolve) => {
+        firstBatchReady = resolve;
+      });
+      const allRequests = new Promise<void>((resolve) => {
+        allRequestsStarted = resolve;
+      });
+
+      (globalThis.fetch as jest.Mock).mockImplementation(() => {
+        const request = deferred<Response>();
+        const uuid = uuids[pending.length];
+        pending.push({ uuid, resolve: request.resolve });
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        if (pending.length === 8) firstBatchReady();
+        if (pending.length === uuids.length) allRequestsStarted();
+        return request.promise.finally(() => {
+          inFlight -= 1;
+        });
+      });
+
+      const app = createTestApp();
+      const responsePromise = supertest(app)
+        .get(`/conceptos/locations/resolve?uuids=${uuids.join(",")}`)
+        .then((response) => response);
+
+      await firstBatch;
+      expect(globalThis.fetch).toHaveBeenCalledTimes(8);
+      expect(maxInFlight).toBe(8);
+
+      for (const request of pending.slice(0, 8)) {
+        request.resolve(
+          mockFetchRes(200, {
+            uuid: request.uuid,
+            display: request.uuid,
+          }),
+        );
+      }
+
+      await allRequests;
+      for (const request of pending.slice(8)) {
+        request.resolve(
+          mockFetchRes(200, {
+            uuid: request.uuid,
+            display: request.uuid,
+          }),
+        );
+      }
+
+      const res = await responsePromise;
+      expect(res.status).toBe(200);
+      expect(res.body.map((item: { uuid: string }) => item.uuid)).toEqual(
+        uuids,
+      );
+    });
   });
 
   describe("GET /conceptos/diagnosticos/resolve", () => {
@@ -509,5 +589,30 @@ describe("Conceptos Router", () => {
       expect(res.status).toBe(400);
       expect(res.body.detail).toMatch(/inválido/);
     });
+  });
+
+  describe("UUID resolve request limits", () => {
+    test.each([
+      "/conceptos/buscar/resolve",
+      "/conceptos/locations/resolve",
+      "/conceptos/diagnosticos/resolve",
+    ])(
+      "returns 413 and does not call OpenMRS when more than 100 UUIDs are sent (%s)",
+      async (path) => {
+        const uuids = Array.from({ length: 101 }, (_, index) =>
+          makeUuid(index + 1),
+        );
+        const app = createTestApp();
+        const res = await supertest(app).get(
+          `${path}?uuids=${uuids.join(",")}`,
+        );
+
+        expect(res.status).toBe(413);
+        expect(res.body.detail).toBe(
+          "Se permite un máximo de 100 UUIDs por solicitud",
+        );
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+      },
+    );
   });
 });

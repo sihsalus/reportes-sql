@@ -27,8 +27,19 @@ export async function handleCreateVersion(
     return;
   }
 
-  const body = req.body as { definicion?: unknown };
-  if (!body.definicion) {
+  const body = req.body;
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    res.status(422).json({
+      detail: {
+        field: "definicion",
+        message: "definicion es obligatorio",
+      },
+    });
+    return;
+  }
+
+  const typedBody = body as { definicion?: unknown };
+  if (!typedBody.definicion) {
     res.status(422).json({
       detail: {
         field: "definicion",
@@ -40,7 +51,7 @@ export async function handleCreateVersion(
 
   // Reject inbound periodo
   try {
-    rejectPeriodoInPayload(body.definicion);
+    rejectPeriodoInPayload(typedBody.definicion);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Validation error";
     res.status(422).json({
@@ -51,7 +62,7 @@ export async function handleCreateVersion(
 
   let definicion: DefinicionIndicador;
   try {
-    definicion = parseDefinicionIndicador(body.definicion);
+    definicion = parseDefinicionIndicador(typedBody.definicion);
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : "Validation error";

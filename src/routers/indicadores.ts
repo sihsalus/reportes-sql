@@ -31,8 +31,10 @@ import {
   validarDefinicionLocationUuids,
 } from "../validators/openmrs.js";
 import { asyncHandler } from "../middleware/async-handler.js";
+import { requirePrivilege } from "../middleware/auth.js";
 import { handleCreateVersion } from "./indicadores/versiones.js";
 import { handlePreviewSql } from "./indicadores/preview-sql.js";
+import { settings } from "../config/index.js";
 
 export const indicadoresRouter: Router = Router();
 
@@ -40,6 +42,7 @@ export const indicadoresRouter: Router = Router();
 
 indicadoresRouter.post(
   "/",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
     let body;
     try {
@@ -190,6 +193,7 @@ indicadoresRouter.get(
 
 indicadoresRouter.put(
   "/:id",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
     const id = req.params["id"] as string;
     const indicador = await Indicador.findByPk(id);
@@ -333,6 +337,7 @@ indicadoresRouter.delete(
 
 indicadoresRouter.post(
   "/:id/versiones",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
     await handleCreateVersion(req, res);
   }),

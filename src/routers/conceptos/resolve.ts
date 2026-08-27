@@ -14,6 +14,8 @@ import {
   proxyWithErrorHandling,
   parseUuidList,
   validateUuids,
+  MAX_RESOLVE_UUIDS,
+  mapWithConcurrency,
 } from "./helpers.js";
 
 // ── GET /buscar/resolve ────────────────────────────────────────────────────
@@ -42,9 +44,16 @@ export async function handleBuscarResolve(
       return;
     }
 
+    if (valid.length > MAX_RESOLVE_UUIDS) {
+      res.status(413).json({
+        detail: "Se permite un máximo de 100 UUIDs por solicitud",
+      });
+      return;
+    }
+
     const result: Record<string, string> = {};
 
-    const fetches = valid.map(async (uid) => {
+    const fetched = await mapWithConcurrency(valid, async (uid) => {
       const url = openmrsUrl(`concept/${uid}`);
       try {
         const resp = await fetch(`${url}?v=custom:(uuid,display)`, {
@@ -65,7 +74,6 @@ export async function handleBuscarResolve(
       }
     });
 
-    const fetched = await Promise.all(fetches);
     for (const item of fetched) {
       if (item !== null) {
         result[item.uuid] = item.display;
@@ -102,9 +110,16 @@ export async function handleLocationsResolve(
       return;
     }
 
+    if (valid.length > MAX_RESOLVE_UUIDS) {
+      res.status(413).json({
+        detail: "Se permite un máximo de 100 UUIDs por solicitud",
+      });
+      return;
+    }
+
     const results: Array<{ uuid: string; display: string }> = [];
 
-    const fetches = valid.map(async (uid) => {
+    const fetched = await mapWithConcurrency(valid, async (uid) => {
       const url = openmrsUrl(`location/${uid}`);
       try {
         const resp = await fetch(`${url}?v=custom:(uuid,display)`, {
@@ -125,7 +140,6 @@ export async function handleLocationsResolve(
       }
     });
 
-    const fetched = await Promise.all(fetches);
     for (const item of fetched) {
       if (item !== null) {
         results.push(item);
@@ -162,13 +176,20 @@ export async function handleDiagnosticosResolve(
       return;
     }
 
+    if (valid.length > MAX_RESOLVE_UUIDS) {
+      res.status(413).json({
+        detail: "Se permite un máximo de 100 UUIDs por solicitud",
+      });
+      return;
+    }
+
     const results: Array<{
       uuid: string;
       codigo?: string;
       nombre: string;
     }> = [];
 
-    const fetches = valid.map(async (uid) => {
+    const fetched = await mapWithConcurrency(valid, async (uid) => {
       const url = openmrsUrl(`concept/${uid}`);
       try {
         const resp = await fetch(`${url}?v=full`, {
@@ -199,7 +220,6 @@ export async function handleDiagnosticosResolve(
       }
     });
 
-    const fetched = await Promise.all(fetches);
     for (const item of fetched) {
       if (item !== null) {
         results.push(item);

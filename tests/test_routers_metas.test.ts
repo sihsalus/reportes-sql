@@ -28,13 +28,54 @@ jest.mock("../src/models/indicador.js", () => ({
   },
 }));
 
+// Configured write privilege so the real requirePrivilege guard passes.
+jest.mock("../src/config/index.js", () => ({
+  settings: {
+    openmrs_api_url: "http://fake-openmrs/openmrs",
+    openmrs_api_user: "admin",
+    openmrs_api_password: "test",
+    openmrs_required_privilege: "app:indicadores:write",
+    indicadores_db_host: "localhost",
+    indicadores_db_port: 5432,
+    indicadores_db_name: "test",
+    indicadores_db_user: "test",
+    indicadores_db_password: "test",
+    openmrs_db_host: "localhost",
+    openmrs_db_port: 3306,
+    openmrs_db_name: "test",
+    openmrs_db_user: "test",
+    openmrs_db_password: "test",
+    port: 8000,
+    cors_origins: [],
+    base_path: "",
+    auto_seed_default_indicator: false,
+  },
+  getIndicadoresDatabaseUrl: () =>
+    "postgres://test:test@localhost:5432/test",
+}));
+
 import express from "express";
 import supertest from "supertest";
 import { metasRouter } from "../src/routers/metas.js";
 
+// Simulates the requireSession middleware: an authenticated user holding the
+// configured write privilege.
+function stubAuthenticatedSession(
+  req: express.Request,
+  _res: express.Response,
+  next: express.NextFunction,
+) {
+  (req as express.Request & { authUser?: unknown }).authUser = {
+    uuid: "user-uuid-1",
+    privileges: [{ display: "app:indicadores:write" }],
+  };
+  next();
+}
+
 function createTestApp() {
   const app = express();
   app.use(express.json());
+  app.use(stubAuthenticatedSession);
   app.use("/metas", metasRouter);
   return app;
 }

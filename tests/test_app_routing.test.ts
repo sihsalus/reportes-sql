@@ -95,12 +95,37 @@ jest.mock("../src/seed/default-indicador.js", () => ({
   DEFAULT_DEFINICION: {},
 }));
 
-// Mock global fetch for conceptos proxy routes
-const mockFetch = jest.fn().mockResolvedValue({
-  ok: true,
-  status: 200,
-  json: jest.fn().mockResolvedValue({ results: [] }),
-  text: jest.fn().mockResolvedValue(""),
+// Mock global fetch: /ws/rest/v1/session returns an authenticated session
+// (for requireSession); every other OpenMRS call (conceptos proxy) returns
+// an empty results list.
+const MOCKED_SESSION_USER = {
+  uuid: "user-uuid-1",
+  display: "Test User",
+  roles: [{ display: "System Developer", uuid: "role-uuid-1" }],
+  privileges: [{ display: "app:indicadores:write", uuid: "priv-uuid-1" }],
+};
+
+const mockFetch = jest.fn((input: RequestInfo | URL) => {
+  const url =
+    typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url;
+  if (url.includes("/ws/rest/v1/session")) {
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ authenticated: true, user: MOCKED_SESSION_USER }),
+      text: async () => "",
+    }) as Promise<Response>;
+  }
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({ results: [] }),
+    text: async () => "",
+  }) as Promise<Response>;
 });
 global.fetch = mockFetch as unknown as typeof fetch;
 
@@ -179,14 +204,18 @@ describe("default routing — BASE_PATH empty", () => {
   });
 
   it("serves /indicadores at root", async () => {
-    const res = await request.get("/indicadores");
+    const res = await request
+      .get("/indicadores")
+      .set("Cookie", "JSESSIONID=test-session");
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("items");
     expect(res.body).toHaveProperty("total");
   });
 
   it("serves /resultados at root", async () => {
-    const res = await request.get("/resultados");
+    const res = await request
+      .get("/resultados")
+      .set("Cookie", "JSESSIONID=test-session");
     expect(res.status).toBe(200);
   });
 
@@ -206,8 +235,10 @@ describe("default routing — BASE_PATH empty", () => {
     expect(res.body.servers[0].url).toBe("http://localhost:8000");
   });
 
-  it("returns 404 for unknown route", async () => {
-    const res = await request.get("/nonexistent");
+  it("returns 404 for unknown route when authenticated", async () => {
+    const res = await request
+      .get("/nonexistent")
+      .set("Cookie", "JSESSIONID=test-session");
     expect(res.status).toBe(404);
   });
 });
@@ -231,20 +262,26 @@ describe("prefixed routing — BASE_PATH=/openmrs/services/reportes-sql", () => 
   });
 
   it("serves /indicadores at prefixed path", async () => {
-    const res = await request.get(`${prefix}/indicadores`);
+    const res = await request
+      .get(`${prefix}/indicadores`)
+      .set("Cookie", "JSESSIONID=test-session");
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty("items");
     expect(res.body).toHaveProperty("total");
   });
 
   it("serves /resultados at prefixed path", async () => {
-    const res = await request.get(`${prefix}/resultados`);
+    const res = await request
+      .get(`${prefix}/resultados`)
+      .set("Cookie", "JSESSIONID=test-session");
     expect(res.status).toBe(200);
   });
 
   it("serves /conceptos at prefixed path", async () => {
     // /conceptos/encounter-types uses fetch to OpenMRS (mocked)
-    const res = await request.get(`${prefix}/conceptos/encounter-types`);
+    const res = await request
+      .get(`${prefix}/conceptos/encounter-types`)
+      .set("Cookie", "JSESSIONID=test-session");
     expect(res.status).toBe(200);
   });
 
@@ -297,7 +334,105 @@ describe("routing normalization edge cases", () => {
 
   it("empty base path mounts routes at root", async () => {
     const { request } = requestFor("");
-    const res = await request.get("/indicadores");
+    const res = await request
+      .get("/indicadores")
+      .set("Cookie", "JSESSIONID=test-session");
     expect(res.status).toBe(200);
+  });
+});
+
+// ── Incoming auth — requireSession gate ─────────────────────────────────
+
+describe("incoming auth — requireSession gate", () => {
+  const prefix = "/openmrs/services/reportes-sql";
+  const session = ["Cookie", "JSESSIONID=test-session"] as const;
+
+  it("returns 401 without a session on all four protected routers (root mount)", async () => {
+    const { request } = requestFor("");
+
+    for (const path of [
+      "/indicadores",
+      "/resultados",
+      "/conceptos/encounter-types",
+      "/metas",
+    ]) {
+      const res = await request.get(path);
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ detail: "No autorizado" });
+    }
+    // Missing cookie ⇒ no upstream validation call at all
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 without a session on all four protected routers (prefixed mount)", async () => {
+    const { request } = requestFor(prefix);
+
+    for (const path of [
+      `${prefix}/indicadores`,
+      `${prefix}/resultados`,
+      `${prefix}/conceptos/encounter-types`,
+      `${prefix}/metas`,
+    ]) {
+      const res = await request.get(path);
+      expect(res.status).toBe(401);
+    }
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 fail-closed on all seven write/recalc handlers (privilege unset)", async () => {
+    const { request } = requestFor("");
+    const indicadorId = "00000000-0000-0000-0000-000000000001";
+
+    const cases: Array<[string, string]> = [
+      ["post", "/indicadores"],
+      ["put", `/indicadores/${indicadorId}`],
+      ["post", `/indicadores/${indicadorId}/versiones`],
+      ["post", "/resultados/calcular-ahora"],
+      ["post", "/resultados/recalcular-anio"],
+      ["put", "/metas"],
+      ["delete", "/metas"],
+    ];
+
+    for (const [method, path] of cases) {
+      const req = request[method as "post" | "put" | "delete"](path);
+      const res = await req.set(...session);
+      expect(res.status).toBe(403);
+      expect(res.body).toEqual({ detail: "Sin privilegios" });
+    }
+  });
+
+  it("keeps /health public at both mount positions (no cookie needed)", async () => {
+    const { request } = requestFor(prefix);
+
+    const rootRes = await request.get("/health");
+    expect(rootRes.status).toBe(200);
+    expect(rootRes.body).toEqual({ status: "ok" });
+
+    const prefixedRes = await request.get(`${prefix}/health`);
+    expect(prefixedRes.status).toBe(200);
+    expect(prefixedRes.body).toEqual({ status: "ok" });
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps /docs and /docs/openapi.json public (no cookie needed)", async () => {
+    const { request } = requestFor("");
+
+    const docsRes = await request.get("/docs/");
+    expect(docsRes.status).toBe(200);
+
+    const openapiRes = await request.get("/docs/openapi.json");
+    expect(openapiRes.status).toBe(200);
+    expect(openapiRes.body).toHaveProperty("openapi");
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("serves /docs/openapi.json at prefixed mount without a session", async () => {
+    const { request } = requestFor(prefix);
+
+    const res = await request.get(`${prefix}/docs/openapi.json`);
+    expect(res.status).toBe(200);
+    expect(res.body.servers[0].url).toBe(`http://localhost:8000${prefix}`);
   });
 });

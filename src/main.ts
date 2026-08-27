@@ -22,11 +22,16 @@ import { settings, warnDefaultCredentials } from "./config/index.js";
 import { logger, requestLogger } from "./config/logger.js";
 import { sequelize } from "./database/postgres.js";
 import { disposeMysql } from "./database/mysql.js";
-import { backfillResultadoCanonical, createRollupViews } from "./database/views.js";
+import {
+  ensureCanonicalResultIndex,
+  backfillResultadoCanonical,
+  createRollupViews,
+} from "./database/views.js";
 import { indicadoresRouter } from "./routers/indicadores.js";
 import { resultadosRouter } from "./routers/resultados.js";
 import { conceptosRouter } from "./routers/conceptos.js";
 import { metasRouter } from "./routers/metas.js";
+import { requireSession } from "./middleware/auth.js";
 import { buildOpenapiSpec } from "./docs/openapi.js";
 import { seedDefaultIndicador } from "./seed/default-indicador.js";
 
@@ -101,8 +106,9 @@ export function createApp(basePath: string): Express {
     cors({
       origin: settings.cors_origins,
       credentials: true,
-      methods: ["*"],
-      allowedHeaders: ["*"],
+      // Explicit lists — never `*` (no wildcard with credentials).
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Accept", "X-Request-Id"],
     }),
   );
 
@@ -116,6 +122,10 @@ app.use(accessLogMiddleware);
   const spec = buildOpenapiSpec(basePath || undefined);
 
   const publicRouter = Router();
+  // Incoming session validation gate — mounted before every route. Exempts
+  // /health (both mount positions) and exactly /docs + /docs/* (including
+  // /docs/openapi.json) via an inline path check in the middleware.
+  publicRouter.use(requireSession);
   publicRouter.use("/indicadores", indicadoresRouter);
   publicRouter.use("/resultados", resultadosRouter);
   publicRouter.use("/conceptos", conceptosRouter);
@@ -205,6 +215,9 @@ async function start(): Promise<void> {
   // Sync Sequelize models with PostgreSQL (safe — does not drop data)
   await sequelize.sync();
   logger.info("PostgreSQL models synced.");
+
+  await ensureCanonicalResultIndex();
+  logger.info("Canonical result index ensured.");
 
   // Backfill canonical fields for existing rows
   await backfillResultadoCanonical();
