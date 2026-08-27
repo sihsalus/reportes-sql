@@ -183,6 +183,11 @@ IndicadorResultado.init(
         fields: ["indicador_version_id", "mes_referencia", "es_canonico"],
       },
       {
+        name: "idx_resultado_canonico_mes",
+        fields: ["mes_referencia"],
+        where: { es_canonico: true },
+      },
+      {
         name: "idx_resultado_periodo",
         fields: ["periodo_inicio", "periodo_fin"],
       },

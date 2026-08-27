@@ -8,17 +8,11 @@
 
 import { queryMysql } from "../database/mysql.js";
 import type { DefinicionIndicador } from "../types/definicion.js";
+import { OpenMRSUnavailableError } from "../errors.js";
 
-/**
- * Raised when the OpenMRS MySQL database cannot be reached.
- * Routers map this to HTTP 502 (same convention as validarLocations).
- */
-export class OpenMRSUnavailableError extends Error {
-  constructor() {
-    super("OpenMRS no disponible");
-    this.name = "OpenMRSUnavailableError";
-  }
-}
+// Re-export the legacy location so existing imports (`import {
+// OpenMRSUnavailableError } from "../validators/openmrs.js"`) keep working.
+export { OpenMRSUnavailableError };
 
 /**
  * Validate all UUID strings exist in the OpenMRS location table.

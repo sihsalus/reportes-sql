@@ -40,6 +40,9 @@ Copy `.env.example` to `.env` and adjust for your environment.
 | `OPENMRS_DB_NAME` | `openmrs` | OpenMRS MySQL database |
 | `OPENMRS_DB_USER` | `openmrs` | OpenMRS MySQL user |
 | `OPENMRS_DB_PASSWORD` | `openmrs` | OpenMRS MySQL password |
+| `OPENMRS_DB_CONNECT_TIMEOUT_MS` | `10000` | TCP connect handshake ceiling (ms) — fail-fast against a stuck OpenMRS DB |
+| `OPENMRS_DB_ACQUIRE_TIMEOUT_MS` | `10000` | Time waiting for an idle pool connection (ms); enforced by the application because mysql2 lacks a PoolOptions acquireTimeout |
+| `OPENMRS_DB_QUERY_TIMEOUT_MS` | `30000` | Per-query execution ceiling (ms) — increase only for very large OpenMRS datasets |
 | `OPENMRS_API_URL` | `http://localhost/openmrs` | OpenMRS REST API base URL |
 | `OPENMRS_API_USER` | `admin` | OpenMRS API basic-auth user |
 | `OPENMRS_API_PASSWORD` | `Admin123` | OpenMRS API basic-auth password |
@@ -98,4 +101,3 @@ Notes:
 - Put that override in your local `config/frontend.json` inside the frontend repo.
 - Do not use the deprecated `indicatorsApiPath` key for this app.
 - Do not commit that override unless the whole team explicitly wants the shared local default.
-

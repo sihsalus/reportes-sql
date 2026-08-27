@@ -17,6 +17,22 @@ import { logger } from "../config/logger.js";
 const CANONICAL_BACKFILL_KEY = "canonical_backfill_v1";
 
 /**
+ * Ensure the partial index used by cross-version canonical supersede exists.
+ *
+ * The model declaration covers fresh tables, but `sequelize.sync()` does not
+ * add indexes to an existing table. Keep this idempotent guard until schema
+ * migrations replace startup schema maintenance.
+ */
+export async function ensureCanonicalResultIndex(): Promise<void> {
+  await sequelize.query(
+    `CREATE INDEX IF NOT EXISTS idx_resultado_canonico_mes
+     ON indicador_resultado (mes_referencia)
+     WHERE es_canonico = true`,
+    { type: QueryTypes.RAW },
+  );
+}
+
+/**
  * Backfill `mes_referencia` and `es_canonico` for existing rows.
  *
  * - Sets `mes_referencia` from the first day of `periodo_inicio` when null.

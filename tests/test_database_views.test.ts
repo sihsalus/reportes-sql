@@ -32,6 +32,7 @@ jest.spyOn(console, "warn").mockImplementation(() => {});
 jest.spyOn(console, "debug").mockImplementation(() => {});
 
 import {
+  ensureCanonicalResultIndex,
   backfillResultadoCanonical,
   createRollupViews,
 } from "../src/database/views.js";
@@ -43,6 +44,20 @@ beforeEach(() => {
   mockAppMetadataFindOne.mockResolvedValue(null);
   mockAppMetadataCreate.mockReset();
   mockAppMetadataCreate.mockResolvedValue(undefined);
+});
+
+describe("ensureCanonicalResultIndex", () => {
+  test("creates the partial canonical month index idempotently", async () => {
+    await ensureCanonicalResultIndex();
+
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    expect(mockQuery.mock.calls[0]?.[0]).toContain(
+      "CREATE INDEX IF NOT EXISTS idx_resultado_canonico_mes",
+    );
+    expect(mockQuery.mock.calls[0]?.[0]).toContain(
+      "WHERE es_canonico = true",
+    );
+  });
 });
 
 describe("backfillResultadoCanonical", () => {

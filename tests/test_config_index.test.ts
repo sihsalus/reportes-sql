@@ -103,6 +103,9 @@ beforeEach(() => {
   delete process.env["INDICADORES_DB_PASSWORD"];
   delete process.env["OPENMRS_DB_PASSWORD"];
   delete process.env["OPENMRS_API_PASSWORD"];
+  delete process.env["OPENMRS_DB_CONNECT_TIMEOUT_MS"];
+  delete process.env["OPENMRS_DB_ACQUIRE_TIMEOUT_MS"];
+  delete process.env["OPENMRS_DB_QUERY_TIMEOUT_MS"];
 });
 
 afterEach(() => {
@@ -136,6 +139,23 @@ describe("warnDefaultCredentials", () => {
     c.mockRestore();
   });
 
+  test("warns for unset passwords without exposing default values", async () => {
+    const c = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const { warnDefaultCredentials } = await importConfigFresh();
+
+    warnDefaultCredentials();
+
+    const calls = c.mock.calls.map((call) => call[0] as string);
+    expect(calls).toHaveLength(3);
+    expect(calls.some((line) => line.includes("INDICATORS_DB_PASSWORD"))).toBe(true);
+    expect(calls.some((line) => line.includes("OPENMRS_DB_PASSWORD"))).toBe(true);
+    expect(calls.some((line) => line.includes("OPENMRS_API_PASSWORD"))).toBe(true);
+    for (const credential of ["postgres", "openmrs", "Admin123"]) {
+      expect(calls.some((line) => line.includes(credential))).toBe(false);
+    }
+    c.mockRestore();
+  });
+
   test("does not warn when all passwords are set", async () => {
     process.env["INDICATORS_DB_PASSWORD"] = "s3cret";
     process.env["OPENMRS_DB_PASSWORD"] = "s3cret";
@@ -163,6 +183,40 @@ describe("warnDefaultCredentials", () => {
     expect(calls.some((line) => line.includes("INDICATORS_DB_PASSWORD"))).toBe(false);
     expect(calls.some((line) => line.includes("OPENMRS_API_PASSWORD"))).toBe(true);
     c.mockRestore();
+  });
+});
+
+describe("OpenMRS MySQL timeouts", () => {
+  test("uses conservative defaults", async () => {
+    const { settings: freshSettings } = await importConfigFresh();
+
+    expect(freshSettings.openmrs_db_connect_timeout_ms).toBe(10_000);
+    expect(freshSettings.openmrs_db_acquire_timeout_ms).toBe(10_000);
+    expect(freshSettings.openmrs_db_query_timeout_ms).toBe(30_000);
+  });
+
+  test("parses positive integer overrides", async () => {
+    process.env["OPENMRS_DB_CONNECT_TIMEOUT_MS"] = "5000";
+    process.env["OPENMRS_DB_ACQUIRE_TIMEOUT_MS"] = "7500";
+    process.env["OPENMRS_DB_QUERY_TIMEOUT_MS"] = "60000";
+
+    const { settings: freshSettings } = await importConfigFresh();
+
+    expect(freshSettings.openmrs_db_connect_timeout_ms).toBe(5_000);
+    expect(freshSettings.openmrs_db_acquire_timeout_ms).toBe(7_500);
+    expect(freshSettings.openmrs_db_query_timeout_ms).toBe(60_000);
+  });
+
+  test("falls back when timeout overrides are invalid or non-positive", async () => {
+    process.env["OPENMRS_DB_CONNECT_TIMEOUT_MS"] = "not-a-number";
+    process.env["OPENMRS_DB_ACQUIRE_TIMEOUT_MS"] = "0";
+    process.env["OPENMRS_DB_QUERY_TIMEOUT_MS"] = "-1";
+
+    const { settings: freshSettings } = await importConfigFresh();
+
+    expect(freshSettings.openmrs_db_connect_timeout_ms).toBe(10_000);
+    expect(freshSettings.openmrs_db_acquire_timeout_ms).toBe(10_000);
+    expect(freshSettings.openmrs_db_query_timeout_ms).toBe(30_000);
   });
 });
 
