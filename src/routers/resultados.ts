@@ -27,11 +27,14 @@ import { executeAndPersist } from "../engine/executor.js";
 import { writeCalcLog } from "../engine/calc-log.js";
 import { queryMysql } from "../database/mysql.js";
 import { calcularMesActual } from "../engine/periodo.js";
-import { resolveOrcenesConceptMap } from "../engine/concept-resolver.js";
+import { resolveConceptMap } from "../validators/openmrs.js";
+import { OpenMRSUnavailableError } from "../errors.js";
 import { asyncHandler } from "../middleware/async-handler.js";
+import { requirePrivilege } from "../middleware/auth.js";
 import { rateLimit, resetRateLimitStore } from "./resultados/rate-limit.js";
 import { handleSeries } from "./resultados/series.js";
 import { handleRecalcularAnio } from "./resultados/recalcular-anio.js";
+import { settings } from "../config/index.js";
 
 export const resultadosRouter: Router = Router();
 
@@ -189,6 +192,7 @@ resultadosRouter.get(
 
 resultadosRouter.post(
   "/calcular-ahora",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
     const clientIp = req.ip ?? req.socket.remoteAddress ?? "unknown";
     if (!rateLimit(`calcular-ahora:${clientIp}`, 3, 60_000)) {
@@ -212,7 +216,79 @@ resultadosRouter.post(
     });
 
     // Always calculate for the current month (canonical monthly semantics)
-    const { inicio, fin, mes_referencia } = calcularMesActual();
+    const { inicio, fin, finPersistencia, mes_referencia } = calcularMesActual();
+
+    // Batch the latest-version lookup instead of issuing one query per
+    // indicator. Ordering lets us keep the first row for each indicator.
+    const indicadorIds = indicadores.map((indicador) => indicador.id);
+    const versions = indicadorIds.length > 0
+      ? await IndicadorVersion.findAll({
+          where: { indicador_id: indicadorIds },
+          order: [["indicador_id", "ASC"], ["version", "DESC"]],
+        })
+      : [];
+    const latestVersionByIndicador = new Map<string, IndicadorVersion>();
+    for (const version of versions) {
+      if (!latestVersionByIndicador.has(version.indicador_id)) {
+        latestVersionByIndicador.set(version.indicador_id, version);
+      }
+    }
+
+    // Parse definitions and collect all order concepts before making one
+    // OpenMRS lookup for the complete batch.
+    const definicionByIndicador = new Map<string, ReturnType<typeof parseDefinicionIndicador>>();
+    const allConceptUuids = new Set<string>();
+    for (const indicador of indicadores) {
+      const version = latestVersionByIndicador.get(indicador.id);
+      if (!version) continue;
+
+      const definicion = parseDefinicionIndicador(version.definicion);
+      definicionByIndicador.set(indicador.id, definicion);
+      for (const orden of definicion.evento?.ordenes ?? []) {
+        allConceptUuids.add(orden.concepto_uuid);
+      }
+    }
+
+    let globalConceptMap: Record<string, number> = {};
+    if (allConceptUuids.size > 0) {
+      try {
+        globalConceptMap = await resolveConceptMap(Array.from(allConceptUuids));
+      } catch (err) {
+        if (err instanceof OpenMRSUnavailableError) {
+          res.status(502).json({ detail: "OpenMRS no disponible" });
+          return;
+        }
+        throw err;
+      }
+    }
+
+    const conceptMapByIndicador = new Map<string, Record<string, number> | null>();
+    const conceptErrorByIndicador = new Map<string, string>();
+    for (const indicador of indicadores) {
+      const definicion = definicionByIndicador.get(indicador.id);
+      const ordenes = definicion?.evento?.ordenes;
+      if (!ordenes || ordenes.length === 0) {
+        conceptMapByIndicador.set(indicador.id, null);
+        continue;
+      }
+
+      const conceptMap: Record<string, number> = {};
+      const missing: string[] = [];
+      for (const orden of ordenes) {
+        const conceptId = globalConceptMap[orden.concepto_uuid];
+        if (conceptId === undefined) missing.push(orden.concepto_uuid);
+        else conceptMap[orden.concepto_uuid] = conceptId;
+      }
+
+      if (missing.length > 0) {
+        conceptErrorByIndicador.set(
+          indicador.id,
+          `Conceptos de órdenes no encontrados: ${missing.join(", ")}`,
+        );
+      } else {
+        conceptMapByIndicador.set(indicador.id, conceptMap);
+      }
+    }
 
     let calculados = 0;
     const errores: Array<{
@@ -223,14 +299,8 @@ resultadosRouter.post(
     const total = indicadores.length;
 
     for (const indicador of indicadores) {
-      let latestVersionId: string | null = null;
+      const latest = latestVersionByIndicador.get(indicador.id);
       try {
-        // Get latest version
-        const latest = await IndicadorVersion.findOne({
-          where: { indicador_id: indicador.id },
-          order: [["version", "DESC"]],
-        });
-
         if (!latest) {
           errores.push({
             indicador_id: indicador.id,
@@ -246,16 +316,25 @@ resultadosRouter.post(
           });
           continue;
         }
-        latestVersionId = latest.id;
+        const conceptError = conceptErrorByIndicador.get(indicador.id);
+        if (conceptError) {
+          errores.push({
+            indicador_id: indicador.id,
+            indicador_nombre: indicador.nombre,
+            error: conceptError,
+          });
+          await writeCalcLog({
+            indicador_id: indicador.id,
+            indicador_version_id: latest.id,
+            mes_referencia,
+            error: conceptError,
+            fuente: "calcular-ahora",
+          });
+          continue;
+        }
 
-        // Parse definicion (no longer uses periodo)
-        const definicion = parseDefinicionIndicador(latest.definicion);
-
-        // Resolve ordenes concept UUIDs to OpenMRS concept_ids
-        const ordenes = definicion.evento?.ordenes;
-        const conceptMap = ordenes && ordenes.length > 0
-          ? await resolveOrcenesConceptMap(ordenes)
-          : null;
+        const definicion = definicionByIndicador.get(indicador.id)!;
+        const conceptMap = conceptMapByIndicador.get(indicador.id) ?? null;
 
         // Build query with month boundaries
         const { sql, params } = buildQuery(
@@ -270,7 +349,7 @@ resultadosRouter.post(
           params as Record<string, unknown>,
           latest.id,
           inicio,
-          fin,
+          finPersistencia,
           mes_referencia,
           {
             indicadorId: indicador.id,
@@ -281,18 +360,18 @@ resultadosRouter.post(
 
         calculados += 1;
       } catch (err: unknown) {
-        const message =
+        const internalMessage =
           err instanceof Error ? err.message : "Error desconocido";
         errores.push({
           indicador_id: indicador.id,
           indicador_nombre: indicador.nombre,
-          error: message,
+          error: "Error interno durante el cálculo",
         });
         await writeCalcLog({
           indicador_id: indicador.id,
-          indicador_version_id: latestVersionId,
+          indicador_version_id: latest?.id ?? null,
           mes_referencia,
-          error: message,
+          error: internalMessage,
           fuente: "calcular-ahora",
         });
       }
@@ -311,6 +390,7 @@ resultadosRouter.post(
 
 resultadosRouter.post(
   "/recalcular-anio",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
     await handleRecalcularAnio(req, res);
   }),

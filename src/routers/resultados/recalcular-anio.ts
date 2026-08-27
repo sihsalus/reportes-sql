@@ -31,7 +31,15 @@ export async function handleRecalcularAnio(
     return;
   }
 
-  const { anio, indicador_id } = req.body as {
+  const body = req.body;
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    res.status(422).json({
+      detail: { field: "anio", message: "anio debe ser un número entero" },
+    });
+    return;
+  }
+
+  const { anio, indicador_id } = body as {
     anio?: number;
     indicador_id?: string;
   };
@@ -269,19 +277,19 @@ export async function handleRecalcularAnio(
 
         recalculados += 1;
       } catch (err: unknown) {
-        const message =
+        const internalMessage =
           err instanceof Error ? err.message : "Error desconocido";
         errores.push({
           indicador_id: indicador.id,
           indicador_nombre: indicador.nombre,
           mes,
-          error: message,
+          error: "Error interno durante el cálculo",
         });
         await writeCalcLog({
           indicador_id: indicador.id,
           indicador_version_id: version.id,
           mes_referencia: calcularMesEspecifico(anio, mes).mes_referencia,
-          error: message,
+          error: internalMessage,
           fuente: "recalcular-anio",
         });
       }

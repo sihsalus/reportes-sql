@@ -9,7 +9,7 @@ import { jest } from "@jest/globals";
 // ── Mock factory fns ────────────────────────────────────────────────────
 const mockResultadoFindAndCountAll = jest.fn();
 const mockIndicadorFindAll = jest.fn();
-const mockVersionFindOne = jest.fn();
+const mockVersionFindAll = jest.fn();
 const mockExecuteAndPersist = jest.fn();
 const mockResolveConceptMap = jest.fn();
 const mockQueryMysql = jest.fn();
@@ -31,7 +31,7 @@ jest.mock("../src/models/indicador.js", () => ({
     findAll: (...args: unknown[]) => mockIndicadorFindAll(...args),
   },
   IndicadorVersion: {
-    findOne: (...args: unknown[]) => mockVersionFindOne(...args),
+    findAll: (...args: unknown[]) => mockVersionFindAll(...args),
   },
   IndicadorResultado: {
     findAndCountAll: (...args: unknown[]) =>
@@ -53,13 +53,54 @@ jest.mock("../src/validators/openmrs.js", () => ({
   validarDefinicionLocationUuids: jest.fn().mockResolvedValue([]),
 }));
 
+// Configured write privilege so the real requirePrivilege guard passes.
+jest.mock("../src/config/index.js", () => ({
+  settings: {
+    openmrs_api_url: "http://fake-openmrs/openmrs",
+    openmrs_api_user: "admin",
+    openmrs_api_password: "test",
+    openmrs_required_privilege: "app:indicadores:write",
+    indicadores_db_host: "localhost",
+    indicadores_db_port: 5432,
+    indicadores_db_name: "test",
+    indicadores_db_user: "test",
+    indicadores_db_password: "test",
+    openmrs_db_host: "localhost",
+    openmrs_db_port: 3306,
+    openmrs_db_name: "test",
+    openmrs_db_user: "test",
+    openmrs_db_password: "test",
+    port: 8000,
+    cors_origins: [],
+    base_path: "",
+    auto_seed_default_indicator: false,
+  },
+  getIndicadoresDatabaseUrl: () =>
+    "postgres://test:test@localhost:5432/test",
+}));
+
 import express from "express";
 import supertest from "supertest";
 import { resultadosRouter, resetRateLimitStore } from "../src/routers/resultados.js";
 
+// Simulates the requireSession middleware: an authenticated user holding the
+// configured write privilege.
+function stubAuthenticatedSession(
+  req: express.Request,
+  _res: express.Response,
+  next: express.NextFunction,
+) {
+  (req as express.Request & { authUser?: unknown }).authUser = {
+    uuid: "user-uuid-1",
+    privileges: [{ display: "app:indicadores:write" }],
+  };
+  next();
+}
+
 function createTestApp() {
   const app = express();
   app.use(express.json());
+  app.use(stubAuthenticatedSession);
   app.use("/resultados", resultadosRouter);
   return app;
 }
@@ -116,6 +157,7 @@ beforeEach(() => {
   resetRateLimitStore();
   mockResolveConceptMap.mockResolvedValue({});
   mockQueryMysql.mockResolvedValue([]);
+  mockVersionFindAll.mockResolvedValue([]);
   mockExecuteAndPersist.mockResolvedValue([]);
   mockCalculoLogCreate.mockResolvedValue(undefined);
 });
@@ -580,7 +622,7 @@ describe("Resultados Router", () => {
   describe("POST /resultados/calcular-ahora — batch calculation", () => {
     test("calculates active indicators for current month and returns summary", async () => {
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-      mockVersionFindOne.mockResolvedValue(makeVersion());
+      mockVersionFindAll.mockResolvedValue([makeVersion()]);
       mockExecuteAndPersist.mockResolvedValue([]);
 
       const app = createTestApp();
@@ -612,6 +654,55 @@ describe("Resultados Router", () => {
       );
     });
 
+    test("batches latest versions and OpenMRS concept resolution", async () => {
+      const ind1 = makeIndicador({ id: "uuid-1", nombre: "Ind 1" });
+      const ind2 = makeIndicador({ id: "uuid-2", nombre: "Ind 2" });
+      const order1 = "concept-order-1";
+      const order2 = "concept-order-2";
+      mockIndicadorFindAll.mockResolvedValue([ind1, ind2]);
+      mockVersionFindAll.mockResolvedValue([
+        makeVersion({ indicador_id: ind1.id, definicion: {
+          tipo: "conteo_atenciones",
+          evento: { ordenes: [{ concepto_uuid: order1 }] },
+        } }),
+        makeVersion({ indicador_id: ind2.id, definicion: {
+          tipo: "conteo_atenciones",
+          evento: { ordenes: [{ concepto_uuid: order2 }] },
+        } }),
+      ]);
+      mockResolveConceptMap.mockResolvedValue({
+        [order1]: 101,
+        [order2]: 102,
+      });
+
+      const app = createTestApp();
+      const res = await supertest(app).post("/resultados/calcular-ahora");
+
+      expect(res.status).toBe(200);
+      expect(mockVersionFindAll).toHaveBeenCalledTimes(1);
+      expect(mockResolveConceptMap).toHaveBeenCalledTimes(1);
+      expect(mockResolveConceptMap).toHaveBeenCalledWith([order1, order2]);
+      expect(mockExecuteAndPersist).toHaveBeenCalledTimes(2);
+    });
+
+    test("persists the canonical month end, not the calculation day", async () => {
+      jest.useFakeTimers().setSystemTime(new Date("2026-08-15T22:30:00.000Z"));
+      try {
+        mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+        mockVersionFindAll.mockResolvedValue([makeVersion()]);
+
+        const app = createTestApp();
+        const res = await supertest(app).post("/resultados/calcular-ahora");
+
+        expect(res.status).toBe(200);
+        const executeArgs = mockExecuteAndPersist.mock.calls[0] as unknown[];
+        expect(executeArgs[4]).toEqual(new Date("2026-08-31T00:00:00.000Z"));
+        expect(executeArgs[3]).toEqual(new Date("2026-08-01T00:00:00.000Z"));
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     test("returns 502 when OpenMRS MySQL is unreachable (preflight)", async () => {
       mockQueryMysql.mockRejectedValue(new Error("ECONNREFUSED"));
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
@@ -629,7 +720,7 @@ describe("Resultados Router", () => {
 
     test("reports error for indicator without versions", async () => {
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-      mockVersionFindOne.mockResolvedValue(null);
+      mockVersionFindAll.mockResolvedValue([]);
 
       const app = createTestApp();
       const res = await supertest(app).post(
@@ -653,10 +744,10 @@ describe("Resultados Router", () => {
       );
     });
 
-    test("records an error ledger entry when the calculation fails", async () => {
+    test("does not expose calculation errors but records the raw error", async () => {
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-      mockVersionFindOne.mockResolvedValue(makeVersion());
-      mockExecuteAndPersist.mockRejectedValue(new Error("query failed"));
+      mockVersionFindAll.mockResolvedValue([makeVersion()]);
+      mockExecuteAndPersist.mockRejectedValue(new Error("raw DB error"));
 
       const app = createTestApp();
       const res = await supertest(app).post(
@@ -666,14 +757,15 @@ describe("Resultados Router", () => {
       expect(res.status).toBe(200);
       expect(res.body.calculados).toBe(0);
       expect(res.body.errores).toHaveLength(1);
-      expect(res.body.errores[0].error).toBe("query failed");
+      expect(res.body.errores[0].error).toBe("Error interno durante el cálculo");
+      expect(res.body.errores[0].error).not.toContain("raw DB error");
       expect(mockCalculoLogCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           status: "error",
           indicador_id: UUID,
           indicador_version_id: VERSION_UUID,
           mes_referencia: expect.any(Date),
-          error: "query failed",
+          error: "raw DB error",
           fuente: "calcular-ahora",
         }),
       );
@@ -682,7 +774,7 @@ describe("Resultados Router", () => {
     test("ledger write failure does not break the calculation response", async () => {
       mockCalculoLogCreate.mockRejectedValue(new Error("ledger db down"));
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-      mockVersionFindOne.mockResolvedValue(makeVersion());
+      mockVersionFindAll.mockResolvedValue([makeVersion()]);
 
       const app = createTestApp();
       const res = await supertest(app).post(
@@ -698,9 +790,9 @@ describe("Resultados Router", () => {
       const ind1 = makeIndicador({ id: "uuid-1", nombre: "Ind 1" });
       const ind2 = makeIndicador({ id: "uuid-2", nombre: "Ind 2" });
       mockIndicadorFindAll.mockResolvedValue([ind1, ind2]);
-      mockVersionFindOne
-        .mockResolvedValueOnce(makeVersion({ indicador_id: "uuid-1" }))
-        .mockResolvedValueOnce(null);
+      mockVersionFindAll.mockResolvedValue([
+        makeVersion({ indicador_id: "uuid-1" }),
+      ]);
 
       const app = createTestApp();
       const res = await supertest(app).post(
@@ -757,6 +849,17 @@ describe("Resultados Router", () => {
 
       expect(res.status).toBe(422);
       expect(res.body.detail.field).toBe("anio");
+    });
+
+    test("rejects a null body", async () => {
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send(null);
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("anio");
+      expect(res.body.detail.message).toMatch(/entero/);
     });
 
     test("rejects anio below 2000", async () => {
@@ -921,7 +1024,8 @@ describe("Resultados Router", () => {
       expect(res.body.recalculados).toBe(11);
       expect(res.body.errores).toHaveLength(1);
       expect(res.body.errores[0].mes).toBe(6);
-      expect(res.body.errores[0].error).toBe("DB error");
+      expect(res.body.errores[0].error).toBe("Error interno durante el cálculo");
+      expect(res.body.errores[0].error).not.toContain("DB error");
       expect(mockExecuteAndPersist).toHaveBeenCalledTimes(12);
     });
 
