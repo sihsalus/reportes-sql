@@ -24,9 +24,11 @@ jest.mock("../src/config/index.js", () => ({
     openmrs_api_user: "admin",
     openmrs_api_password: "test",
     openmrs_required_privilege: undefined,
+    auth_disabled: false,
   },
 }));
 
+import { settings } from "../src/config/index.js";
 import express from "express";
 import supertest from "supertest";
 import type { NextFunction, Request, Response } from "express";
@@ -100,6 +102,7 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  (settings as { auth_disabled: boolean }).auth_disabled = false;
 });
 
 // ── extractJSESSIONID ────────────────────────────────────────────────────
@@ -424,6 +427,20 @@ describe("requireSession", () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(next).not.toHaveBeenCalled();
   });
+
+  test("AUTH_DISABLED bypasses session validation (no cookie, no upstream call)", async () => {
+    (settings as { auth_disabled: boolean }).auth_disabled = true;
+    const req = makeReq();
+    const res = makeRes();
+    const next = makeNext();
+
+    await requireSession(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+    expect(req.authUser).toBeUndefined();
+  });
 });
 
 // ── requirePrivilege ─────────────────────────────────────────────────────
@@ -525,6 +542,17 @@ describe("requirePrivilege", () => {
 
     expect(res.status).toHaveBeenCalledWith(403);
     expect(next).not.toHaveBeenCalled();
+  });
+
+  test("AUTH_DISABLED bypasses the privilege guard (even unset privilege, no authUser)", () => {
+    (settings as { auth_disabled: boolean }).auth_disabled = true;
+    const res = makeRes();
+    const next = makeNext();
+
+    requirePrivilege(undefined)(makeReq(), res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.status).not.toHaveBeenCalled();
   });
 });
 

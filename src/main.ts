@@ -202,6 +202,13 @@ async function start(): Promise<void> {
   // Warn about default credentials in non-dev environments
   warnDefaultCredentials();
 
+  if (settings.auth_disabled) {
+    logger.warn(
+      "[auth] AUTH_DISABLED=true — session and privilege checks BYPASSED. " +
+        "Dev-only. Never enable in production.",
+    );
+  }
+
   // Verify database connectivity before syncing models
   try {
     await sequelize.authenticate();

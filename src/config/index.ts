@@ -41,6 +41,9 @@ export interface Settings {
   openmrs_api_password: string;
   // Privilege required for writes/recalculation (fail-closed when unset)
   openmrs_required_privilege: string | undefined;
+  // Dev-only kill switch: when true, requireSession and requirePrivilege let
+  // every request through without touching OpenMRS. NEVER enable in production.
+  auth_disabled: boolean;
 
   // Application
   port: number;
@@ -173,6 +176,7 @@ export const settings: Settings = {
   openmrs_required_privilege: parseRequiredPrivilege(
     process.env["OPENMRS_REQUIRED_PRIVILEGE"],
   ),
+  auth_disabled: parseBoolean(process.env["AUTH_DISABLED"], true),
 
   port: parsePort(process.env["PORT"], 8000),
   auto_seed_default_indicator: parseBoolean(
@@ -183,6 +187,8 @@ export const settings: Settings = {
   cors_origins: parseCorsOrigins(process.env["CORS_ORIGINS"]),
 
   base_path: normalizeBasePath(process.env["BASE_PATH"]),
+
+
 };
 
 /** PostgreSQL connection URL for Sequelize */

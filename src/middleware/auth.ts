@@ -17,6 +17,8 @@
  *   including roles and privileges) to `req.authUser`.
  * - `requirePrivilege` is a fail-closed write guard: unset or missing
  *   privilege → 403.
+ * - Escape hatch: `AUTH_DISABLED=true` bypasses both middlewares entirely.
+ *   Dev-only — never in production.
  */
 import type {
   NextFunction,
@@ -25,6 +27,7 @@ import type {
   Response,
 } from "express";
 import { settings } from "../config/index.js";
+import { logger } from "../config/logger.js";
 
 /**
  * Bounded timeout for the upstream `/session` call (implementation constant,
@@ -91,12 +94,21 @@ function isPublicPath(path: string): boolean {
  *
  * Mounted on `publicRouter` before all route registrations. Exempts `/health`
  * and `/docs`/`/docs/*`; every other request requires a valid OpenMRS session.
+ *
+ * Dev escape hatch: when `AUTH_DISABLED=true`, every request passes through
+ * untouched (no upstream call, no `req.authUser`). Never enable in production.
  */
 export async function requireSession(
   req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> {
+  if (settings.auth_disabled) {
+    warnAuthDisabledOnce();
+    next();
+    return;
+  }
+
   if (isPublicPath(req.path ?? "/")) {
     next();
     return;
@@ -163,9 +175,25 @@ function userHasPrivilege(
   });
 }
 
+let authDisabledWarned = false;
+
+/**
+ * Single warn per process when the dev bypass is active — loud enough to
+ * notice in the logs, quiet enough not to spam one line per request.
+ */
+function warnAuthDisabledOnce(): void {
+  if (authDisabledWarned) return;
+  authDisabledWarned = true;
+  logger.warn(
+    "[auth] AUTH_DISABLED=true — session and privilege checks BYPASSED. " +
+      "Dev-only. Never enable in production.",
+  );
+}
+
 /**
  * Fail-closed write guard factory.
  *
+ * - `AUTH_DISABLED=true` → every request passes (dev escape hatch).
  * - `privilege` unset/empty (`OPENMRS_REQUIRED_PRIVILEGE` not configured) →
  *   403 for every authenticated user until an admin configures the real name.
  * - Authenticated user lacking the privilege → 403.
@@ -175,6 +203,11 @@ export function requirePrivilege(
   privilege: string | undefined,
 ): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
+    if (settings.auth_disabled) {
+      warnAuthDisabledOnce();
+      next();
+      return;
+    }
     if (!privilege) {
       res.status(403).json({ detail: "Sin privilegios" });
       return;
