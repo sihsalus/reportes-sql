@@ -43,10 +43,19 @@ export function buildQuery(
 ): { sql: string; params: Record<string, unknown> } {
   const finExcl = addDays(periodoFin, 1);
 
-  if (definicion.tipo === "conteo_atenciones") {
-    return buildConteoAtenciones(definicion, periodoInicio, finExcl, conceptMap ?? null);
+  switch (definicion.tipo) {
+    case "conteo_atenciones":
+      return buildConteoAtenciones(definicion, periodoInicio, finExcl, conceptMap ?? null);
+    case "conteo_pacientes":
+      return buildConteoPacientes(definicion, periodoInicio, finExcl, conceptMap ?? null);
+    case "conteo_pacientes_ventana":
+      return buildConteoPacientesVentana(definicion, periodoInicio, finExcl, conceptMap ?? null);
+    default:
+      // Defensive: the Zod schema already restricts `tipo`.
+      throw new Error(
+        `Tipo de indicador no soportado: ${String(definicion.tipo)}`,
+      );
   }
-  return buildConteoPacientes(definicion, periodoInicio, finExcl, conceptMap ?? null);
 }
 
 // ── Internal builders ─────────────────────────────────────────────────
@@ -266,6 +275,148 @@ function buildConteoPacientes(
 
 // ── Subquery builder ──────────────────────────────────────────────────
 
+/**
+ * Windowed patient-count builder (`conteo_pacientes_ventana`).
+ *
+ * Counts patients with at least `minimo_ocurrencias` qualifying encounters
+ * inside an age window (poblacion bounds, evaluated per encounter) and
+ * attributes each patient to the month of their LAST qualifying control:
+ * `MAX(e.encounter_datetime)` must fall inside the measurement period.
+ * Encounters are not bound to the period — earlier controls in previous
+ * months still count toward the minimum.
+ *
+ * The scan is bounded by a sargable window: every counted encounter is at
+ * most `ventana_dias` older than the last control (which is inside the
+ * period), so `e.encounter_datetime >= DATE_SUB(:inicio, INTERVAL
+ * :ventana_dias DAY)` is a safe lower bound derived from the max age bound.
+ */
+function buildConteoPacientesVentana(
+  d: DefinicionIndicador,
+  inicio: Date,
+  finExcl: Date,
+  conceptMap: Record<string, number> | null,
+): { sql: string; params: Record<string, unknown> } {
+  const params: Record<string, unknown> = {
+    inicio: formatDate(inicio),
+    fin_excl: formatDate(finExcl),
+  };
+
+  const evento = d.evento;
+  const locationUuids: string[] =
+    evento?.location_uuids && evento.location_uuids.length > 0
+      ? evento.location_uuids
+      : [];
+  const encounterTypeUuids: string[] =
+    evento?.encounter_type_uuids && evento.encounter_type_uuids.length > 0
+      ? evento.encounter_type_uuids
+      : [];
+  const diagnosticos: FiltroDiagnostico[] | null =
+    evento?.diagnosticos ?? null;
+  const ordenes: FiltroOrden[] | null = evento?.ordenes ?? null;
+  const minOc: number = evento?.minimo_ocurrencias ?? 1;
+  const poblacion = d.poblacion ?? null;
+
+  let tables = "encounter e";
+  let joins = "";
+
+  const conditions: string[] = ["e.voided = 0"];
+
+  // ── Encounter types filter ──
+  if (encounterTypeUuids.length > 0) {
+    const etResult = buildEncounterTypesFilterBlock(
+      encounterTypeUuids,
+      params,
+    );
+    joins += "\n" + etResult.joins;
+    conditions.push(etResult.clause);
+  }
+
+  // ── Locations filter ──
+  if (locationUuids.length > 0) {
+    const core = buildCoreFilterBlock(locationUuids, params);
+    joins += "\n" + core.joins;
+    conditions.push(core.clause);
+  }
+
+  // ── Person join for age/sexo ──
+  if (poblacion != null) {
+    const necesitaPerson =
+      hasAgeFilter(poblacion) || poblacion.sexo != null;
+    if (necesitaPerson) {
+      joins += "\nJOIN person p ON e.patient_id = p.person_id";
+      conditions.push("p.voided = 0");
+      if (hasAgeFilter(poblacion)) {
+        const ageResult = buildAgeFilter(poblacion);
+        conditions.push(ageResult.clause);
+        Object.assign(params, ageResult.params);
+      }
+      if (poblacion.sexo != null) {
+        params["sexo"] = poblacion.sexo;
+        conditions.push("p.gender = :sexo");
+      }
+    }
+  }
+
+  // ── Diagnosticos filter ──
+  const diagResult = buildDiagnosticosFilter(diagnosticos);
+  if (diagResult.joins) {
+    joins += "\n" + diagResult.joins;
+  }
+  if (diagResult.clause) {
+    conditions.push(diagResult.clause);
+    Object.assign(params, diagResult.params);
+  }
+
+  // ── Ordenes filter ──
+  const ordResult = buildOrdenesFilter(ordenes, conceptMap);
+  if (ordResult.clause) {
+    conditions.push(ordResult.clause);
+    Object.assign(params, ordResult.params);
+  }
+
+  // ── Sargable window lower bound ──
+  const ventanaDias = maxWindowDays(poblacion);
+  if (ventanaDias != null) {
+    params["ventana_dias"] = ventanaDias;
+    conditions.push(
+      "e.encounter_datetime >= DATE_SUB(:inicio, INTERVAL :ventana_dias DAY)",
+    );
+  }
+
+  params["min_oc"] = minOc;
+
+  const whereClause = "WHERE " + conditions.join("\n  AND ");
+  const selectCols = ["e.patient_id"];
+  const subquery =
+    `SELECT ${selectCols.join(", ")}\n` +
+    `FROM ${tables}\n` +
+    `${joins}\n` +
+    `${whereClause}\n` +
+    `GROUP BY e.patient_id\n` +
+    `HAVING COUNT(e.encounter_id) >= :min_oc\n` +
+    `   AND MAX(e.encounter_datetime) >= :inicio\n` +
+    `   AND MAX(e.encounter_datetime) < :fin_excl`;
+
+  const query =
+    `SELECT COUNT(*) as valor\n` +
+    `FROM (\n${subquery}\n) AS _sub`.trim() + ";";
+
+  return { sql: query, params };
+}
+
+/**
+ * Upper bound in days of the age window defined by the poblacion max
+ * bounds. Used to bound the encounter scan in buildConteoPacientesVentana.
+ * Returns null when no max bound is configured (unbounded window).
+ */
+function maxWindowDays(poblacion: FiltrosPoblacion | null): number | null {
+  if (poblacion == null) return null;
+  if (poblacion.max_dias != null) return poblacion.max_dias;
+  if (poblacion.max_meses_excl != null) return poblacion.max_meses_excl * 31;
+  if (poblacion.max_anios_excl != null) return poblacion.max_anios_excl * 366;
+  return null;
+}
+
 interface SubqueryInput {
   locationUuids: string[];
   poblacion: FiltrosPoblacion | null;
@@ -392,6 +543,33 @@ function buildCoreFilterBlock(
   return {
     joins: "JOIN location l ON e.location_id = l.location_id",
     clause: `l.uuid IN (${locPlaceholders})`,
+    params: {},
+  };
+}
+
+/**
+ * Encounter-type filter block mirroring `buildCoreFilterBlock`. Builds the
+ * `encounter_type et` join and the `et.uuid IN (...)` condition for a list
+ * of encounter-type UUIDs, excluding retired types. Emits no joins or
+ * conditions when `encounterTypeUuids` is empty.
+ */
+function buildEncounterTypesFilterBlock(
+  encounterTypeUuids: string[],
+  params: Record<string, unknown>,
+): CoreFilterResult {
+  if (encounterTypeUuids.length === 0) {
+    return { joins: "", clause: "", params: {} };
+  }
+  const etPlaceholders = encounterTypeUuids
+    .map((_, i) => `:${paramName("et", i)}`)
+    .join(", ");
+  for (let i = 0; i < encounterTypeUuids.length; i++) {
+    params[paramName("et", i)] = encounterTypeUuids[i];
+  }
+  return {
+    joins:
+      "JOIN encounter_type et ON e.encounter_type = et.encounter_type_id AND et.retired = 0",
+    clause: `et.uuid IN (${etPlaceholders})`,
     params: {},
   };
 }

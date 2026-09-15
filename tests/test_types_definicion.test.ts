@@ -76,6 +76,21 @@ describe("DefinicionIndicador", () => {
     ).toThrow(ZodError);
   });
 
+  test("conteo_pacientes_ventana accepted", () => {
+    const d = DefinicionIndicadorSchema.parse({
+      tipo: "conteo_pacientes_ventana",
+      evento: {
+        encounter_type_uuids: ["uuid-et"],
+        minimo_ocurrencias: 4,
+      },
+      poblacion: { max_dias: 28 },
+    });
+    expect(d.tipo).toBe("conteo_pacientes_ventana");
+    expect(d.evento!.encounter_type_uuids).toEqual(["uuid-et"]);
+    expect(d.evento!.minimo_ocurrencias).toBe(4);
+    expect(d.poblacion!.max_dias).toBe(28);
+  });
+
   test("invalid minimo_ocurrencias rejected", () => {
     expect(() =>
       FiltrosEventoSchema.parse({
@@ -238,10 +253,11 @@ describe("CanonicalContract", () => {
     expect(() => parseFiltrosPoblacion({ edad_min_anios: 10 })).toThrow();
   });
 
-  test("legacy encounter_type_uuids is rejected", () => {
-    expect(() =>
-      parseFiltrosEvento({ encounter_type_uuids: ["uuid-legacy"] }),
-    ).toThrow();
+  test("encounter_type_uuids is canonical", () => {
+    const ev = parseFiltrosEvento({
+      encounter_type_uuids: ["uuid-et"],
+    });
+    expect(ev.encounter_type_uuids).toEqual(["uuid-et"]);
   });
 
   test("flat diagnostico is rejected (no normalization)", () => {

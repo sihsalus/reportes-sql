@@ -13,7 +13,10 @@ import {
   rejectPeriodoInPayload,
   type DefinicionIndicador,
 } from "../../types/definicion.js";
-import { validarDefinicionLocationUuids } from "../../validators/openmrs.js";
+import {
+  validarDefinicionLocationUuids,
+  validarDefinicionEncounterTypeUuids,
+} from "../../validators/openmrs.js";
 import { logger } from "../../config/logger.js";
 
 export async function handleCreateVersion(
@@ -79,6 +82,24 @@ export async function handleCreateVersion(
       res.status(422).json({
         detail: {
           field: "location_uuids",
+          unknown_uuids: unknownUuids,
+        },
+      });
+      return;
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "OpenMRS no disponible";
+    res.status(502).json({ detail: message });
+    return;
+  }
+
+  // Validate encounter_type_uuids against OpenMRS
+  try {
+    const unknownUuids = await validarDefinicionEncounterTypeUuids(definicion);
+    if (unknownUuids.length > 0) {
+      res.status(422).json({
+        detail: {
+          field: "encounter_type_uuids",
           unknown_uuids: unknownUuids,
         },
       });

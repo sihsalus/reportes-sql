@@ -49,6 +49,7 @@ jest.mock("../src/models/indicador.js", () => ({
 
 jest.mock("../src/validators/openmrs.js", () => ({
   validarDefinicionLocationUuids: jest.fn().mockResolvedValue([]),
+  validarDefinicionEncounterTypeUuids: jest.fn().mockResolvedValue([]),
   resolveConceptMap: jest.fn().mockResolvedValue({}),
   validarLocations: jest.fn().mockResolvedValue([]),
 }));
@@ -85,6 +86,7 @@ import type { Request, Response } from "express";
 import supertest from "supertest";
 import { indicadoresRouter } from "../src/routers/indicadores.js";
 import { metasRouter } from "../src/routers/metas.js";
+import { validarDefinicionEncounterTypeUuids } from "../src/validators/openmrs.js";
 
 // Simulates the requireSession middleware: an authenticated user holding the
 // configured write privilege.
@@ -271,6 +273,46 @@ describe("Indicadores Router", () => {
 
       expect(res.status).toBe(422);
       expect(res.body.detail.field).toContain("periodo");
+    });
+
+    test("rejects unknown encounter_type_uuids with 422", async () => {
+      (validarDefinicionEncounterTypeUuids as jest.Mock).mockResolvedValueOnce([
+        "unknown-et-uuid",
+      ]);
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/indicadores")
+        .send({
+          nombre: "Test",
+          definicion: {
+            tipo: "conteo_pacientes_ventana",
+            evento: { encounter_type_uuids: ["unknown-et-uuid"] },
+          },
+        });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("encounter_type_uuids");
+      expect(res.body.detail.unknown_uuids).toEqual(["unknown-et-uuid"]);
+      expect(mockIndicadorCreate).not.toHaveBeenCalled();
+    });
+
+    test("returns 502 when encounter type validation hits an OpenMRS outage", async () => {
+      (validarDefinicionEncounterTypeUuids as jest.Mock).mockRejectedValueOnce(
+        new Error("OpenMRS no disponible"),
+      );
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/indicadores")
+        .send({
+          nombre: "Test",
+          definicion: {
+            tipo: "conteo_pacientes_ventana",
+            evento: { encounter_type_uuids: ["et-uuid"] },
+          },
+        });
+
+      expect(res.status).toBe(502);
+      expect(mockIndicadorCreate).not.toHaveBeenCalled();
     });
   });
 
@@ -512,6 +554,28 @@ describe("Indicadores Router", () => {
 
       expect(res.status).toBe(422);
       expect(res.body.detail.field).toContain("periodo");
+    });
+
+    test("rejects unknown encounter_type_uuids with 422", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      (validarDefinicionEncounterTypeUuids as jest.Mock).mockResolvedValueOnce([
+        "unknown-et-uuid",
+      ]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post(`/indicadores/${UUID}/versiones`)
+        .send({
+          definicion: {
+            tipo: "conteo_pacientes_ventana",
+            evento: { encounter_type_uuids: ["unknown-et-uuid"] },
+          },
+        });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("encounter_type_uuids");
+      expect(res.body.detail.unknown_uuids).toEqual(["unknown-et-uuid"]);
+      expect(mockVersionCreate).not.toHaveBeenCalled();
     });
 
     test("SC-15: new version auto-copies metas from previous version", async () => {

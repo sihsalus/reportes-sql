@@ -19,7 +19,11 @@ import { z } from "zod";
 
 // ── Type aliases ───────────────────────────────────────────────────────
 
-export const TipoIndicador = z.enum(["conteo_atenciones", "conteo_pacientes"]);
+export const TipoIndicador = z.enum([
+  "conteo_atenciones",
+  "conteo_pacientes",
+  "conteo_pacientes_ventana",
+]);
 export type TipoIndicador = z.infer<typeof TipoIndicador>;
 
 /**
@@ -141,6 +145,7 @@ export type FiltroOrden = z.infer<typeof FiltroOrdenSchema>;
 export const FiltrosEventoSchema = z
   .object({
     location_uuids: z.array(z.string()).optional(),
+    encounter_type_uuids: z.array(z.string()).optional(),
     minimo_ocurrencias: z.number().int().min(1).optional(),
     diagnosticos: z.array(FiltroDiagnosticoSchema).optional(),
     ordenes: z.array(FiltroOrdenSchema).optional(),

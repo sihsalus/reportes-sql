@@ -23,6 +23,8 @@ import {
   OpenMRSUnavailableError,
   validarLocations,
   validarDefinicionLocationUuids,
+  validarEncounterTypes,
+  validarDefinicionEncounterTypeUuids,
   resolveConceptMap,
 } from "../src/validators/openmrs.js";
 import type { DefinicionIndicador } from "../src/types/definicion.js";
@@ -119,6 +121,79 @@ describe("validarDefinicionLocationUuids", () => {
 
   it("returns [] without calling MySQL when evento has no location_uuids", async () => {
     const result = await validarDefinicionLocationUuids(makeDefinicion(undefined));
+
+    expect(result).toEqual([]);
+    expect(mockQueryMysql).not.toHaveBeenCalled();
+  });
+});
+
+describe("validarEncounterTypes", () => {
+  it("returns [] without touching MySQL when the set is empty", async () => {
+    const result = await validarEncounterTypes(new Set<string>());
+    expect(result).toEqual([]);
+    expect(mockQueryMysql).not.toHaveBeenCalled();
+  });
+
+  it("returns [] when every uuid exists in OpenMRS", async () => {
+    mockQueryMysql.mockResolvedValueOnce([{ uuid: UUID1 }, { uuid: UUID2 }]);
+
+    const result = await validarEncounterTypes(new Set([UUID1, UUID2]));
+
+    expect(result).toEqual([]);
+    expect(mockQueryMysql).toHaveBeenCalledTimes(1);
+    const [sql, params] = mockQueryMysql.mock.calls[0];
+    expect(sql).toContain("SELECT uuid FROM encounter_type");
+    expect(sql).toContain("WHERE uuid IN");
+    expect(sql).toContain("retired = 0");
+    expect(params).toEqual({ uuid_0: UUID1, uuid_1: UUID2 });
+  });
+
+  it("returns the uuids not found in OpenMRS, preserving caller order", async () => {
+    mockQueryMysql.mockResolvedValueOnce([{ uuid: UUID1 }]);
+
+    const result = await validarEncounterTypes(new Set([UUID1, UUID2, UUID3]));
+
+    expect(result).toEqual([UUID2, UUID3]);
+  });
+
+  it("throws OpenMRSUnavailableError when MySQL rejects", async () => {
+    mockQueryMysql.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+
+    await expect(validarEncounterTypes(new Set([UUID1]))).rejects.toThrow(
+      OpenMRSUnavailableError,
+    );
+  });
+});
+
+describe("validarDefinicionEncounterTypeUuids", () => {
+  function makeDefinicion(
+    encounterTypeUuids: string[] | undefined,
+  ): DefinicionIndicador {
+    return {
+      tipo: "conteo_pacientes_ventana",
+      evento: encounterTypeUuids
+        ? { encounter_type_uuids: encounterTypeUuids }
+        : undefined,
+    } as unknown as DefinicionIndicador;
+  }
+
+  it("delegates to validarEncounterTypes with the union of evento.encounter_type_uuids", async () => {
+    mockQueryMysql.mockResolvedValueOnce([{ uuid: UUID1 }, { uuid: UUID2 }]);
+
+    const result = await validarDefinicionEncounterTypeUuids(
+      makeDefinicion([UUID1, UUID2, UUID1]),
+    );
+
+    expect(result).toEqual([]);
+    const [, params] = mockQueryMysql.mock.calls[0];
+    // Set dedups UUID1 and orders deterministically per insertion.
+    expect(Object.keys(params)).toEqual(["uuid_0", "uuid_1"]);
+  });
+
+  it("returns [] without calling MySQL when evento has no encounter_type_uuids", async () => {
+    const result = await validarDefinicionEncounterTypeUuids(
+      makeDefinicion(undefined),
+    );
 
     expect(result).toEqual([]);
     expect(mockQueryMysql).not.toHaveBeenCalled();

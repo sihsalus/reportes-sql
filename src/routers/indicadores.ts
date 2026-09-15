@@ -29,6 +29,7 @@ import {
 } from "../types/indicador.js";
 import {
   validarDefinicionLocationUuids,
+  validarDefinicionEncounterTypeUuids,
 } from "../validators/openmrs.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { requirePrivilege } from "../middleware/auth.js";
@@ -103,6 +104,24 @@ indicadoresRouter.post(
         res.status(422).json({
           detail: {
             field: "location_uuids",
+            unknown_uuids: unknownUuids,
+          },
+        });
+        return;
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "OpenMRS no disponible";
+      res.status(502).json({ detail: message });
+      return;
+    }
+
+    // Validate encounter_type_uuids exist in OpenMRS before DB write.
+    try {
+      const unknownUuids = await validarDefinicionEncounterTypeUuids(definicion);
+      if (unknownUuids.length > 0) {
+        res.status(422).json({
+          detail: {
+            field: "encounter_type_uuids",
             unknown_uuids: unknownUuids,
           },
         });

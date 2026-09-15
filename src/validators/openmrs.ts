@@ -71,6 +71,64 @@ export async function validarDefinicionLocationUuids(
 }
 
 /**
+ * Validate all UUID strings exist in the OpenMRS encounter_type table.
+ *
+ * Queries the sync MySQL database with a single parameterized SELECT
+ * to avoid N+1 queries. Retired encounter types are excluded.
+ *
+ * @param uuids - Set of UUID strings to validate.
+ * @returns Array of unknown UUIDs. Empty array means all valid.
+ * @throws Error with message "OpenMRS no disponible" on MySQL connection failure.
+ */
+export async function validarEncounterTypes(
+  uuids: Set<string>,
+): Promise<string[]> {
+  if (uuids.size === 0) return [];
+
+  try {
+    const uuidArray = Array.from(uuids);
+    const placeholders = uuidArray.map((_, i) => `:uuid_${i}`).join(", ");
+    const params: Record<string, string> = {};
+    uuidArray.forEach((u, i) => {
+      params[`uuid_${i}`] = u;
+    });
+
+    const rows = await queryMysql<{ uuid: string }>(
+      `SELECT uuid FROM encounter_type WHERE uuid IN (${placeholders}) AND retired = 0`,
+      params,
+    );
+
+    const encontrados = new Set(rows.map((r) => r.uuid));
+    const desconocidos = uuidArray.filter((u) => !encontrados.has(u));
+
+    return desconocidos;
+  } catch (err: unknown) {
+    throw new OpenMRSUnavailableError();
+  }
+}
+
+/**
+ * Collect unique encounter_type_uuids from the singular evento and validate.
+ *
+ * Convenience helper that extracts UUIDs from a definicion and passes
+ * them to validarEncounterTypes() in a single call.
+ *
+ * @param definicion - Fully validated DefinicionIndicador.
+ * @returns Array of unknown UUIDs, empty if all valid.
+ */
+export async function validarDefinicionEncounterTypeUuids(
+  definicion: DefinicionIndicador,
+): Promise<string[]> {
+  const allUuids = new Set<string>();
+  if (definicion.evento?.encounter_type_uuids) {
+    for (const u of definicion.evento.encounter_type_uuids) {
+      allUuids.add(u);
+    }
+  }
+  return validarEncounterTypes(allUuids);
+}
+
+/**
  * Resolve ordenes concepto UUIDs to OpenMRS concept_ids.
  *
  * Queries the OpenMRS MySQL concept table to map concepto_uuid strings

@@ -198,11 +198,11 @@ export const openapiSpec = {
         responses: {
           "201": { description: "Indicador creado con éxito" },
           "422": {
-            description: "Error de validación (nombre, definicion, o location_uuids)",
+            description: "Error de validación (nombre, definicion, location_uuids, o encounter_type_uuids)",
             content: { "application/json": { schema: Error422 } },
           },
           "502": {
-            description: "OpenMRS no disponible (validación de location_uuids)",
+            description: "OpenMRS no disponible (validación de location_uuids o encounter_type_uuids)",
             content: { "application/json": { schema: Error502 } },
           },
         },
