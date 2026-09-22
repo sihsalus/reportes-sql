@@ -19,7 +19,11 @@ import { z } from "zod";
 
 // ── Type aliases ───────────────────────────────────────────────────────
 
-export const TipoIndicador = z.enum(["conteo_atenciones", "conteo_pacientes"]);
+export const TipoIndicador = z.enum([
+  "conteo_atenciones",
+  "conteo_pacientes",
+  "conteo_pacientes_ventana",
+]);
 export type TipoIndicador = z.infer<typeof TipoIndicador>;
 
 /**
@@ -106,7 +110,7 @@ export const FiltrosPoblacionSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "min_dias, min_meses, and min_anios are mutually exclusive — at most one may be set",
+          "min_dias, min_meses y min_anios son mutuamente excluyentes — solo puede definirse uno",
         path: ["min_dias"],
       });
     }
@@ -114,7 +118,7 @@ export const FiltrosPoblacionSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "max_dias, max_meses_excl, and max_anios_excl are mutually exclusive — at most one may be set",
+          "max_dias, max_meses_excl y max_anios_excl son mutuamente excluyentes — solo puede definirse uno",
         path: ["max_dias"],
       });
     }
@@ -141,6 +145,7 @@ export type FiltroOrden = z.infer<typeof FiltroOrdenSchema>;
 export const FiltrosEventoSchema = z
   .object({
     location_uuids: z.array(z.string()).optional(),
+    encounter_type_uuids: z.array(z.string()).optional(),
     minimo_ocurrencias: z.number().int().min(1).optional(),
     diagnosticos: z.array(FiltroDiagnosticoSchema).optional(),
     ordenes: z.array(FiltroOrdenSchema).optional(),
@@ -154,9 +159,39 @@ export const FiltrosEventoSchema = z
     if (hasDiag && hasOrd) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "diagnosticos and ordenes are mutually exclusive",
+        message: "diagnosticos y ordenes son mutuamente excluyentes",
         path: ["diagnosticos"],
       });
+    }
+
+    // ── Diagnostico tipo homogeneity ──
+    // The SQL builder emits a single shared `ed.certainty` filter that applies
+    // to the entire encounter_diagnosis JOIN. That is only correct when every
+    // diagnostico item carries the same certainty semantics: all omit
+    // tipo_diagnostico (any certainty) or all declare the same one. Any mix
+    // (different tipos, or some declared and some omitted) would make the
+    // shared filter silently miscount, so reject it at the boundary.
+    if (hasDiag) {
+      const items = data.diagnosticos!;
+      const claimed = items.filter((d) => d.tipo_diagnostico !== undefined);
+      if (claimed.length > 0 && claimed.length !== items.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "todos los diagnósticos deben declarar tipo_diagnostico, o ninguno — no se puede mezclar",
+          path: ["diagnosticos"],
+        });
+      } else if (claimed.length > 1) {
+        const first = claimed[0].tipo_diagnostico!;
+        if (!claimed.every((d) => d.tipo_diagnostico === first)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message:
+              "todos los diagnósticos deben tener el mismo tipo_diagnostico (definitivo o presuntivo), sin mezclar",
+            path: ["diagnosticos"],
+          });
+        }
+      }
     }
   });
 export type FiltrosEvento = z.infer<typeof FiltrosEventoSchema>;

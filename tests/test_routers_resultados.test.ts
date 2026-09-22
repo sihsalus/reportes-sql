@@ -9,10 +9,12 @@ import { jest } from "@jest/globals";
 // ── Mock factory fns ────────────────────────────────────────────────────
 const mockResultadoFindAndCountAll = jest.fn();
 const mockIndicadorFindAll = jest.fn();
-const mockVersionFindOne = jest.fn();
+const mockVersionFindAll = jest.fn();
 const mockExecuteAndPersist = jest.fn();
 const mockResolveConceptMap = jest.fn();
+const mockQueryMysql = jest.fn();
 const mockSequelizeQuery = jest.fn();
+const mockCalculoLogCreate = jest.fn();
 
 jest.mock("../src/database/postgres.js", () => ({
   sequelize: {
@@ -20,16 +22,23 @@ jest.mock("../src/database/postgres.js", () => ({
   },
 }));
 
+jest.mock("../src/database/mysql.js", () => ({
+  queryMysql: (...args: unknown[]) => mockQueryMysql(...args),
+}));
+
 jest.mock("../src/models/indicador.js", () => ({
   Indicador: {
     findAll: (...args: unknown[]) => mockIndicadorFindAll(...args),
   },
   IndicadorVersion: {
-    findOne: (...args: unknown[]) => mockVersionFindOne(...args),
+    findAll: (...args: unknown[]) => mockVersionFindAll(...args),
   },
   IndicadorResultado: {
     findAndCountAll: (...args: unknown[]) =>
       mockResultadoFindAndCountAll(...args),
+  },
+  IndicadorCalculoLog: {
+    create: (...args: unknown[]) => mockCalculoLogCreate(...args),
   },
 }));
 
@@ -44,13 +53,54 @@ jest.mock("../src/validators/openmrs.js", () => ({
   validarDefinicionLocationUuids: jest.fn().mockResolvedValue([]),
 }));
 
+// Configured write privilege so the real requirePrivilege guard passes.
+jest.mock("../src/config/index.js", () => ({
+  settings: {
+    openmrs_api_url: "http://fake-openmrs/openmrs",
+    openmrs_api_user: "admin",
+    openmrs_api_password: "test",
+    openmrs_required_privilege: "app:indicadores:write",
+    indicadores_db_host: "localhost",
+    indicadores_db_port: 5432,
+    indicadores_db_name: "test",
+    indicadores_db_user: "test",
+    indicadores_db_password: "test",
+    openmrs_db_host: "localhost",
+    openmrs_db_port: 3306,
+    openmrs_db_name: "test",
+    openmrs_db_user: "test",
+    openmrs_db_password: "test",
+    port: 8000,
+    cors_origins: [],
+    base_path: "",
+    auto_seed_default_indicator: false,
+  },
+  getIndicadoresDatabaseUrl: () =>
+    "postgres://test:test@localhost:5432/test",
+}));
+
 import express from "express";
 import supertest from "supertest";
 import { resultadosRouter, resetRateLimitStore } from "../src/routers/resultados.js";
 
+// Simulates the requireSession middleware: an authenticated user holding the
+// configured write privilege.
+function stubAuthenticatedSession(
+  req: express.Request,
+  _res: express.Response,
+  next: express.NextFunction,
+) {
+  (req as express.Request & { authUser?: unknown }).authUser = {
+    uuid: "user-uuid-1",
+    privileges: [{ display: "app:indicadores:write" }],
+  };
+  next();
+}
+
 function createTestApp() {
   const app = express();
   app.use(express.json());
+  app.use(stubAuthenticatedSession);
   app.use("/resultados", resultadosRouter);
   return app;
 }
@@ -106,7 +156,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   resetRateLimitStore();
   mockResolveConceptMap.mockResolvedValue({});
+  mockQueryMysql.mockResolvedValue([]);
+  mockVersionFindAll.mockResolvedValue([]);
   mockExecuteAndPersist.mockResolvedValue([]);
+  mockCalculoLogCreate.mockResolvedValue(undefined);
 });
 
 describe("Resultados Router", () => {
@@ -140,6 +193,151 @@ describe("Resultados Router", () => {
       );
 
       expect(res.status).toBe(200);
+    });
+
+    test("defaults to canonical-only rows (where includes es_canonico: true)", async () => {
+      mockResultadoFindAndCountAll.mockResolvedValue({
+        count: 1,
+        rows: [makeResultadoRow()],
+      });
+
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados");
+
+      expect(res.status).toBe(200);
+      const firstCall = mockResultadoFindAndCountAll.mock.calls[0]?.[0] as {
+        where?: Record<string, unknown>;
+      };
+      expect(firstCall?.where).toEqual(
+        expect.objectContaining({ es_canonico: true }),
+      );
+    });
+
+    test("include_historicos=true skips the canonical filter", async () => {
+      mockResultadoFindAndCountAll.mockResolvedValue({
+        count: 2,
+        rows: [makeResultadoRow(), makeResultadoRow({ id: "r-2" })],
+      });
+
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?include_historicos=true");
+
+      expect(res.status).toBe(200);
+      const firstCall = mockResultadoFindAndCountAll.mock.calls[0]?.[0] as {
+        where?: Record<string, unknown>;
+      };
+      expect(firstCall?.where).toBeDefined();
+      expect(firstCall?.where).not.toHaveProperty("es_canonico");
+    });
+
+    test("version_id filters by indicador_version_id", async () => {
+      mockResultadoFindAndCountAll.mockResolvedValue({
+        count: 1,
+        rows: [makeResultadoRow()],
+      });
+
+      const app = createTestApp();
+      const res = await supertest(app).get(`/resultados?version_id=${VERSION_UUID}`);
+
+      expect(res.status).toBe(200);
+      expect(mockResultadoFindAndCountAll).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ indicador_version_id: VERSION_UUID }),
+        }),
+      );
+    });
+
+    test("rejects invalid version_id with 422", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?version_id=no-es-uuid");
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("version_id");
+      expect(res.body.detail.message).toMatch(/UUID/);
+      expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
+    });
+
+    test("rejects non-integer page with 422", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?page=abc");
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("page");
+      expect(res.body.detail.message).toMatch(/número entero/);
+      expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
+    });
+
+    test("rejects page 0 with 422", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?page=0");
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("page");
+      expect(res.body.detail.message).toMatch(/mayor o igual a 1/);
+      expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
+    });
+
+    test("rejects non-integer size with 422", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?size=xs");
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("size");
+      expect(res.body.detail.message).toMatch(/número entero/);
+      expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
+    });
+
+    test("rejects size 0 with 422", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?size=0");
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("size");
+      expect(res.body.detail.message).toMatch(/entre 1 y 100/);
+      expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
+    });
+
+    test("rejects size above 100 with 422", async () => {
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?size=1000");
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("size");
+      expect(res.body.detail.message).toMatch(/entre 1 y 100/);
+      expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
+    });
+
+    test("valid page=2 is accepted and paginates from the offset", async () => {
+      mockResultadoFindAndCountAll.mockResolvedValue({
+        count: 25,
+        rows: [makeResultadoRow()],
+      });
+
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?page=2");
+
+      expect(res.status).toBe(200);
+      expect(res.body.page).toBe(2);
+      expect(res.body.size).toBe(20);
+      expect(mockResultadoFindAndCountAll).toHaveBeenCalledWith(
+        expect.objectContaining({ offset: 20, limit: 20 }),
+      );
+    });
+
+    test("valid size=50 is accepted and applied as limit", async () => {
+      mockResultadoFindAndCountAll.mockResolvedValue({
+        count: 25,
+        rows: [makeResultadoRow()],
+      });
+
+      const app = createTestApp();
+      const res = await supertest(app).get("/resultados?size=50");
+
+      expect(res.status).toBe(200);
+      expect(res.body.size).toBe(50);
+      expect(mockResultadoFindAndCountAll).toHaveBeenCalledWith(
+        expect.objectContaining({ offset: 0, limit: 50 }),
+      );
     });
   });
 
@@ -196,6 +394,50 @@ describe("Resultados Router", () => {
       expect(res.body.items).toHaveLength(2);
       expect(res.body.items[0].periodo_label).toBe("Q1");
       expect(res.body.granularity).toBe("trimestral");
+    });
+
+    test("monthly series rows expose version_num and version_id", async () => {
+      mockSequelizeQuery.mockResolvedValue([
+        {
+          periodo_label: "2026-01",
+          valor: "100",
+          meses_disponibles: 1,
+          anio: 2026,
+          mes_referencia: "2026-01-01",
+          version_num: 2,
+          version_id: VERSION_UUID,
+        },
+      ]);
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=mensual",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.items[0].version_num).toBe(2);
+      expect(res.body.items[0].version_id).toBe(VERSION_UUID);
+    });
+
+    test("quarterly series rows expose versiones array", async () => {
+      mockSequelizeQuery.mockResolvedValue([
+        {
+          periodo_label: "Q1",
+          valor: "300",
+          meses_disponibles: 3,
+          anio: 2026,
+          trimestre: 1,
+          versiones: [1, 2],
+        },
+      ]);
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=trimestral",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.items[0].versiones).toEqual([1, 2]);
     });
 
     test("annual SQL uses an aggregate-safe period label (regression: 500 on /series?granularity=anual)", async () => {
@@ -292,6 +534,15 @@ describe("Resultados Router", () => {
       expect(res.body.items[0].meta).toBe(1500);
       expect(res.body.items[1].meta).toBe(1500);
       expect(mockSequelizeQuery).toHaveBeenCalledTimes(3);
+
+      // Regression: sequelize renders a single-element array replacement as a
+      // bare scalar, so `anio = ANY(:years)` produced `ANY(2026)` and
+      // PostgreSQL raised 42809. `IN (:years)` renders valid SQL for both
+      // single and multi-element arrays.
+      const metaSql = mockSequelizeQuery.mock.calls[2]?.[0];
+      expect(typeof metaSql).toBe("string");
+      expect(metaSql as string).toContain("anio IN (:years)");
+      expect(metaSql as string).not.toContain("ANY(");
     });
 
     test("SC-08: series with include_meta=true returns null when no meta for year", async () => {
@@ -371,7 +622,7 @@ describe("Resultados Router", () => {
   describe("POST /resultados/calcular-ahora — batch calculation", () => {
     test("calculates active indicators for current month and returns summary", async () => {
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-      mockVersionFindOne.mockResolvedValue(makeVersion());
+      mockVersionFindAll.mockResolvedValue([makeVersion()]);
       mockExecuteAndPersist.mockResolvedValue([]);
 
       const app = createTestApp();
@@ -385,7 +636,9 @@ describe("Resultados Router", () => {
       expect(res.body.total).toBe(1);
       // Verify mes_referencia is included in response
       expect(res.body.mes_referencia).toBeDefined();
-      // Verify executeAndPersist was called with mesReferencia
+      // Verify executeAndPersist was called with mesReferencia and the
+      // calcular-ahora execution options (indicadorId enables cross-version
+      // canonical supersede; zero-fill persists 0-valued months).
       expect(mockExecuteAndPersist).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(Object),
@@ -393,12 +646,81 @@ describe("Resultados Router", () => {
         expect.any(Date),
         expect.any(Date),
         expect.any(Date), // mes_referencia
+        expect.objectContaining({
+          indicadorId: UUID,
+          fuente: "calcular-ahora",
+          persistirCeroSiVacio: true,
+        }),
       );
+    });
+
+    test("batches latest versions and OpenMRS concept resolution", async () => {
+      const ind1 = makeIndicador({ id: "uuid-1", nombre: "Ind 1" });
+      const ind2 = makeIndicador({ id: "uuid-2", nombre: "Ind 2" });
+      const order1 = "concept-order-1";
+      const order2 = "concept-order-2";
+      mockIndicadorFindAll.mockResolvedValue([ind1, ind2]);
+      mockVersionFindAll.mockResolvedValue([
+        makeVersion({ indicador_id: ind1.id, definicion: {
+          tipo: "conteo_atenciones",
+          evento: { ordenes: [{ concepto_uuid: order1 }] },
+        } }),
+        makeVersion({ indicador_id: ind2.id, definicion: {
+          tipo: "conteo_atenciones",
+          evento: { ordenes: [{ concepto_uuid: order2 }] },
+        } }),
+      ]);
+      mockResolveConceptMap.mockResolvedValue({
+        [order1]: 101,
+        [order2]: 102,
+      });
+
+      const app = createTestApp();
+      const res = await supertest(app).post("/resultados/calcular-ahora");
+
+      expect(res.status).toBe(200);
+      expect(mockVersionFindAll).toHaveBeenCalledTimes(1);
+      expect(mockResolveConceptMap).toHaveBeenCalledTimes(1);
+      expect(mockResolveConceptMap).toHaveBeenCalledWith([order1, order2]);
+      expect(mockExecuteAndPersist).toHaveBeenCalledTimes(2);
+    });
+
+    test("persists the canonical month end, not the calculation day", async () => {
+      jest.useFakeTimers().setSystemTime(new Date("2026-08-15T22:30:00.000Z"));
+      try {
+        mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+        mockVersionFindAll.mockResolvedValue([makeVersion()]);
+
+        const app = createTestApp();
+        const res = await supertest(app).post("/resultados/calcular-ahora");
+
+        expect(res.status).toBe(200);
+        const executeArgs = mockExecuteAndPersist.mock.calls[0] as unknown[];
+        expect(executeArgs[4]).toEqual(new Date("2026-08-31T00:00:00.000Z"));
+        expect(executeArgs[3]).toEqual(new Date("2026-08-01T00:00:00.000Z"));
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    test("returns 502 when OpenMRS MySQL is unreachable (preflight)", async () => {
+      mockQueryMysql.mockRejectedValue(new Error("ECONNREFUSED"));
+      mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+
+      const app = createTestApp();
+      const res = await supertest(app).post(
+        "/resultados/calcular-ahora",
+      );
+
+      expect(res.status).toBe(502);
+      expect(res.body.detail).toBe("OpenMRS no disponible");
+      // Nothing should have been executed or persisted.
+      expect(mockExecuteAndPersist).not.toHaveBeenCalled();
     });
 
     test("reports error for indicator without versions", async () => {
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-      mockVersionFindOne.mockResolvedValue(null);
+      mockVersionFindAll.mockResolvedValue([]);
 
       const app = createTestApp();
       const res = await supertest(app).post(
@@ -409,15 +731,68 @@ describe("Resultados Router", () => {
       expect(res.body.calculados).toBe(0);
       expect(res.body.errores).toHaveLength(1);
       expect(res.body.errores[0].error).toBe("Sin versiones definidas");
+      // Ledger records the failure with no version resolved
+      expect(mockCalculoLogCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "error",
+          indicador_id: UUID,
+          indicador_version_id: null,
+          mes_referencia: expect.any(Date),
+          error: "Sin versiones definidas",
+          fuente: "calcular-ahora",
+        }),
+      );
+    });
+
+    test("does not expose calculation errors but records the raw error", async () => {
+      mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+      mockVersionFindAll.mockResolvedValue([makeVersion()]);
+      mockExecuteAndPersist.mockRejectedValue(new Error("raw DB error"));
+
+      const app = createTestApp();
+      const res = await supertest(app).post(
+        "/resultados/calcular-ahora",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.calculados).toBe(0);
+      expect(res.body.errores).toHaveLength(1);
+      expect(res.body.errores[0].error).toBe("Error interno durante el cálculo");
+      expect(res.body.errores[0].error).not.toContain("raw DB error");
+      expect(mockCalculoLogCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "error",
+          indicador_id: UUID,
+          indicador_version_id: VERSION_UUID,
+          mes_referencia: expect.any(Date),
+          error: "raw DB error",
+          fuente: "calcular-ahora",
+        }),
+      );
+    });
+
+    test("ledger write failure does not break the calculation response", async () => {
+      mockCalculoLogCreate.mockRejectedValue(new Error("ledger db down"));
+      mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+      mockVersionFindAll.mockResolvedValue([makeVersion()]);
+
+      const app = createTestApp();
+      const res = await supertest(app).post(
+        "/resultados/calcular-ahora",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.calculados).toBe(1);
+      expect(res.body.errores).toHaveLength(0);
     });
 
     test("isolates failures — one fails, others succeed", async () => {
       const ind1 = makeIndicador({ id: "uuid-1", nombre: "Ind 1" });
       const ind2 = makeIndicador({ id: "uuid-2", nombre: "Ind 2" });
       mockIndicadorFindAll.mockResolvedValue([ind1, ind2]);
-      mockVersionFindOne
-        .mockResolvedValueOnce(makeVersion({ indicador_id: "uuid-1" }))
-        .mockResolvedValueOnce(null);
+      mockVersionFindAll.mockResolvedValue([
+        makeVersion({ indicador_id: "uuid-1" }),
+      ]);
 
       const app = createTestApp();
       const res = await supertest(app).post(
@@ -476,6 +851,17 @@ describe("Resultados Router", () => {
       expect(res.body.detail.field).toBe("anio");
     });
 
+    test("rejects a null body", async () => {
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send(null);
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("anio");
+      expect(res.body.detail.message).toMatch(/entero/);
+    });
+
     test("rejects anio below 2000", async () => {
       const app = createTestApp();
       const res = await supertest(app)
@@ -506,6 +892,20 @@ describe("Resultados Router", () => {
       expect(res.body.recalculados).toBe(12);
       expect(res.body.errores).toHaveLength(0);
       expect(mockExecuteAndPersist).toHaveBeenCalledTimes(12);
+      // recalcular-anio execution options on every month
+      expect(mockExecuteAndPersist).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Object),
+        VERSION_UUID,
+        expect.any(Date),
+        expect.any(Date),
+        expect.any(Date),
+        expect.objectContaining({
+          indicadorId: UUID,
+          fuente: "recalcular-anio",
+          persistirCeroSiVacio: true,
+        }),
+      );
       // Batch version query was used (not per-month findOne)
       expect(mockSequelizeQuery).toHaveBeenCalledWith(
         expect.stringContaining("DISTINCT ON"),
@@ -578,6 +978,14 @@ describe("Resultados Router", () => {
           }),
         }),
       );
+
+      // Regression: same single-element array rendering trap — `= ANY(:indicador_ids)`
+      // became `ANY(<uuid>)` for a single indicador_id. `IN (:indicador_ids)` is
+      // valid for 1..N ids.
+      const phase1Sql = mockSequelizeQuery.mock.calls[0]?.[0];
+      expect(typeof phase1Sql).toBe("string");
+      expect(phase1Sql as string).toContain("IN (:indicador_ids)");
+      expect(phase1Sql as string).not.toContain("ANY(");
     });
 
     test("returns 422 when indicador_id not found", async () => {
@@ -616,8 +1024,60 @@ describe("Resultados Router", () => {
       expect(res.body.recalculados).toBe(11);
       expect(res.body.errores).toHaveLength(1);
       expect(res.body.errores[0].mes).toBe(6);
-      expect(res.body.errores[0].error).toBe("DB error");
+      expect(res.body.errores[0].error).toBe("Error interno durante el cálculo");
+      expect(res.body.errores[0].error).not.toContain("DB error");
       expect(mockExecuteAndPersist).toHaveBeenCalledTimes(12);
+    });
+
+    test("records an error ledger per month when execute fails", async () => {
+      mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+      mockSequelizeQuery.mockResolvedValue([
+        { id: VERSION_UUID, indicador_id: UUID, version: 1, definicion: { tipo: "conteo_atenciones" } },
+      ]);
+      mockExecuteAndPersist.mockRejectedValue(new Error("DB error"));
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({ anio: 2025 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.errores).toHaveLength(12);
+      expect(mockCalculoLogCreate).toHaveBeenCalledTimes(12);
+      expect(mockCalculoLogCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "error",
+          indicador_id: UUID,
+          indicador_version_id: VERSION_UUID,
+          mes_referencia: new Date("2025-06-01T00:00:00.000Z"),
+          error: "DB error",
+          fuente: "recalcular-anio",
+        }),
+      );
+    });
+
+    test("records an error ledger per month when the indicator has no version", async () => {
+      mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
+      mockSequelizeQuery.mockResolvedValue([]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/resultados/recalcular-anio")
+        .send({ anio: 2025 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.errores).toHaveLength(12);
+      expect(mockCalculoLogCreate).toHaveBeenCalledTimes(12);
+      expect(mockCalculoLogCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "error",
+          indicador_id: UUID,
+          indicador_version_id: null,
+          mes_referencia: new Date("2025-01-01T00:00:00.000Z"),
+          error: "Sin versiones definidas",
+          fuente: "recalcular-anio",
+        }),
+      );
     });
 
 

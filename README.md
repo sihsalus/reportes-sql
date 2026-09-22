@@ -9,7 +9,7 @@ almacena resultados en PostgreSQL.
 
 ```bash
 cp .env.example .env        # edit DB credentials as needed
-yarn install --frozen-lockfile
+yarn install --immutable
 yarn dev                     # http://localhost:8000
 ```
 
@@ -42,7 +42,11 @@ Copy `.env.example` to `.env` and adjust for your environment.
 | `OPENMRS_DB_PASSWORD` | `openmrs` | OpenMRS MySQL password |
 | `OPENMRS_API_URL` | `http://localhost/openmrs` | OpenMRS REST API base URL |
 | `OPENMRS_API_USER` | `admin` | OpenMRS API basic-auth user |
-| `OPENMRS_API_PASSWORD` | `Admin123` | OpenMRS API basic-auth password |
+| `OPENMRS_API_PASSWORD` | `Admin123` | OpenMRS API basic-auth password; replace in configured environments |
+| `OPENMRS_REQUIRED_PRIVILEGE` | _(unset)_ | Institutionally approved write/recalculation privilege; unset denies writes |
+| `OPENMRS_DB_CONNECT_TIMEOUT_MS` | `10000` | MySQL connection timeout |
+| `OPENMRS_DB_ACQUIRE_TIMEOUT_MS` | `10000` | MySQL pool acquisition timeout |
+| `OPENMRS_DB_QUERY_TIMEOUT_MS` | `30000` | MySQL query timeout |
 
 ## BASE_PATH
 
@@ -79,24 +83,32 @@ BASE_PATH=/openmrs/services/reportes-sql yarn dev
 # Health probe at http://localhost:8000/health
 ```
 
-### Local frontend override for `esm-indicadores-app`
+### Frontend and session contract
 
-If you want to run only the indicadores microfrontend against a standalone local
-`reportes-sql` instance, use a local override in the frontend repo instead of
-committing shared repo config:
+Use the same gateway origin as the OpenMRS SPA. The frontend setting remains
+`reportesSqlApiPath: "/services/reportes-sql"`; `openmrsFetch` prepends the OpenMRS
+base, normally `/openmrs`. With that base, the gateway forwards
+`/openmrs/services/reportes-sql/*` without stripping the prefix, and this service
+uses `BASE_PATH=/openmrs/services/reportes-sql`.
 
-```json
-{
-  "@sihsalus/esm-indicadores-app": {
-    "reportesSqlApiPath": "http://127.0.0.1:8000"
-  }
-}
-```
+Business routes (`indicadores`, `resultados`, `conceptos`, `metas`) require a live
+OpenMRS `JSESSIONID` session and the existing `app:indicadores` privilege. The
+service revalidates the session on each request. It forwards only that cookie to
+`OPENMRS_API_URL/ws/rest/v1/session`, with a three-second timeout and redirects
+disallowed. Health and API documentation remain public.
 
-Notes:
-- Put that override in your local `config/frontend.json` inside the frontend repo.
-- Do not use the deprecated `indicatorsApiPath` key for this app.
-- Do not commit that override unless the whole team explicitly wants the shared local default.
+Every mutation and recalculation additionally requires the exact privilege
+configured in `OPENMRS_REQUIRED_PRIVILEGE`. An unset value denies writes. This PR
+neither creates privileges nor assigns roles; choose an institutionally approved
+privilege from the content repository and test effective privileges in the actual
+OpenMRS session response. Do not substitute browser role checks for backend checks.
+The catalogue service account (`OPENMRS_API_USER/PASSWORD`) is separate from the
+operator's session and needs its own configured institutional credentials.
+
+A standalone cross-origin URL is not a substitute for the gateway session setup.
+Do not commit local API addresses, disable authentication, or enable frontend demo
+data to work around an unavailable service. The frontend rejects 401/403 responses
+and never simulates successful writes.
 
 ### Production (compiled)
 
@@ -118,7 +130,7 @@ hot reload via `tsx watch`. It targets the `dev` Dockerfile stage.
 
 ```bash
 docker build -t reportes-sql .
-docker run -p 8000:8000 --env-file .env reportes-sql
+docker run -p 127.0.0.1:8000:8000 --env-file .env reportes-sql
 ```
 
 The production image:
@@ -212,7 +224,7 @@ Container Registry as:
 `ghcr.io/<owner-or-org>/reportes-sql`
 
 The owner/org segment is resolved from the GitHub repository automatically.
-The `ci.yml` workflow only runs tests and build — it does not publish.
+The `ci.yml` workflow runs unit tests, build and a disposable database contract job. It does not publish.
 
 ### Published tags
 
@@ -233,7 +245,7 @@ docker pull ghcr.io/<owner-or-org>/reportes-sql:latest
 ### Run from GHCR
 
 ```bash
-docker run -p 8000:8000 \
+docker run -p 127.0.0.1:8000:8000 \
   -e INDICATORS_DB_HOST=your-pg-host \
   -e INDICATORS_DB_PASSWORD=... \
   -e OPENMRS_DB_HOST=your-openmrs-host \
@@ -251,3 +263,63 @@ git push origin v1.0.0
 ```
 
 The `publish.yml` workflow builds, tags, and pushes to GHCR automatically.
+
+## Definition, results and migration contract
+
+- Definitions are immutable versions. POST creates the indicator and version 1
+  atomically; PUT updates metadata and any new definition version atomically.
+  Nested filters participate in version comparison. Unknown locations or encounter
+  types are rejected before writes; an unavailable catalogue is an error.
+- `conteo_atenciones` counts distinct encounters. Multiple matching diagnoses do
+  not multiply encounters or satisfy a minimum number of encounters twice.
+  Encounter type filters apply to all three supported count modes.
+- `conteo_pacientes_ventana` attributes a patient to the month of the last qualifying
+  encounter in the configured age window. This institutional definition must be
+  approved before using the result operationally.
+- Monthly calculations supersede earlier canonical rows while retaining history.
+  A parent indicator row lock serializes competing calculations. Normal results
+  exclude historical rows unless `include_historicos=true` is requested.
+- Quarterly, half-year and annual API series add monthly values and return
+  `versiones: number[]`. They are not distinct-patient counts across the whole
+  aggregate period. Direct SQL views retain their per-version breakdown.
+- Startup uses `sequelize.sync()` without `force` or `alter`. The new calculation
+  ledger and metadata tables are additive. Canonical backfill v2 runs once in a
+  transaction with a table lock: existing canonical rows take priority over legacy
+  rows with no month; one winner is selected per indicator/month; explicit history
+  stays historical. The migration marker commits with the rows. Failure rolls
+  back and stops startup. No source OpenMRS rows are modified or deleted.
+
+Before rollout, rehearse this startup against a recoverable, de-identified copy
+of the indicators PostgreSQL database and compare row counts, historical results,
+and approved expected calculations. Preserve the existing PostgreSQL volume and
+OpenMRS database. Use an OpenMRS MySQL account with SELECT grants only, set
+`AUTO_SEED_DEFAULT_INDICATOR=false`, configure the catalogue account and approved
+write privilege, and pin coordinated frontend/backend image versions. The current
+distribution configuration still needs that coordination. No production rollout
+is implied by these drafts. Reverting an image does not reverse migrated canonical
+flags; database rollback requires the verified PostgreSQL backup procedure.
+
+## Database contract tests
+
+`yarn test --runInBand` uses synthetic mocks and HTTP listeners; `yarn build`
+checks production TypeScript. The CI job **PostgreSQL and MariaDB contract** then
+runs `node scripts/test-database-contract.mjs` against fresh PostgreSQL 17 and
+MariaDB 10.11 services. It checks real SQL counts, a read-only source account,
+migration rollback/restart/history, concurrent calculations, atomic CRUD failure,
+and the aggregate HTTP contract. It removes its own synthetic tables, views,
+functions and reader account on completion.
+
+The script requires `RUN_DATABASE_CONTRACT=synthetic-only`, loopback hosts and
+empty databases named `reportes_sql_test`; the workflow defines all synthetic
+settings. It refuses existing tables and must never target institutional data.
+These tests do not replace OpenMRS session/role integration, gateway validation,
+indicator definition approval, or management-user acceptance in DEV/QLTY.
+
+## Integration provenance
+
+This candidate carries forward Anderson's functional work through
+`3f5fd70eae2184920b3063d0deda5ea416207460` from `dev`, with integration regressions
+and fixes. Local authentication bypasses, private agent state, and unrelated
+package cleanup from later commits are excluded. Track coordinated frontend,
+configuration and institutional acceptance in
+[sihsalus-frontend.tasktree#36](https://github.com/sihsalus/sihsalus-frontend.tasktree/issues/36).

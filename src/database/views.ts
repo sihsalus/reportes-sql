@@ -11,39 +11,70 @@
 
 import { sequelize } from "./postgres.js";
 import { QueryTypes } from "sequelize";
+import { AppMetadata } from "../models/indicador.js";
 import { logger } from "../config/logger.js";
 
+const CANONICAL_BACKFILL_KEY = "canonical_backfill_v2";
+
 /**
- * Backfill `mes_referencia` and `es_canonico` for existing rows.
+ * Ensure the partial index used by cross-version canonical supersede exists.
  *
- * - Sets `mes_referencia` from the first day of `periodo_inicio` when null.
- * - Marks existing rows as canonical when `es_canonico` is false and no
- *   canonical row already exists for the same version + month.
+ * The model declaration covers fresh tables, but `sequelize.sync()` does not
+ * add indexes to an existing table. Keep this idempotent guard until schema
+ * migrations replace startup schema maintenance.
+ */
+export async function ensureCanonicalResultIndex(): Promise<void> {
+  await sequelize.query(
+    `CREATE INDEX IF NOT EXISTS idx_resultado_canonico_mes
+     ON indicador_resultado (mes_referencia)
+     WHERE es_canonico = true`,
+    { type: QueryTypes.RAW },
+  );
+}
+
+/**
+ * Preserve all result rows while selecting one canonical result per indicator
+ * and month. Explicit historical rows with a known month stay historical.
+ * Legacy rows (no month) can become canonical only when no current row wins.
+ * The table lock serializes startup with writers; the marker and data commit
+ * together, so a failure cannot leave a partially applied migration.
  */
 export async function backfillResultadoCanonical(): Promise<void> {
-  await sequelize.query(
-    `UPDATE indicador_resultado
-     SET mes_referencia = DATE_TRUNC('month', periodo_inicio)::DATE
-     WHERE mes_referencia IS NULL`,
-    { type: QueryTypes.UPDATE },
-  );
+  await sequelize.transaction(async (transaction) => {
+    await sequelize.query(
+      "LOCK TABLE indicador_resultado IN SHARE ROW EXCLUSIVE MODE",
+      { transaction, type: QueryTypes.RAW },
+    );
+    const applied = await AppMetadata.findOne({
+      where: { key: CANONICAL_BACKFILL_KEY },
+      transaction,
+    });
+    if (applied) return;
 
-  // Mark existing rows as canonical where no canonical row exists yet
-  await sequelize.query(
-    `UPDATE indicador_resultado ir
-     SET es_canonico = true
-     WHERE ir.es_canonico = false
-       AND ir.mes_referencia IS NOT NULL
-       AND NOT EXISTS (
-         SELECT 1 FROM indicador_resultado ir2
-         WHERE ir2.indicador_version_id = ir.indicador_version_id
-           AND ir2.mes_referencia = ir.mes_referencia
-           AND ir2.es_canonico = true
-       )`,
-    { type: QueryTypes.UPDATE },
-  );
-
-  logger.info("Backfill: mes_referencia and es_canonico populated.");
+    await sequelize.query(
+      `WITH candidates AS (
+         SELECT ir.id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY iv.indicador_id,
+                    COALESCE(ir.mes_referencia, DATE_TRUNC('month', ir.periodo_inicio)::DATE)
+                  ORDER BY ir.es_canonico DESC, ir.calculado_en DESC, iv.version DESC, ir.id DESC
+                ) AS position
+         FROM indicador_resultado ir
+         JOIN indicador_version iv ON iv.id = ir.indicador_version_id
+         WHERE ir.es_canonico = true OR ir.mes_referencia IS NULL
+       )
+       UPDATE indicador_resultado ir
+       SET mes_referencia = COALESCE(ir.mes_referencia, DATE_TRUNC('month', ir.periodo_inicio)::DATE),
+           es_canonico = candidates.position = 1
+       FROM candidates
+       WHERE candidates.id = ir.id`,
+      { transaction, type: QueryTypes.UPDATE },
+    );
+    await AppMetadata.create(
+      { key: CANONICAL_BACKFILL_KEY, value: "done" },
+      { transaction },
+    );
+  });
 }
 
 const ROLLUP_VIEWS = {

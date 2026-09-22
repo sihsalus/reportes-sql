@@ -9,10 +9,11 @@ describe("calcularMesActual", () => {
   test("returns first day of current month as mes_referencia", () => {
     jest.useFakeTimers().setSystemTime(new Date("2026-08-15T22:30:00.000Z"));
 
-    const { inicio, fin, mes_referencia } = calcularMesActual();
+    const { inicio, fin, finPersistencia, mes_referencia } = calcularMesActual();
 
     expect(inicio).toEqual(new Date("2026-08-01T00:00:00.000Z"));
     expect(fin).toEqual(new Date("2026-08-15T00:00:00.000Z"));
+    expect(finPersistencia).toEqual(new Date("2026-08-31T00:00:00.000Z"));
     expect(mes_referencia).toEqual(new Date("2026-08-01T00:00:00.000Z"));
   });
 

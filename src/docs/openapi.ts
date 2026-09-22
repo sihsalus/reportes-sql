@@ -198,11 +198,11 @@ export const openapiSpec = {
         responses: {
           "201": { description: "Indicador creado con éxito" },
           "422": {
-            description: "Error de validación (nombre, definicion, o location_uuids)",
+            description: "Error de validación (nombre, definicion, location_uuids, o encounter_type_uuids)",
             content: { "application/json": { schema: Error422 } },
           },
           "502": {
-            description: "OpenMRS no disponible (validación de location_uuids)",
+            description: "OpenMRS no disponible (validación de location_uuids o encounter_type_uuids)",
             content: { "application/json": { schema: Error502 } },
           },
         },
@@ -403,7 +403,7 @@ export const openapiSpec = {
       get: {
         tags: ["Resultados"],
         summary:
-          "Listar resultados pre-calculados (filtrable por indicador y período)",
+          "Listar resultados pre-calculados (filtrable por indicador y período; por defecto solo filas canónicas)",
         operationId: "listResultados",
         parameters: [
           {
@@ -411,6 +411,19 @@ export const openapiSpec = {
             in: "query",
             schema: { type: "string", format: "uuid" },
             description: "Filtrar por indicador",
+          },
+          {
+            name: "include_historicos",
+            in: "query",
+            schema: { type: "boolean" },
+            description:
+              "Si es exactamente 'true', incluye también resultados superseded. Por defecto (ausente o cualquier otro valor) solo se devuelven filas canónicas.",
+          },
+          {
+            name: "version_id",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description: "Filtrar por una versión específica del indicador",
           },
           {
             name: "periodo_inicio",
@@ -437,7 +450,7 @@ export const openapiSpec = {
         ],
         responses: {
           "200": {
-            description: "Lista paginada de resultados",
+            description: "Lista paginada de resultados (solo canónicos por defecto)",
             content: { "application/json": { schema: PaginatedResponse } },
           },
         },
@@ -519,7 +532,7 @@ export const openapiSpec = {
         responses: {
           "200": {
             description:
-              "Series temporales con `periodo_label`, `valor` y `meses_disponibles`",
+              "Series temporales con `periodo_label`, `valor` y `meses_disponibles`. Granularidad mensual incluye `version_num`/`version_id` (versión con la que se calculó cada punto); trimestral/semestral/anual incluyen `versiones` (versiones presentes en el grupo).",
             content: {
               "application/json": {
                 schema: {
@@ -541,6 +554,17 @@ export const openapiSpec = {
                           },
                           trimestre: { type: "integer", nullable: true },
                           semestre: { type: "integer", nullable: true },
+                          version_num: { type: "integer", nullable: true },
+                          version_id: {
+                            type: "string",
+                            format: "uuid",
+                            nullable: true,
+                          },
+                          versiones: {
+                            type: "array",
+                            items: { type: "integer" },
+                            nullable: true,
+                          },
                         },
                       },
                     },
@@ -921,6 +945,109 @@ export const openapiSpec = {
           "502": {
             description: "Error conectando a OpenMRS",
             content: { "application/json": { schema: Error502 } },
+          },
+        },
+      },
+    },
+
+    // ── Metas ────────────────────────────────────────────────────────
+
+    "/metas": {
+      put: {
+        tags: ["Metas"],
+        summary: "Crear o actualizar una meta anual",
+        operationId: "upsertMeta",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["indicador_version_id", "anio", "valor_meta"],
+                properties: {
+                  indicador_version_id: { type: "string", format: "uuid" },
+                  anio: { type: "integer", minimum: 2000, maximum: 2100 },
+                  valor_meta: { type: "number", minimum: 0 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "Meta creada o actualizada" },
+          "422": {
+            description: "Error de validación",
+            content: { "application/json": { schema: Error422 } },
+          },
+        },
+      },
+      get: {
+        tags: ["Metas"],
+        summary: "Listar metas por versión o indicador (última versión)",
+        operationId: "listMetas",
+        parameters: [
+          {
+            name: "indicador_version_id",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description: "UUID de la versión del indicador",
+          },
+          {
+            name: "indicador_id",
+            in: "query",
+            schema: { type: "string", format: "uuid" },
+            description: "UUID del indicador (usa la última versión)",
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Lista de metas",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string" },
+                      indicador_version_id: { type: "string" },
+                      anio: { type: "integer" },
+                      valor_meta: { type: "number" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "422": {
+            description: "Error de validación",
+            content: { "application/json": { schema: Error422 } },
+          },
+        },
+      },
+      delete: {
+        tags: ["Metas"],
+        summary: "Eliminar una meta específica",
+        operationId: "deleteMeta",
+        parameters: [
+          {
+            name: "indicador_version_id",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "anio",
+            in: "query",
+            required: true,
+            schema: { type: "integer" },
+          },
+        ],
+        responses: {
+          "204": { description: "Meta eliminada" },
+          "422": {
+            description: "Error de validación",
+            content: { "application/json": { schema: Error422 } },
           },
         },
       },

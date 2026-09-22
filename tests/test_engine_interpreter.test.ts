@@ -28,13 +28,32 @@ function makeEvento(props: Partial<FiltrosEvento> = {}): FiltrosEvento {
 }
 
 describe("BuildQuery", () => {
+  test.each(["conteo_atenciones", "conteo_pacientes", "conteo_pacientes_ventana"])(
+    "%s preserves encounter-type filters and counts encounters only once with multiple diagnoses",
+    (tipo) => {
+      const definition = parseDefinicionIndicador({
+        tipo,
+        evento: {
+          encounter_type_uuids: ["synthetic-encounter-type"],
+          minimo_ocurrencias: 2,
+          diagnosticos: [{ concepto_uuids: [UUID_DIAG, UUID_DIAG2] }],
+        },
+      });
+      const { sql, params } = buildQuery(definition, INICIO, FIN);
+
+      expect(params.et_0).toBe("synthetic-encounter-type");
+      expect(sql).toContain("et.uuid IN (:et_0)");
+      expect(sql).toContain("HAVING COUNT(DISTINCT e.encounter_id)");
+      if (tipo === "conteo_atenciones") expect(sql).toContain("COUNT(DISTINCT e.encounter_id) as valor");
+    },
+  );
   test("minimal query — conteo_atenciones with location", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
       evento: { location_uuids: [UUID_LOC] },
     });
     const { sql } = buildQuery(definicion, INICIO, FIN);
-    expect(sql).toContain("COUNT(*)");
+    expect(sql).toContain("COUNT(DISTINCT e.encounter_id)");
     expect(sql).toContain("location");
   });
 
@@ -180,7 +199,7 @@ describe("BuildQuery", () => {
     expect(sql).toContain("orders o1");
   });
 
-  test("ordenes no concept_map omits", () => {
+  test("ordenes without concept_map throws instead of silently dropping", () => {
     const definicion = parseDefinicionIndicador({
       tipo: "conteo_atenciones",
       evento: {
@@ -188,8 +207,9 @@ describe("BuildQuery", () => {
         ordenes: [{ concepto_uuid: UUID_ORD }],
       },
     });
-    const { sql } = buildQuery(definicion, INICIO, FIN);
-    expect(sql).not.toContain("orders");
+    expect(() => buildQuery(definicion, INICIO, FIN)).toThrow(
+      /conceptos de órdenes/i,
+    );
   });
 
   test("no obs table references", () => {
@@ -213,6 +233,46 @@ describe("BuildQuery", () => {
     });
     const { sql } = buildQuery(definicion, INICIO, FIN);
     expect(sql).toContain("JOIN");
+  });
+
+  test("conteo_atenciones applies sexo without age or minimo_ocurrencias", () => {
+    const definicion = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      evento: { location_uuids: [UUID_LOC] },
+      poblacion: { sexo: "F" },
+    });
+    const { sql, params } = buildQuery(definicion, INICIO, FIN);
+    expect(sql).toContain("JOIN person p");
+    expect(sql).toContain("p.gender = :sexo");
+    expect(params).toHaveProperty("sexo", "F");
+  });
+
+  test("conteo_atenciones applies age and sexo together", () => {
+    const definicion = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      evento: { location_uuids: [UUID_LOC] },
+      poblacion: { min_anios: 18, sexo: "M" },
+    });
+    const { sql, params } = buildQuery(definicion, INICIO, FIN);
+    expect(sql).toContain("p.gender = :sexo");
+    expect(sql).toContain(
+      "DATE_ADD(p.birthdate, INTERVAL :min_anios YEAR)",
+    );
+    expect(params).toHaveProperty("sexo", "M");
+  });
+
+  test("conteo_atenciones minimo_ocurrencias applies sexo via subquery", () => {
+    const definicion = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      evento: {
+        location_uuids: [UUID_LOC],
+        minimo_ocurrencias: 3,
+      },
+      poblacion: { sexo: "F" },
+    });
+    const { sql, params } = buildQuery(definicion, INICIO, FIN);
+    expect(sql).toContain("p.gender = :sexo");
+    expect(params).toHaveProperty("sexo", "F");
   });
 
   test("no evento returns valid SQL", () => {
@@ -568,5 +628,129 @@ describe("AgeFilterSQL", () => {
         poblacion: { edad_max_anios: 5 },
       }),
     ).toThrow();
+  });
+});
+
+// ── conteo_pacientes_ventana (windowed, last-control attribution) ─────
+
+describe("ConteoPacientesVentana", () => {
+  const UUID_ET = "99999999-9999-9999-9999-999999999999";
+
+  test("full CRED definition generates windowed subquery with last-control attribution", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_pacientes_ventana",
+      evento: {
+        encounter_type_uuids: [UUID_ET],
+        location_uuids: [UUID_LOC],
+        minimo_ocurrencias: 4,
+      },
+      poblacion: { max_dias: 28 },
+    });
+    const { sql, params } = buildQuery(d, INICIO, FIN);
+    expect(sql).toContain("SELECT COUNT(*) as valor");
+    expect(sql).toContain(
+      "JOIN encounter_type et ON e.encounter_type = et.encounter_type_id AND et.retired = 0",
+    );
+    expect(sql).toContain("et.uuid IN (:et_0)");
+    expect(sql).toContain("JOIN location l ON e.location_id = l.location_id");
+    expect(sql).toContain(
+      "DATEDIFF(e.encounter_datetime, p.birthdate) <= :max_dias",
+    );
+    expect(sql).toContain("HAVING COUNT(DISTINCT e.encounter_id) >= :min_oc");
+    expect(sql).toContain("MAX(e.encounter_datetime) >= :inicio");
+    expect(sql).toContain("MAX(e.encounter_datetime) < :fin_excl");
+    expect(sql).toContain(
+      "e.encounter_datetime >= DATE_SUB(:inicio, INTERVAL :ventana_dias DAY)",
+    );
+    expect(params["et_0"]).toBe(UUID_ET);
+    expect(params["min_oc"]).toBe(4);
+    expect(params["ventana_dias"]).toBe(28);
+  });
+
+  test("defaults min_oc to 1 and omits encounter_type join when absent", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_pacientes_ventana",
+    });
+    const { sql, params } = buildQuery(d, INICIO, FIN);
+    expect(sql).not.toContain("JOIN encounter_type");
+    expect(params["min_oc"]).toBe(1);
+  });
+
+  test("omits the sargable bound when no max age bound is configured", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_pacientes_ventana",
+      poblacion: { min_dias: 2 },
+    });
+    const { sql } = buildQuery(d, INICIO, FIN);
+    expect(sql).not.toContain("DATE_SUB(:inicio, INTERVAL");
+    expect(sql).toContain(
+      "DATEDIFF(e.encounter_datetime, p.birthdate) >= :min_dias",
+    );
+  });
+
+  test("ventana_dias derived from max_meses_excl", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_pacientes_ventana",
+      poblacion: { max_meses_excl: 1 },
+    });
+    const { sql, params } = buildQuery(d, INICIO, FIN);
+    expect(sql).toContain("DATE_SUB(:inicio, INTERVAL :ventana_dias DAY)");
+    expect(params["ventana_dias"]).toBe(31);
+  });
+
+  test("ventana_dias derived from max_anios_excl", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_pacientes_ventana",
+      poblacion: { max_anios_excl: 1 },
+    });
+    const { params } = buildQuery(d, INICIO, FIN);
+    expect(params["ventana_dias"]).toBe(366);
+  });
+
+  test("applies sexo via person join", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_pacientes_ventana",
+      poblacion: { sexo: "F" },
+    });
+    const { sql, params } = buildQuery(d, INICIO, FIN);
+    expect(sql).toContain("JOIN person p");
+    expect(sql).toContain("p.gender = :sexo");
+    expect(params["sexo"]).toBe("F");
+  });
+
+  test("period applies to the last control only, not to every encounter", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_pacientes_ventana",
+      evento: { location_uuids: [UUID_LOC] },
+    });
+    const { sql } = buildQuery(d, INICIO, FIN);
+    expect(sql).toContain("MAX(e.encounter_datetime) >= :inicio");
+    expect(sql).not.toMatch(/e\.encounter_datetime >= :inicio/);
+  });
+
+  test("reuses diagnosticos and ordenes filters", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_pacientes_ventana",
+      evento: {
+        location_uuids: [UUID_LOC],
+        diagnosticos: [
+          { concepto_uuids: [UUID_DIAG], tipo_diagnostico: "definitivo" },
+        ],
+      },
+    });
+    const { sql } = buildQuery(d, INICIO, FIN);
+    expect(sql).toContain("encounter_diagnosis");
+    expect(sql).toContain("ed.certainty");
+
+    const d2 = parseDefinicionIndicador({
+      tipo: "conteo_pacientes_ventana",
+      evento: {
+        location_uuids: [UUID_LOC],
+        ordenes: [{ concepto_uuid: UUID_ORD }],
+      },
+    });
+    const { sql: sql2 } = buildQuery(d2, INICIO, FIN, { [UUID_ORD]: 42 });
+    expect(sql2).toContain("EXISTS");
+    expect(sql2).toContain("orders");
   });
 });

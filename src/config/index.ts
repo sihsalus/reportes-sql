@@ -25,11 +25,22 @@ export interface Settings {
   openmrs_db_name: string;
   openmrs_db_user: string;
   openmrs_db_password: string;
+  // Fail-fast timeouts for the OpenMRS MySQL pool (ms).
+  // See A-1: unbounded waits saturate the pool and hang the service.
+  // - connect: TCP handshake ceiling (mysql2 `connectTimeout`).
+  // - acquire: time waiting for a free connection. mysql2 does not expose
+  //   `acquireTimeout` in PoolOptions, so queryMysql enforces this manually.
+  // - query: per-query execution ceiling.
+  openmrs_db_connect_timeout_ms: number;
+  openmrs_db_acquire_timeout_ms: number;
+  openmrs_db_query_timeout_ms: number;
 
   // OpenMRS REST API
   openmrs_api_url: string;
   openmrs_api_user: string;
   openmrs_api_password: string;
+  // Privilege required for writes/recalculation (fail-closed when unset)
+  openmrs_required_privilege: string | undefined;
 
   // Application
   port: number;
@@ -44,6 +55,19 @@ function parsePort(value: string | undefined, fallback: number): number {
   if (value === undefined || value === "") return fallback;
   const parsed = parseInt(value, 10);
   return isNaN(parsed) ? fallback : parsed;
+}
+
+/**
+ * Parse a positive integer env var (typically a millisecond timeout).
+ * Falls back to `fallback` when unset, empty, or non-numeric. Negative or
+ * zero values are rejected too: a timeout of 0 would disable the limit,
+ * reintroducing the A-1 saturation risk we are guarding against.
+ */
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (value === undefined || value === "") return fallback;
+  const parsed = parseInt(value, 10);
+  if (isNaN(parsed) || parsed <= 0) return fallback;
+  return parsed;
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -104,6 +128,17 @@ function envEither(primary: string, alias: string): string | undefined {
   return process.env[primary] ?? process.env[alias];
 }
 
+/**
+ * Parse OPENMRS_REQUIRED_PRIVILEGE. Empty/whitespace-only values count as
+ * unset: writes stay fail-closed (403) until an admin configures the real
+ * OpenMRS privilege name.
+ */
+function parseRequiredPrivilege(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
+
 export const settings: Settings = {
   indicadores_db_host: envEither("INDICATORS_DB_HOST", "INDICADORES_DB_HOST") ?? "localhost",
   indicadores_db_port: parsePort(envEither("INDICATORS_DB_PORT", "INDICADORES_DB_PORT"), 5432),
@@ -116,10 +151,28 @@ export const settings: Settings = {
   openmrs_db_name: process.env["OPENMRS_DB_NAME"] ?? "openmrs",
   openmrs_db_user: process.env["OPENMRS_DB_USER"] ?? "openmrs",
   openmrs_db_password: process.env["OPENMRS_DB_PASSWORD"] ?? "openmrs",
+  // Fail-fast MySQL pool timeouts (ms). mysql2 has no PoolOptions
+  // `acquireTimeout`, so queryMysql applies this acquire timeout around
+  // getConnection. `queueLimit` also rejects when the acquire queue overflows.
+  openmrs_db_connect_timeout_ms: parsePositiveInt(
+    process.env["OPENMRS_DB_CONNECT_TIMEOUT_MS"],
+    10_000,
+  ),
+  openmrs_db_acquire_timeout_ms: parsePositiveInt(
+    process.env["OPENMRS_DB_ACQUIRE_TIMEOUT_MS"],
+    10_000,
+  ),
+  openmrs_db_query_timeout_ms: parsePositiveInt(
+    process.env["OPENMRS_DB_QUERY_TIMEOUT_MS"],
+    30_000,
+  ),
 
   openmrs_api_url: process.env["OPENMRS_API_URL"] ?? "http://localhost/openmrs",
   openmrs_api_user: process.env["OPENMRS_API_USER"] ?? "admin",
   openmrs_api_password: process.env["OPENMRS_API_PASSWORD"] ?? "Admin123",
+  openmrs_required_privilege: parseRequiredPrivilege(
+    process.env["OPENMRS_REQUIRED_PRIVILEGE"],
+  ),
 
   port: parsePort(process.env["PORT"], 8000),
   auto_seed_default_indicator: parseBoolean(
@@ -142,16 +195,16 @@ export function getIndicadoresDatabaseUrl(): string {
  * Called once at startup to surface misconfigured production deployments.
  */
 export function warnDefaultCredentials(): void {
-  const checks: Array<{ env: string; defaultVal: string }> = [
-    { env: "INDICATORS_DB_PASSWORD", defaultVal: "postgres" },
-    { env: "OPENMRS_DB_PASSWORD", defaultVal: "openmrs" },
-    { env: "OPENMRS_API_PASSWORD", defaultVal: "Admin123" },
+  const checks = [
+    "INDICATORS_DB_PASSWORD",
+    "OPENMRS_DB_PASSWORD",
+    "OPENMRS_API_PASSWORD",
   ];
 
-  for (const { env, defaultVal } of checks) {
+  for (const env of checks) {
     if (!process.env[env]) {
       logger.warn(
-        `[config] ${env} no está definida — usando valor por defecto (${defaultVal}). ` +
+        `[config] ${env} no está definida — usando valor por defecto. ` +
         `En producción, definila explícitamente.`,
       );
     }

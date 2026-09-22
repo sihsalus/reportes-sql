@@ -36,3 +36,52 @@ jobs:
       - run: yarn test
 
       - run: yarn build
+
+  database-contract:
+    name: PostgreSQL and MariaDB contract
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: reportes_test
+          POSTGRES_PASSWORD: synthetic-postgres-only
+          POSTGRES_DB: reportes_sql_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s --health-timeout 5s --health-retries 5
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: synthetic-mysql-only
+          MARIADB_ROOT_HOST: '%'
+          MARIADB_DATABASE: reportes_sql_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      RUN_DATABASE_CONTRACT: synthetic-only
+      AUTO_SEED_DEFAULT_INDICATOR: 'false'
+      INDICATORS_DB_HOST: 127.0.0.1
+      INDICATORS_DB_PORT: '5432'
+      INDICATORS_DB_NAME: reportes_sql_test
+      INDICATORS_DB_USER: reportes_test
+      INDICATORS_DB_PASSWORD: synthetic-postgres-only
+      OPENMRS_DB_HOST: 127.0.0.1
+      OPENMRS_DB_PORT: '3306'
+      OPENMRS_DB_NAME: reportes_sql_test
+      OPENMRS_DB_USER: reportes_reader
+      OPENMRS_DB_PASSWORD: synthetic-reader-only
+      MYSQL_TEST_ROOT_PASSWORD: synthetic-mysql-only
+      OPENMRS_REQUIRED_PRIVILEGE: synthetic-indicators-write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn build
+      - run: node scripts/test-database-contract.mjs

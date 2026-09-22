@@ -2,74 +2,46 @@
  * Resultados router — query and trigger indicator calculations.
  *
  * - GET  /resultados?indicador_id=X&periodo_inicio=...&periodo_fin=...
- *        → filterable, paginated list of pre-computed results.
+ *        → filterable, paginated list of pre-computed results; by default
+ *          only canonical rows are returned, include_historicos=true also
+ *          returns superseded rows, version_id filters by specific version.
  * - GET  /resultados/series?indicador_id=X&anio=YYYY&granularity=mensual|...
  *        → time-series rollups from canonical monthly results.
  * - POST /resultados/calcular-ahora
  *        → iterate all active indicators, calculate for the current month,
  *          run engine/interpreter + executor with canonical semantics, return batch summary.
+ * - POST /resultados/recalcular-anio
+ *        → recalculate all active indicators for every month in a given year.
  */
 
 import { Router, type Request, type Response } from "express";
-import { Op, QueryTypes } from "sequelize";
+import { Op } from "sequelize";
 import {
   Indicador,
   IndicadorVersion,
   IndicadorResultado,
 } from "../models/indicador.js";
-import { sequelize } from "../database/postgres.js";
 import { parseDefinicionIndicador } from "../types/definicion.js";
 import { buildQuery } from "../engine/interpreter.js";
 import { executeAndPersist } from "../engine/executor.js";
-import { calcularMesActual, calcularMesEspecifico } from "../engine/periodo.js";
+import { writeCalcLog } from "../engine/calc-log.js";
+import { queryMysql } from "../database/mysql.js";
+import { calcularMesActual } from "../engine/periodo.js";
 import { resolveConceptMap } from "../validators/openmrs.js";
-import { resolveOrcenesConceptMap } from "../engine/concept-resolver.js";
-
+import { OpenMRSUnavailableError } from "../errors.js";
 import { asyncHandler } from "../middleware/async-handler.js";
+import { requirePrivilege } from "../middleware/auth.js";
+import { rateLimit, resetRateLimitStore } from "./resultados/rate-limit.js";
+import { handleSeries } from "./resultados/series.js";
+import { handleRecalcularAnio } from "./resultados/recalcular-anio.js";
+import { settings } from "../config/index.js";
 
 export const resultadosRouter: Router = Router();
 
-// ── Rate limiter for expensive batch endpoints ─────────────────────────
+// Re-export for testing
+export { resetRateLimitStore };
 
-const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
-
-function rateLimit(
-  key: string,
-  maxRequests: number,
-  windowMs: number,
-): boolean {
-  const now = Date.now();
-  const entry = rateLimitStore.get(key);
-
-  if (!entry || now > entry.resetAt) {
-    rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
-    return true;
-  }
-
-  if (entry.count >= maxRequests) {
-    return false;
-  }
-
-  entry.count++;
-  return true;
-}
-
-// Cleanup stale entries every 5 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of rateLimitStore) {
-    if (now > entry.resetAt) {
-      rateLimitStore.delete(key);
-    }
-  }
-}, 5 * 60 * 1000);
-
-// Exported for testing only
-export function resetRateLimitStore(): void {
-  rateLimitStore.clear();
-}
-
-// ── GET /resultados ────────────────────────────────────────────────────
+// ── GET /resultados ────────────────────────────────────────────────────────
 
 resultadosRouter.get(
   "/",
@@ -77,11 +49,65 @@ resultadosRouter.get(
     const indicadorId = req.query["indicador_id"] as string | undefined;
     const periodoInicioStr = req.query["periodo_inicio"] as string | undefined;
     const periodoFinStr = req.query["periodo_fin"] as string | undefined;
-    const page = Math.max(1, parseInt((req.query["page"] as string) ?? "1", 10) || 1);
-    const size = Math.min(100, Math.max(1, parseInt((req.query["size"] as string) ?? "20", 10) || 20));
+    const versionId = req.query["version_id"] as string | undefined;
+    const includeHistoricos = req.query["include_historicos"] === "true";
+    const pageRaw = req.query["page"] as string | undefined;
+    const sizeRaw = req.query["size"] as string | undefined;
 
-    // Build where clause
+    let page = 1;
+    let size = 20;
+
+    if (pageRaw !== undefined && pageRaw !== "") {
+      if (!/^\d+$/.test(pageRaw)) {
+        res.status(422).json({
+          detail: { field: "page", message: "page debe ser un número entero" },
+        });
+        return;
+      }
+      page = parseInt(pageRaw, 10);
+      if (page < 1) {
+        res.status(422).json({
+          detail: { field: "page", message: "page debe ser mayor o igual a 1" },
+        });
+        return;
+      }
+    }
+
+    if (sizeRaw !== undefined && sizeRaw !== "") {
+      if (!/^\d+$/.test(sizeRaw)) {
+        res.status(422).json({
+          detail: { field: "size", message: "size debe ser un número entero" },
+        });
+        return;
+      }
+      size = parseInt(sizeRaw, 10);
+      if (size < 1 || size > 100) {
+        res.status(422).json({
+          detail: { field: "size", message: "size debe estar entre 1 y 100" },
+        });
+        return;
+      }
+    }
+
+    if (
+      versionId !== undefined &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(versionId)
+    ) {
+      res.status(422).json({
+        detail: { field: "version_id", message: "version_id debe ser un UUID válido" },
+      });
+      return;
+    }
+
+    // Build where clause. Default: canonical rows only (one per
+    // indicador+month); include_historicos=true also returns superseded rows.
     const where: Record<string, unknown> = {};
+    if (!includeHistoricos) {
+      where["es_canonico"] = true;
+    }
+    if (versionId) {
+      where["indicador_version_id"] = versionId;
+    }
     if (periodoInicioStr) {
       where["periodo_inicio"] = { [Op.gte]: periodoInicioStr };
     }
@@ -153,201 +179,20 @@ resultadosRouter.get(
   }),
 );
 
-// ── GET /resultados/series ─────────────────────────────────────────────
-
-type Granularity = "mensual" | "trimestral" | "semestral" | "anual";
-
-interface SeriesRow {
-  periodo_label: string;
-  valor: number;
-  meses_disponibles: number;
-  mes_referencia?: string;
-  trimestre?: number;
-  semestre?: number;
-  anio: number;
-}
-
-const GRANULARITY_SQL: Record<Granularity, string> = {
-  mensual: `
-    SELECT
-      TO_CHAR(mes_referencia, 'YYYY-MM') AS periodo_label,
-      mes_referencia,
-      EXTRACT(YEAR FROM mes_referencia)::int AS anio,
-      SUM(valor)::numeric AS valor,
-      COUNT(*)::int AS meses_disponibles
-    FROM indicador_resultado ir
-    JOIN indicador_version iv ON iv.id = ir.indicador_version_id
-    WHERE iv.indicador_id = :indicador_id
-      AND ir.es_canonico = true
-      AND EXTRACT(YEAR FROM ir.mes_referencia) = :anio
-    GROUP BY mes_referencia
-    ORDER BY mes_referencia
-  `,
-  trimestral: `
-    SELECT
-      EXTRACT(YEAR FROM mes_referencia)::int AS anio,
-      EXTRACT(QUARTER FROM mes_referencia)::int AS trimestre,
-      'Q' || EXTRACT(QUARTER FROM mes_referencia)::int AS periodo_label,
-      SUM(valor)::numeric AS valor,
-      COUNT(*)::int AS meses_disponibles
-    FROM indicador_resultado ir
-    JOIN indicador_version iv ON iv.id = ir.indicador_version_id
-    WHERE iv.indicador_id = :indicador_id
-      AND ir.es_canonico = true
-      AND EXTRACT(YEAR FROM ir.mes_referencia) = :anio
-    GROUP BY EXTRACT(YEAR FROM mes_referencia), EXTRACT(QUARTER FROM mes_referencia)
-    ORDER BY trimestre
-  `,
-  semestral: `
-    SELECT
-      EXTRACT(YEAR FROM mes_referencia)::int AS anio,
-      CASE
-        WHEN EXTRACT(MONTH FROM mes_referencia) <= 6 THEN 1 ELSE 2
-      END AS semestre,
-      'H' || CASE
-        WHEN EXTRACT(MONTH FROM mes_referencia) <= 6 THEN 1 ELSE 2
-      END AS periodo_label,
-      SUM(valor)::numeric AS valor,
-      COUNT(*)::int AS meses_disponibles
-    FROM indicador_resultado ir
-    JOIN indicador_version iv ON iv.id = ir.indicador_version_id
-    WHERE iv.indicador_id = :indicador_id
-      AND ir.es_canonico = true
-      AND EXTRACT(YEAR FROM ir.mes_referencia) = :anio
-    GROUP BY
-      EXTRACT(YEAR FROM mes_referencia),
-      CASE WHEN EXTRACT(MONTH FROM mes_referencia) <= 6 THEN 1 ELSE 2 END
-    ORDER BY semestre
-  `,
-  anual: `
-    SELECT
-      EXTRACT(YEAR FROM mes_referencia)::int AS anio,
-      TO_CHAR(MIN(mes_referencia), 'YYYY') AS periodo_label,
-      SUM(valor)::numeric AS valor,
-      COUNT(*)::int AS meses_disponibles
-    FROM indicador_resultado ir
-    JOIN indicador_version iv ON iv.id = ir.indicador_version_id
-    WHERE iv.indicador_id = :indicador_id
-      AND ir.es_canonico = true
-      AND EXTRACT(YEAR FROM ir.mes_referencia) = :anio
-    GROUP BY EXTRACT(YEAR FROM mes_referencia)
-    ORDER BY anio
-  `,
-};
+// ── GET /resultados/series ─────────────────────────────────────────────────
 
 resultadosRouter.get(
   "/series",
   asyncHandler(async (req: Request, res: Response) => {
-    const indicadorId = req.query["indicador_id"] as string | undefined;
-    const anioStr = req.query["anio"] as string | undefined;
-    const granularity = (req.query["granularity"] as string) || "mensual";
-    const includeMeta = req.query["include_meta"] === "true";
-
-    if (!indicadorId) {
-      res.status(422).json({
-        detail: { field: "indicador_id", message: "indicador_id es obligatorio" },
-      });
-      return;
-    }
-
-    // Strict integer contract: reject missing, non-digit, or non-integer
-    // values before parsing. `parseInt("2026abc", 10) === 2026`, so we must
-    // validate the raw string with a digit-only pattern.
-    if (anioStr === undefined || anioStr === "") {
-      res.status(422).json({
-        detail: { field: "anio", message: "anio es obligatorio" },
-      });
-      return;
-    }
-    if (!/^-?\d+$/.test(anioStr)) {
-      res.status(422).json({
-        detail: { field: "anio", message: "anio debe ser un número entero" },
-      });
-      return;
-    }
-    const anio = parseInt(anioStr, 10);
-    if (anio < 2000 || anio > 2100) {
-      res.status(422).json({
-        detail: { field: "anio", message: "anio debe estar en el rango 2000-2100" },
-      });
-      return;
-    }
-
-    if (!["mensual", "trimestral", "semestral", "anual"].includes(granularity)) {
-      res.status(422).json({
-        detail: {
-          field: "granularity",
-          message: "granularity debe ser: mensual, trimestral, semestral, o anual",
-        },
-      });
-      return;
-    }
-
-    const sql = GRANULARITY_SQL[granularity as Granularity];
-    const rows = await sequelize.query<SeriesRow>(sql, {
-      replacements: { indicador_id: indicadorId, anio },
-      type: QueryTypes.SELECT,
-    });
-
-    // Map rows to a consistent shape
-    const items = rows.map((r) => {
-      const item: Record<string, unknown> = {
-        periodo_label: r.periodo_label,
-        valor: typeof r.valor === "string" ? parseFloat(String(r.valor)) : Number(r.valor),
-        meses_disponibles: r.meses_disponibles,
-        anio: r.anio,
-      };
-
-      if ("mes_referencia" in r && r.mes_referencia) {
-        item["mes_referencia"] = r.mes_referencia;
-      }
-      if ("trimestre" in r && r.trimestre != null) {
-        item["trimestre"] = r.trimestre;
-      }
-      if ("semestre" in r && r.semestre != null) {
-        item["semestre"] = r.semestre;
-      }
-
-      return item;
-    });
-
-    // Enrich with meta values when requested
-    if (includeMeta && indicadorId) {
-      const distinctYears = [...new Set(items.map((r) => r.anio as number))];
-      const [latestVersion] = await sequelize.query<{ id: string }>(
-        `SELECT iv.id FROM indicador_version iv
-         JOIN indicador i ON i.id = iv.indicador_id
-         WHERE iv.indicador_id = :iId AND i.activo = true
-         ORDER BY iv.version DESC LIMIT 1`,
-        { replacements: { iId: indicadorId }, type: QueryTypes.SELECT },
-      );
-      const metaMap = new Map<number, number | null>();
-      if (latestVersion && distinctYears.length > 0) {
-        const metaRows = await sequelize.query<{ anio: number; valor_meta: string }>(
-          `SELECT anio, valor_meta::float8 FROM indicador_meta
-           WHERE indicador_version_id = :vId AND anio = ANY(:years)`,
-          { replacements: { vId: latestVersion.id, years: distinctYears }, type: QueryTypes.SELECT },
-        );
-        for (const m of metaRows) metaMap.set(m.anio, parseFloat(String(m.valor_meta)));
-      }
-      for (const item of items) {
-        item["meta"] = metaMap.get(item.anio as number) ?? null;
-      }
-    }
-
-    res.json({
-      items,
-      indicador_id: indicadorId,
-      anio,
-      granularity,
-    });
+    await handleSeries(req, res);
   }),
 );
 
-// ── POST /resultados/calcular-ahora ────────────────────────────────────
+// ── POST /resultados/calcular-ahora ────────────────────────────────────────
 
 resultadosRouter.post(
   "/calcular-ahora",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
     const clientIp = req.ip ?? req.socket.remoteAddress ?? "unknown";
     if (!rateLimit(`calcular-ahora:${clientIp}`, 3, 60_000)) {
@@ -357,12 +202,93 @@ resultadosRouter.post(
       return;
     }
 
+    // Preflight: fail fast with 502 when the OpenMRS MySQL database is
+    // unreachable, instead of returning a 200 with every indicator errored.
+    try {
+      await queryMysql("SELECT 1", {});
+    } catch {
+      res.status(502).json({ detail: "OpenMRS no disponible" });
+      return;
+    }
+
     const indicadores = await Indicador.findAll({
       where: { activo: true },
     });
 
     // Always calculate for the current month (canonical monthly semantics)
-    const { inicio, fin, mes_referencia } = calcularMesActual();
+    const { inicio, fin, finPersistencia, mes_referencia } = calcularMesActual();
+
+    // Batch the latest-version lookup instead of issuing one query per
+    // indicator. Ordering lets us keep the first row for each indicator.
+    const indicadorIds = indicadores.map((indicador) => indicador.id);
+    const versions = indicadorIds.length > 0
+      ? await IndicadorVersion.findAll({
+          where: { indicador_id: indicadorIds },
+          order: [["indicador_id", "ASC"], ["version", "DESC"]],
+        })
+      : [];
+    const latestVersionByIndicador = new Map<string, IndicadorVersion>();
+    for (const version of versions) {
+      if (!latestVersionByIndicador.has(version.indicador_id)) {
+        latestVersionByIndicador.set(version.indicador_id, version);
+      }
+    }
+
+    // Parse definitions and collect all order concepts before making one
+    // OpenMRS lookup for the complete batch.
+    const definicionByIndicador = new Map<string, ReturnType<typeof parseDefinicionIndicador>>();
+    const allConceptUuids = new Set<string>();
+    for (const indicador of indicadores) {
+      const version = latestVersionByIndicador.get(indicador.id);
+      if (!version) continue;
+
+      const definicion = parseDefinicionIndicador(version.definicion);
+      definicionByIndicador.set(indicador.id, definicion);
+      for (const orden of definicion.evento?.ordenes ?? []) {
+        allConceptUuids.add(orden.concepto_uuid);
+      }
+    }
+
+    let globalConceptMap: Record<string, number> = {};
+    if (allConceptUuids.size > 0) {
+      try {
+        globalConceptMap = await resolveConceptMap(Array.from(allConceptUuids));
+      } catch (err) {
+        if (err instanceof OpenMRSUnavailableError) {
+          res.status(502).json({ detail: "OpenMRS no disponible" });
+          return;
+        }
+        throw err;
+      }
+    }
+
+    const conceptMapByIndicador = new Map<string, Record<string, number> | null>();
+    const conceptErrorByIndicador = new Map<string, string>();
+    for (const indicador of indicadores) {
+      const definicion = definicionByIndicador.get(indicador.id);
+      const ordenes = definicion?.evento?.ordenes;
+      if (!ordenes || ordenes.length === 0) {
+        conceptMapByIndicador.set(indicador.id, null);
+        continue;
+      }
+
+      const conceptMap: Record<string, number> = {};
+      const missing: string[] = [];
+      for (const orden of ordenes) {
+        const conceptId = globalConceptMap[orden.concepto_uuid];
+        if (conceptId === undefined) missing.push(orden.concepto_uuid);
+        else conceptMap[orden.concepto_uuid] = conceptId;
+      }
+
+      if (missing.length > 0) {
+        conceptErrorByIndicador.set(
+          indicador.id,
+          `Conceptos de órdenes no encontrados: ${missing.join(", ")}`,
+        );
+      } else {
+        conceptMapByIndicador.set(indicador.id, conceptMap);
+      }
+    }
 
     let calculados = 0;
     const errores: Array<{
@@ -373,30 +299,42 @@ resultadosRouter.post(
     const total = indicadores.length;
 
     for (const indicador of indicadores) {
+      const latest = latestVersionByIndicador.get(indicador.id);
       try {
-        // Get latest version
-        const latest = await IndicadorVersion.findOne({
-          where: { indicador_id: indicador.id },
-          order: [["version", "DESC"]],
-        });
-
         if (!latest) {
           errores.push({
             indicador_id: indicador.id,
             indicador_nombre: indicador.nombre,
             error: "Sin versiones definidas",
           });
+          await writeCalcLog({
+            indicador_id: indicador.id,
+            indicador_version_id: null,
+            mes_referencia,
+            error: "Sin versiones definidas",
+            fuente: "calcular-ahora",
+          });
+          continue;
+        }
+        const conceptError = conceptErrorByIndicador.get(indicador.id);
+        if (conceptError) {
+          errores.push({
+            indicador_id: indicador.id,
+            indicador_nombre: indicador.nombre,
+            error: conceptError,
+          });
+          await writeCalcLog({
+            indicador_id: indicador.id,
+            indicador_version_id: latest.id,
+            mes_referencia,
+            error: conceptError,
+            fuente: "calcular-ahora",
+          });
           continue;
         }
 
-        // Parse definicion (no longer uses periodo)
-        const definicion = parseDefinicionIndicador(latest.definicion);
-
-        // Resolve ordenes concept UUIDs to OpenMRS concept_ids
-        const ordenes = definicion.evento?.ordenes;
-        const conceptMap = ordenes && ordenes.length > 0
-          ? await resolveOrcenesConceptMap(ordenes)
-          : null;
+        const definicion = definicionByIndicador.get(indicador.id)!;
+        const conceptMap = conceptMapByIndicador.get(indicador.id) ?? null;
 
         // Build query with month boundaries
         const { sql, params } = buildQuery(
@@ -411,18 +349,30 @@ resultadosRouter.post(
           params as Record<string, unknown>,
           latest.id,
           inicio,
-          fin,
+          finPersistencia,
           mes_referencia,
+          {
+            indicadorId: indicador.id,
+            fuente: "calcular-ahora",
+            persistirCeroSiVacio: true,
+          },
         );
 
         calculados += 1;
       } catch (err: unknown) {
-        const message =
+        const internalMessage =
           err instanceof Error ? err.message : "Error desconocido";
         errores.push({
           indicador_id: indicador.id,
           indicador_nombre: indicador.nombre,
-          error: message,
+          error: "Error interno durante el cálculo",
+        });
+        await writeCalcLog({
+          indicador_id: indicador.id,
+          indicador_version_id: latest?.id ?? null,
+          mes_referencia,
+          error: internalMessage,
+          fuente: "calcular-ahora",
         });
       }
     }
@@ -436,244 +386,12 @@ resultadosRouter.post(
   }),
 );
 
-// ── POST /resultados/recalcular-anio ───────────────────────────────────
+// ── POST /resultados/recalcular-anio ───────────────────────────────────────
 
 resultadosRouter.post(
   "/recalcular-anio",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
-    const clientIp = req.ip ?? req.socket.remoteAddress ?? "unknown";
-    if (!rateLimit(`recalcular-anio:${clientIp}`, 2, 300_000)) {
-      res.status(429).json({
-        detail: "Demasiadas solicitudes. Intentá de nuevo en 5 minutos.",
-      });
-      return;
-    }
-
-    const { anio, indicador_id } = req.body as {
-      anio?: number;
-      indicador_id?: string;
-    };
-
-    if (typeof anio !== "number" || !Number.isInteger(anio)) {
-      res.status(422).json({
-        detail: { field: "anio", message: "anio debe ser un número entero" },
-      });
-      return;
-    }
-
-    const hoy = new Date();
-    const currentYear = hoy.getUTCFullYear();
-    const currentMonth = hoy.getUTCMonth() + 1; // 1-indexed
-
-    // Lower bound: stays consistent with `/resultados/series` (2000-2100).
-    // Recalculating pre-2000 is meaningless for clinical indicators and would
-    // produce unbounded batch sizes.
-    if (anio < 2000) {
-      res.status(422).json({
-        detail: { field: "anio", message: "anio debe ser un año realista (>= 2000)" },
-      });
-      return;
-    }
-
-    if (anio > currentYear) {
-      res.status(422).json({
-        detail: { field: "anio", message: "No se puede recalcular un año futuro" },
-      });
-      return;
-    }
-
-    let indicadores;
-    if (indicador_id) {
-      indicadores = await Indicador.findAll({ where: { id: indicador_id } });
-      if (indicadores.length === 0) {
-        res.status(422).json({
-          detail: { field: "indicador_id", message: "Indicador no encontrado" },
-        });
-        return;
-      }
-    } else {
-      indicadores = await Indicador.findAll({ where: { activo: true } });
-    }
-
-    const maxMes = anio === currentYear ? currentMonth : 12;
-    const meses: number[] = [];
-    for (let m = 1; m <= maxMes; m++) meses.push(m);
-
-    // ── Phase 1: Batch version lookup (single DISTINCT ON query) ──
-    const indicadorIds = indicadores.map((i) => i.id);
-
-    interface VersionRow {
-      id: string;
-      indicador_id: string;
-      version: number;
-      definicion: Record<string, unknown>;
-    }
-
-    const versionRows: VersionRow[] =
-      indicadorIds.length > 0
-        ? await sequelize.query<VersionRow>(
-            `SELECT DISTINCT ON (indicador_id)
-               id, indicador_id, version, definicion
-             FROM indicador_version
-             WHERE indicador_id = ANY(:indicador_ids)
-             ORDER BY indicador_id, version DESC`,
-            {
-              replacements: { indicador_ids: indicadorIds },
-              type: QueryTypes.SELECT,
-            },
-          )
-        : [];
-
-    const versionMap = new Map<string, VersionRow>();
-    for (const row of versionRows) {
-      versionMap.set(row.indicador_id, row);
-    }
-
-    // ── Phase 2: Parse definitions + collect all concept UUIDs ──
-    const definicionMap = new Map<string, ReturnType<typeof parseDefinicionIndicador>>();
-    const allConceptUuids = new Set<string>();
-    const indicatorsWithoutVersion: string[] = [];
-
-    for (const indicador of indicadores) {
-      const version = versionMap.get(indicador.id);
-      if (!version) {
-        indicatorsWithoutVersion.push(indicador.id);
-        continue;
-      }
-      const definicion = parseDefinicionIndicador(version.definicion);
-      definicionMap.set(indicador.id, definicion);
-
-      const ordenes = definicion.evento?.ordenes;
-      if (ordenes && ordenes.length > 0) {
-        for (const o of ordenes) {
-          allConceptUuids.add(o.concepto_uuid);
-        }
-      }
-    }
-
-    // ── Phase 3: Batch concept resolution (single call) ──
-    let globalConceptMap: Record<string, number> = {};
-    if (allConceptUuids.size > 0) {
-      globalConceptMap = await resolveConceptMap(Array.from(allConceptUuids));
-    }
-
-    // ── Phase 4: Per-indicator concept validation ──
-    const conceptMapByIndicador = new Map<string, Record<string, number>>();
-    const conceptErrorByIndicador = new Map<string, string>();
-
-    for (const indicador of indicadores) {
-      if (indicatorsWithoutVersion.includes(indicador.id)) continue;
-
-      const definicion = definicionMap.get(indicador.id)!;
-      const ordenes = definicion.evento?.ordenes;
-      if (!ordenes || ordenes.length === 0) continue;
-
-      const conceptMap: Record<string, number> = {};
-      const missing: string[] = [];
-      for (const o of ordenes) {
-        const cid = globalConceptMap[o.concepto_uuid];
-        if (cid !== undefined) {
-          conceptMap[o.concepto_uuid] = cid;
-        } else {
-          missing.push(o.concepto_uuid);
-        }
-      }
-
-      if (missing.length > 0) {
-        conceptErrorByIndicador.set(
-          indicador.id,
-          `Conceptos de órdenes no encontrados: ${missing.join(", ")}`,
-        );
-      } else {
-        conceptMapByIndicador.set(indicador.id, conceptMap);
-      }
-    }
-
-    // ── Phase 5: Per-indicator × per-month execution ──
-    let recalculados = 0;
-    const errores: Array<{
-      indicador_id: string;
-      indicador_nombre: string;
-      mes: number;
-      error: string;
-    }> = [];
-    const total = indicadores.length * meses.length;
-
-    for (const indicador of indicadores) {
-      // No version → error for ALL months
-      if (indicatorsWithoutVersion.includes(indicador.id)) {
-        for (const mes of meses) {
-          errores.push({
-            indicador_id: indicador.id,
-            indicador_nombre: indicador.nombre,
-            mes,
-            error: "Sin versiones definidas",
-          });
-        }
-        continue;
-      }
-
-      // Concept resolution failure → error for ALL months
-      if (conceptErrorByIndicador.has(indicador.id)) {
-        const errorMsg = conceptErrorByIndicador.get(indicador.id)!;
-        for (const mes of meses) {
-          errores.push({
-            indicador_id: indicador.id,
-            indicador_nombre: indicador.nombre,
-            mes,
-            error: errorMsg,
-          });
-        }
-        continue;
-      }
-
-      const conceptMap =
-        conceptMapByIndicador.get(indicador.id) ?? null;
-      const definicion = definicionMap.get(indicador.id)!;
-      const version = versionMap.get(indicador.id)!;
-
-      for (const mes of meses) {
-        try {
-          const { inicio, fin, mes_referencia } = calcularMesEspecifico(anio, mes);
-          const { sql, params } = buildQuery(
-            definicion,
-            inicio,
-            fin,
-            conceptMap,
-          );
-
-          await executeAndPersist(
-            sql,
-            params as Record<string, unknown>,
-            version.id,
-            inicio,
-            fin,
-            mes_referencia,
-          );
-
-          recalculados += 1;
-        } catch (err: unknown) {
-          const message =
-            err instanceof Error ? err.message : "Error desconocido";
-          errores.push({
-            indicador_id: indicador.id,
-            indicador_nombre: indicador.nombre,
-            mes,
-            error: message,
-          });
-        }
-      }
-    }
-
-    res.json({
-      anio,
-      indicador_id: indicador_id || null,
-      meses_procesados: meses.length,
-      indicadores_considerados: indicadores.length,
-      recalculados,
-      errores,
-      total,
-    });
-
+    await handleRecalcularAnio(req, res);
   }),
 );
