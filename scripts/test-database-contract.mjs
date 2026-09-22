@@ -109,7 +109,7 @@ try {
   const app = express();
   app.use(express.json());
   // Scope: router/ORM contract. Session HTTP validation has separate tests.
-  app.use((req, _res, next) => { req.authUser = { uuid: randomUUID(), privileges: [{ name: process.env.OPENMRS_REQUIRED_PRIVILEGE }] }; next(); });
+  app.use((req, _res, next) => { req.authUser = { uuid: randomUUID(), privileges: [{ display: process.env.OPENMRS_REQUIRED_PRIVILEGE }] }; next(); });
   app.use('/indicadores', indicadoresRouter);
   app.use('/resultados', resultadosRouter);
   app.use((_err, _req, res, _next) => res.status(500).json({ detail: 'Synthetic write rejected' }));
