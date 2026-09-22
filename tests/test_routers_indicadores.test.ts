@@ -17,10 +17,12 @@ const mockVersionFindOne = jest.fn();
 const mockVersionFindAll = jest.fn();
 const mockVersionMax = jest.fn();
 const mockSequelizeQuery = jest.fn();
+const mockTransaction = { id: "synthetic-transaction" };
 
 jest.mock("../src/database/postgres.js", () => ({
   sequelize: {
     query: (...args: unknown[]) => mockSequelizeQuery(...args),
+    transaction: (callback: (tx: unknown) => Promise<unknown>) => callback(mockTransaction),
   },
 }));
 
@@ -49,8 +51,35 @@ jest.mock("../src/models/indicador.js", () => ({
 
 jest.mock("../src/validators/openmrs.js", () => ({
   validarDefinicionLocationUuids: jest.fn().mockResolvedValue([]),
+  validarDefinicionEncounterTypeUuids: jest.fn().mockResolvedValue([]),
   resolveConceptMap: jest.fn().mockResolvedValue({}),
   validarLocations: jest.fn().mockResolvedValue([]),
+}));
+
+// Configured write privilege so the real requirePrivilege guard passes.
+jest.mock("../src/config/index.js", () => ({
+  settings: {
+    openmrs_api_url: "http://fake-openmrs/openmrs",
+    openmrs_api_user: "admin",
+    openmrs_api_password: "test",
+    openmrs_required_privilege: "app:indicadores:write",
+    indicadores_db_host: "localhost",
+    indicadores_db_port: 5432,
+    indicadores_db_name: "test",
+    indicadores_db_user: "test",
+    indicadores_db_password: "test",
+    openmrs_db_host: "localhost",
+    openmrs_db_port: 3306,
+    openmrs_db_name: "test",
+    openmrs_db_user: "test",
+    openmrs_db_password: "test",
+    port: 8000,
+    cors_origins: [],
+    base_path: "",
+    auto_seed_default_indicator: false,
+  },
+  getIndicadoresDatabaseUrl: () =>
+    "postgres://test:test@localhost:5432/test",
 }));
 
 import { jest } from "@jest/globals";
@@ -59,10 +88,26 @@ import type { Request, Response } from "express";
 import supertest from "supertest";
 import { indicadoresRouter } from "../src/routers/indicadores.js";
 import { metasRouter } from "../src/routers/metas.js";
+import { validarDefinicionEncounterTypeUuids } from "../src/validators/openmrs.js";
+
+// Simulates the requireSession middleware: an authenticated user holding the
+// configured write privilege.
+function stubAuthenticatedSession(
+  req: Request,
+  _res: Response,
+  next: express.NextFunction,
+) {
+  (req as Request & { authUser?: unknown }).authUser = {
+    uuid: "user-uuid-1",
+    privileges: [{ display: "app:indicadores:write" }],
+  };
+  next();
+}
 
 function createTestApp() {
   const app = express();
   app.use(express.json());
+  app.use(stubAuthenticatedSession);
   app.use("/indicadores", indicadoresRouter);
   app.use("/metas", metasRouter);
   app.use(
@@ -120,6 +165,7 @@ function makeVersionRow(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(validarDefinicionEncounterTypeUuids).mockReset().mockResolvedValue([]);
 });
 
 describe("Indicadores Router", () => {
@@ -152,6 +198,47 @@ describe("Indicadores Router", () => {
         .send({ definicion: { tipo: "conteo_atenciones" } });
 
       expect(res.status).toBe(422);
+    });
+
+    test("missing nombre → 422 with exact message 'nombre es obligatorio y no puede estar vacío'", async () => {
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/indicadores")
+        .send({ definicion: { tipo: "conteo_atenciones" } });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("nombre");
+      expect(res.body.detail.message).toBe(
+        "nombre es obligatorio y no puede estar vacío",
+      );
+    });
+
+    test("empty nombre string → 422 with exact message", async () => {
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/indicadores")
+        .send({
+          nombre: "   ",
+          definicion: { tipo: "conteo_atenciones" },
+        });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("nombre");
+      expect(res.body.detail.message).toBe(
+        "nombre es obligatorio y no puede estar vacío",
+      );
+    });
+
+    test("valid body passes through to the definicion step (missing definicion → 422)", async () => {
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/indicadores")
+        .send({ nombre: "Test" });
+
+      // nombre validation passes, falls through to 'definicion es obligatorio'
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("definicion");
+      expect(res.body.detail.message).toBe("definicion es obligatorio");
     });
 
     test("rejects missing definicion with 422", async () => {
@@ -189,6 +276,46 @@ describe("Indicadores Router", () => {
 
       expect(res.status).toBe(422);
       expect(res.body.detail.field).toContain("periodo");
+    });
+
+    test("rejects unknown encounter_type_uuids with 422", async () => {
+      (validarDefinicionEncounterTypeUuids as jest.Mock).mockResolvedValueOnce([
+        "unknown-et-uuid",
+      ]);
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/indicadores")
+        .send({
+          nombre: "Test",
+          definicion: {
+            tipo: "conteo_pacientes_ventana",
+            evento: { encounter_type_uuids: ["unknown-et-uuid"] },
+          },
+        });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("encounter_type_uuids");
+      expect(res.body.detail.unknown_uuids).toEqual(["unknown-et-uuid"]);
+      expect(mockIndicadorCreate).not.toHaveBeenCalled();
+    });
+
+    test("returns 502 when encounter type validation hits an OpenMRS outage", async () => {
+      (validarDefinicionEncounterTypeUuids as jest.Mock).mockRejectedValueOnce(
+        new Error("OpenMRS no disponible"),
+      );
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/indicadores")
+        .send({
+          nombre: "Test",
+          definicion: {
+            tipo: "conteo_pacientes_ventana",
+            evento: { encounter_type_uuids: ["et-uuid"] },
+          },
+        });
+
+      expect(res.status).toBe(502);
+      expect(mockIndicadorCreate).not.toHaveBeenCalled();
     });
   });
 
@@ -231,6 +358,39 @@ describe("Indicadores Router", () => {
   });
 
   describe("PUT /indicadores/:id — update", () => {
+    test("versions a changed nested filter even when the top-level keys are identical", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      mockVersionFindOne.mockResolvedValue(makeVersionRow());
+      mockVersionMax.mockResolvedValue(1);
+      mockVersionCreate.mockResolvedValue(makeVersionRow({ version: 2 }));
+
+      const response = await supertest(createTestApp()).put(`/indicadores/${UUID}`).send({
+        nombre: "Updated",
+        definicion: { tipo: "conteo_atenciones", evento: { location_uuids: ["different-location"] } },
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockVersionCreate).toHaveBeenCalledWith(expect.objectContaining({
+        definicion: expect.objectContaining({ evento: { location_uuids: ["different-location"] } }),
+      }), { transaction: mockTransaction });
+    });
+
+    test("rejects unknown encounter types on definition updates before any write", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      mockVersionFindOne.mockResolvedValue(makeVersionRow());
+      (validarDefinicionEncounterTypeUuids as jest.Mock).mockResolvedValueOnce(["missing-type"]);
+
+      const response = await supertest(createTestApp()).put(`/indicadores/${UUID}`).send({
+        nombre: "Updated",
+        definicion: { tipo: "conteo_pacientes_ventana", evento: { encounter_type_uuids: ["missing-type"] } },
+      });
+
+      expect(response.status).toBe(422);
+      expect(response.body.detail.field).toBe("encounter_type_uuids");
+      expect(mockVersionCreate).not.toHaveBeenCalled();
+      expect(mockIndicadorUpdate).not.toHaveBeenCalled();
+    });
+
     test("updates metadata without definicion", async () => {
       const row = makeIndicadorRow();
       mockIndicadorFindByPk.mockResolvedValue(row);
@@ -318,6 +478,32 @@ describe("Indicadores Router", () => {
 
       expect(res.status).toBe(404);
     });
+
+    test("missing nombre → 422 with exact message 'nombre es obligatorio'", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .put(`/indicadores/${UUID}`)
+        .send({ descripcion: "only metadata" });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("nombre");
+      expect(res.body.detail.message).toBe("nombre es obligatorio");
+    });
+
+    test("empty nombre → 422 with exact message 'nombre es obligatorio'", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .put(`/indicadores/${UUID}`)
+        .send({ nombre: "   " });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("nombre");
+      expect(res.body.detail.message).toBe("nombre es obligatorio");
+    });
   });
 
   describe("DELETE /indicadores/:id — soft delete", () => {
@@ -376,6 +562,19 @@ describe("Indicadores Router", () => {
       expect(res.status).toBe(404);
     });
 
+    test("rejects a null body with a validation error", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post(`/indicadores/${UUID}/versiones`)
+        .send(null);
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("definicion");
+      expect(res.body.detail.message).toBe("definicion es obligatorio");
+    });
+
     test("rejects versione with periodo field", async () => {
       mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
 
@@ -391,6 +590,28 @@ describe("Indicadores Router", () => {
 
       expect(res.status).toBe(422);
       expect(res.body.detail.field).toContain("periodo");
+    });
+
+    test("rejects unknown encounter_type_uuids with 422", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      (validarDefinicionEncounterTypeUuids as jest.Mock).mockResolvedValueOnce([
+        "unknown-et-uuid",
+      ]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post(`/indicadores/${UUID}/versiones`)
+        .send({
+          definicion: {
+            tipo: "conteo_pacientes_ventana",
+            evento: { encounter_type_uuids: ["unknown-et-uuid"] },
+          },
+        });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("encounter_type_uuids");
+      expect(res.body.detail.unknown_uuids).toEqual(["unknown-et-uuid"]);
+      expect(mockVersionCreate).not.toHaveBeenCalled();
     });
 
     test("SC-15: new version auto-copies metas from previous version", async () => {

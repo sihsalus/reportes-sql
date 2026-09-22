@@ -17,6 +17,8 @@ import {
 } from "../types/meta.js";
 import { ZodError } from "zod";
 import { asyncHandler } from "../middleware/async-handler.js";
+import { requirePrivilege } from "../middleware/auth.js";
+import { settings } from "../config/index.js";
 
 export const metasRouter: Router = Router();
 
@@ -24,6 +26,7 @@ export const metasRouter: Router = Router();
 
 metasRouter.put(
   "/",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
     let body;
     try {
@@ -48,7 +51,7 @@ metasRouter.put(
       res.status(422).json({
         detail: {
           field: "indicador_version_id",
-          message: "indicador_version_id not found",
+          message: "indicador_version_id no encontrado",
         },
       });
       return;
@@ -185,6 +188,7 @@ metasRouter.get(
 
 metasRouter.delete(
   "/",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
     let query;
     try {

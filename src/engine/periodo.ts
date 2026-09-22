@@ -15,10 +15,18 @@
  * Use `mes_referencia` (inicio) as the canonical month identifier
  * when persisting results.
  */
-export function calcularMesActual(): { inicio: Date; fin: Date; mes_referencia: Date } {
+export function calcularMesActual(): {
+  inicio: Date;
+  fin: Date;
+  finPersistencia: Date;
+  mes_referencia: Date;
+} {
   const hoy = todayUTC();
   const inicio = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), 1));
-  return { inicio, fin: hoy, mes_referencia: inicio };
+  const finPersistencia = new Date(
+    Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() + 1, 0),
+  );
+  return { inicio, fin: hoy, finPersistencia, mes_referencia: inicio };
 }
 
 /**

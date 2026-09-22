@@ -76,6 +76,21 @@ describe("DefinicionIndicador", () => {
     ).toThrow(ZodError);
   });
 
+  test("conteo_pacientes_ventana accepted", () => {
+    const d = DefinicionIndicadorSchema.parse({
+      tipo: "conteo_pacientes_ventana",
+      evento: {
+        encounter_type_uuids: ["uuid-et"],
+        minimo_ocurrencias: 4,
+      },
+      poblacion: { max_dias: 28 },
+    });
+    expect(d.tipo).toBe("conteo_pacientes_ventana");
+    expect(d.evento!.encounter_type_uuids).toEqual(["uuid-et"]);
+    expect(d.evento!.minimo_ocurrencias).toBe(4);
+    expect(d.poblacion!.max_dias).toBe(28);
+  });
+
   test("invalid minimo_ocurrencias rejected", () => {
     expect(() =>
       FiltrosEventoSchema.parse({
@@ -126,7 +141,7 @@ describe("MutualExclusivity", () => {
         diagnosticos: [{ concepto_uuids: ["uuid-d"] }],
         ordenes: [{ concepto_uuid: "uuid-o" }],
       }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("both inside definicion fails", () => {
@@ -139,7 +154,63 @@ describe("MutualExclusivity", () => {
           ordenes: [{ concepto_uuid: "uuid-o" }],
         },
       }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
+  });
+
+  test("all diagnosticos same tipo_diagnostico passes", () => {
+    const ev = FiltrosEventoSchema.parse({
+      location_uuids: ["uuid-x"],
+      diagnosticos: [
+        { concepto_uuids: ["uuid-d1"], tipo_diagnostico: "definitivo" },
+        { concepto_uuids: ["uuid-d2"], tipo_diagnostico: "definitivo" },
+      ],
+    });
+    expect(ev.diagnosticos!.length).toBe(2);
+    expect(ev.diagnosticos![0].tipo_diagnostico).toBe("definitivo");
+  });
+
+  test("all diagnosticos without tipo_diagnostico passes", () => {
+    const ev = FiltrosEventoSchema.parse({
+      location_uuids: ["uuid-x"],
+      diagnosticos: [
+        { concepto_uuids: ["uuid-d1"] },
+        { concepto_uuids: ["uuid-d2"] },
+      ],
+    });
+    expect(ev.diagnosticos!.length).toBe(2);
+    expect(ev.diagnosticos![0].tipo_diagnostico).toBeUndefined();
+  });
+
+  test("diagnosticos mixed tipos rejected", () => {
+    expect(() =>
+      FiltrosEventoSchema.parse({
+        location_uuids: ["uuid-x"],
+        diagnosticos: [
+          { concepto_uuids: ["uuid-d1"], tipo_diagnostico: "definitivo" },
+          { concepto_uuids: ["uuid-d2"], tipo_diagnostico: "presuntivo" },
+        ],
+      }),
+    ).toThrow(/mismo tipo_diagnostico/);
+  });
+
+  test("diagnosticos mixed typed/untyped rejected", () => {
+    expect(() =>
+      FiltrosEventoSchema.parse({
+        location_uuids: ["uuid-x"],
+        diagnosticos: [
+          { concepto_uuids: ["uuid-d1"], tipo_diagnostico: "definitivo" },
+          { concepto_uuids: ["uuid-d2"] },
+        ],
+      }),
+    ).toThrow(/o ninguno — no se puede mezclar/);
+  });
+
+  test("single diagnostico with tipo passes", () => {
+    const ev = FiltrosEventoSchema.parse({
+      location_uuids: ["uuid-x"],
+      diagnosticos: [{ concepto_uuids: ["uuid-d1"], tipo_diagnostico: "presuntivo" }],
+    });
+    expect(ev.diagnosticos![0].tipo_diagnostico).toBe("presuntivo");
   });
 });
 
@@ -182,10 +253,11 @@ describe("CanonicalContract", () => {
     expect(() => parseFiltrosPoblacion({ edad_min_anios: 10 })).toThrow();
   });
 
-  test("legacy encounter_type_uuids is rejected", () => {
-    expect(() =>
-      parseFiltrosEvento({ encounter_type_uuids: ["uuid-legacy"] }),
-    ).toThrow();
+  test("encounter_type_uuids is canonical", () => {
+    const ev = parseFiltrosEvento({
+      encounter_type_uuids: ["uuid-et"],
+    });
+    expect(ev.encounter_type_uuids).toEqual(["uuid-et"]);
   });
 
   test("flat diagnostico is rejected (no normalization)", () => {
@@ -350,7 +422,7 @@ describe("FiltrosPoblacionCanonical", () => {
   test("same group min exclusivity two", () => {
     expect(() =>
       FiltrosPoblacionSchema.parse({ min_dias: 10, min_meses: 1 }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("same group min exclusivity all three", () => {
@@ -360,25 +432,25 @@ describe("FiltrosPoblacionCanonical", () => {
         min_meses: 1,
         min_anios: 0,
       }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("same group min exclusivity dias anios", () => {
     expect(() =>
       FiltrosPoblacionSchema.parse({ min_dias: 30, min_anios: 1 }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("same group max exclusivity", () => {
     expect(() =>
       FiltrosPoblacionSchema.parse({ max_dias: 100, max_meses_excl: 6 }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("same group max exclusivity dias anios", () => {
     expect(() =>
       FiltrosPoblacionSchema.parse({ max_dias: 365, max_anios_excl: 1 }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("same group max exclusivity meses anios", () => {
@@ -387,7 +459,7 @@ describe("FiltrosPoblacionCanonical", () => {
         max_meses_excl: 6,
         max_anios_excl: 5,
       }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 
   test("cross group allowed min_anios max_anios", () => {
@@ -433,7 +505,7 @@ describe("FiltrosPoblacionCanonical", () => {
         tipo: "conteo_atenciones",
         poblacion: { min_dias: 10, min_meses: 1 },
       }),
-    ).toThrow(/mutually exclusive/);
+    ).toThrow(/mutuamente excluyentes/);
   });
 });
 

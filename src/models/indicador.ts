@@ -1,10 +1,11 @@
 /**
  * Sequelize ORM models for the motor-indicadores-core domain.
  *
- * Three core entities:
+ * Four core entities:
  * - Indicador: the indicator definition (name, description, active flag).
  * - IndicadorVersion: immutable versioned JSONB definition (append-only).
  * - IndicadorResultado: computed result for a specific version and period.
+ * - IndicadorCalculoLog: ledger of every calculation attempt (success/error).
  *
  * All models use UUID primary keys. Versioning is enforced via
  * UNIQUE(indicador_id, version).
@@ -182,6 +183,11 @@ IndicadorResultado.init(
         fields: ["indicador_version_id", "mes_referencia", "es_canonico"],
       },
       {
+        name: "idx_resultado_canonico_mes",
+        fields: ["mes_referencia"],
+        where: { es_canonico: true },
+      },
+      {
         name: "idx_resultado_periodo",
         fields: ["periodo_inicio", "periodo_fin"],
       },
@@ -241,6 +247,129 @@ IndicadorMeta.init(
         fields: ["indicador_version_id", "anio"],
       },
     ],
+  },
+);
+
+// ── IndicadorCalculoLog ─────────────────────────────────────────────────
+
+export class IndicadorCalculoLog extends Model<
+  InferAttributes<IndicadorCalculoLog>,
+  InferCreationAttributes<IndicadorCalculoLog>
+> {
+  declare id: CreationOptional<string>;
+  declare indicador_id: string | null;
+  declare indicador_version_id: string | null;
+  declare mes_referencia: Date | null;
+  declare status: string;
+  declare filas_devueltas: number | null;
+  declare filas_persistidas: number | null;
+  declare duracion_ms: number | null;
+  declare error: string | null;
+  declare fuente: string | null;
+  declare creado_en: CreationOptional<Date>;
+}
+
+IndicadorCalculoLog.init(
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    indicador_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: Indicador,
+        key: "id",
+      },
+    },
+    indicador_version_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: IndicadorVersion,
+        key: "id",
+      },
+    },
+    mes_referencia: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
+    status: {
+      type: DataTypes.STRING(16),
+      allowNull: false,
+    },
+    filas_devueltas: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    filas_persistidas: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    duracion_ms: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    error: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    fuente: {
+      type: DataTypes.STRING(64),
+      allowNull: true,
+    },
+    creado_en: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+      allowNull: false,
+    },
+  },
+  {
+    sequelize,
+    tableName: "indicador_calculo_log",
+    timestamps: false,
+    indexes: [
+      {
+        name: "idx_calculo_log_indicador_mes",
+        fields: ["indicador_id", "mes_referencia"],
+      },
+    ],
+  },
+);
+
+// ── AppMetadata ────────────────────────────────────────────────────────
+
+export class AppMetadata extends Model<
+  InferAttributes<AppMetadata>,
+  InferCreationAttributes<AppMetadata>
+> {
+  declare key: string;
+  declare value: string;
+  declare updated_at: CreationOptional<Date>;
+}
+
+AppMetadata.init(
+  {
+    key: {
+      type: DataTypes.STRING,
+      primaryKey: true,
+    },
+    value: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    updated_at: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+      allowNull: false,
+    },
+  },
+  {
+    sequelize,
+    tableName: "app_metadata",
+    timestamps: false,
   },
 );
 

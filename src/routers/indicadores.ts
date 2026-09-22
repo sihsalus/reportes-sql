@@ -10,51 +10,61 @@
  * - GET    /indicadores/:id/preview-sql   → SQL preview (accepts version_id or versionId)
  */
 
+import { isDeepStrictEqual } from "node:util";
+import { sequelize } from "../database/postgres.js";
 import { Router, type Request, type Response } from "express";
 import { v4 as uuidv4 } from "uuid";
+import { ZodError } from "zod";
 import {
   Indicador,
   IndicadorVersion,
   IndicadorResultado,
 } from "../models/indicador.js";
-import { sequelize } from "../database/postgres.js";
 import {
   parseDefinicionIndicador,
   rejectPeriodoInPayload,
   type DefinicionIndicador,
 } from "../types/definicion.js";
-import { buildQuery } from "../engine/interpreter.js";
-import { calcularMesActual } from "../engine/periodo.js";
+import {
+  IndicadorCreateSchema,
+  IndicadorUpdateSchema,
+} from "../types/indicador.js";
 import {
   validarDefinicionLocationUuids,
-  resolveConceptMap,
+  validarDefinicionEncounterTypeUuids,
 } from "../validators/openmrs.js";
-import { resolveOrcenesConceptMapOrNull } from "../engine/concept-resolver.js";
 import { asyncHandler } from "../middleware/async-handler.js";
-import { logger } from "../config/logger.js";
+import { requirePrivilege } from "../middleware/auth.js";
+import { handleCreateVersion } from "./indicadores/versiones.js";
+import { handlePreviewSql } from "./indicadores/preview-sql.js";
+import { settings } from "../config/index.js";
 
 export const indicadoresRouter: Router = Router();
 
-// ── POST /indicadores ──────────────────────────────────────────────────
+// ── POST /indicadores ──────────────────────────────────────────────────────
 
 indicadoresRouter.post(
   "/",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
-    const body = req.body as {
-      nombre?: string;
-      descripcion?: string | null;
-      definicion?: unknown;
-    };
-
-    if (!body.nombre || typeof body.nombre !== "string" || body.nombre.trim().length === 0) {
-      res.status(422).json({
-        detail: {
-          field: "nombre",
-          message: "nombre es obligatorio y no puede estar vacío",
-        },
-      });
-      return;
+    let body;
+    try {
+      body = IndicadorCreateSchema.parse(req.body);
+    } catch (err: unknown) {
+      if (err instanceof ZodError) {
+        const first = err.issues[0];
+        const field =
+          first && first.path.length > 0
+            ? String(first.path[first.path.length - 1])
+            : "nombre";
+        res.status(422).json({
+          detail: { field, message: first?.message ?? "Validation error" },
+        });
+        return;
+      }
+      throw err;
     }
+
     if (!body.definicion) {
       res.status(422).json({
         detail: {
@@ -66,16 +76,14 @@ indicadoresRouter.post(
     }
 
     // Reject inbound periodo (breaking contract change)
-    if (body.definicion) {
-      try {
-        rejectPeriodoInPayload(body.definicion);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "Validation error";
-        res.status(422).json({
-          detail: { field: "definicion.periodo", message },
-        });
-        return;
-      }
+    try {
+      rejectPeriodoInPayload(body.definicion);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Validation error";
+      res.status(422).json({
+        detail: { field: "definicion.periodo", message },
+      });
+      return;
     }
 
     // Parse and validate definicion
@@ -109,23 +117,43 @@ indicadoresRouter.post(
       return;
     }
 
+    // Validate encounter_type_uuids exist in OpenMRS before DB write.
+    try {
+      const unknownUuids = await validarDefinicionEncounterTypeUuids(definicion);
+      if (unknownUuids.length > 0) {
+        res.status(422).json({
+          detail: {
+            field: "encounter_type_uuids",
+            unknown_uuids: unknownUuids,
+          },
+        });
+        return;
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "OpenMRS no disponible";
+      res.status(502).json({ detail: message });
+      return;
+    }
+
     const indicadorId = uuidv4();
     const now = new Date();
 
-    await Indicador.create({
-      id: indicadorId,
-      nombre: body.nombre.trim(),
-      descripcion: body.descripcion ?? null,
-      activo: true,
-      creado_en: now,
-    });
+    await sequelize.transaction(async (transaction) => {
+      await Indicador.create({
+        id: indicadorId,
+        nombre: body.nombre.trim(),
+        descripcion: body.descripcion ?? null,
+        activo: true,
+        creado_en: now,
+      }, { transaction });
 
-    await IndicadorVersion.create({
-      id: uuidv4(),
-      indicador_id: indicadorId,
-      version: 1,
-      definicion: definicion as unknown as Record<string, unknown>,
-      creado_en: now,
+      await IndicadorVersion.create({
+        id: uuidv4(),
+        indicador_id: indicadorId,
+        version: 1,
+        definicion: definicion as unknown as Record<string, unknown>,
+        creado_en: now,
+      }, { transaction });
     });
 
     const created = await Indicador.findByPk(indicadorId);
@@ -133,7 +161,7 @@ indicadoresRouter.post(
   }),
 );
 
-// ── GET /indicadores ───────────────────────────────────────────────────
+// ── GET /indicadores ───────────────────────────────────────────────────────
 
 indicadoresRouter.get(
   "/",
@@ -160,7 +188,7 @@ indicadoresRouter.get(
   }),
 );
 
-// ── GET /indicadores/:id ───────────────────────────────────────────────
+// ── GET /indicadores/:id ───────────────────────────────────────────────────
 
 indicadoresRouter.get(
   "/:id",
@@ -184,10 +212,11 @@ indicadoresRouter.get(
   }),
 );
 
-// ── PUT /indicadores/:id ───────────────────────────────────────────────
+// ── PUT /indicadores/:id ───────────────────────────────────────────────────
 
 indicadoresRouter.put(
   "/:id",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
     const id = req.params["id"] as string;
     const indicador = await Indicador.findByPk(id);
@@ -196,21 +225,25 @@ indicadoresRouter.put(
       return;
     }
 
-    const body = req.body as {
-      nombre?: string;
-      descripcion?: string | null;
-      definicion?: unknown;
-    };
-
-    if (!body.nombre || typeof body.nombre !== "string" || body.nombre.trim().length === 0) {
-      res.status(422).json({
-        detail: {
-          field: "nombre",
-          message: "nombre es obligatorio",
-        },
-      });
-      return;
+    let body;
+    try {
+      body = IndicadorUpdateSchema.parse(req.body);
+    } catch (err: unknown) {
+      if (err instanceof ZodError) {
+        const first = err.issues[0];
+        const field =
+          first && first.path.length > 0
+            ? String(first.path[first.path.length - 1])
+            : "nombre";
+        res.status(422).json({
+          detail: { field, message: first?.message ?? "Validation error" },
+        });
+        return;
+      }
+      throw err;
     }
+
+    let versionToCreate: { version: number; definicion: Record<string, unknown> } | undefined;
 
     // ── Auto-versioning when definicion is present ──
     if (body.definicion != null) {
@@ -243,26 +276,17 @@ indicadoresRouter.put(
         order: [["version", "DESC"]],
       });
 
-      // Normalize both for order-insensitive comparison
-      const incoming = JSON.stringify(
-        newDefinicion,
-        Object.keys(newDefinicion as Record<string, unknown>).sort(),
-      );
-
-      let existing: string | null = null;
+      // Compare the full parsed structure, including nested filters.
+      let existing: DefinicionIndicador | null = null;
       if (latestVersion) {
         try {
-          const parsed = parseDefinicionIndicador(latestVersion.definicion);
-          existing = JSON.stringify(
-            parsed,
-            Object.keys(parsed as Record<string, unknown>).sort(),
-          );
+          existing = parseDefinicionIndicador(latestVersion.definicion);
         } catch {
           existing = null;
         }
       }
 
-      if (incoming !== existing) {
+      if (!isDeepStrictEqual(newDefinicion, existing)) {
         // Validate location UUIDs against OpenMRS
         try {
           const unknownUuids = await validarDefinicionLocationUuids(newDefinicion);
@@ -281,6 +305,20 @@ indicadoresRouter.put(
           return;
         }
 
+        try {
+          const unknownUuids = await validarDefinicionEncounterTypeUuids(newDefinicion);
+          if (unknownUuids.length > 0) {
+            res.status(422).json({
+              detail: { field: "encounter_type_uuids", unknown_uuids: unknownUuids },
+            });
+            return;
+          }
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "OpenMRS no disponible";
+          res.status(502).json({ detail: message });
+          return;
+        }
+
         // Compute next version number
         const maxVersion: number | null = await IndicadorVersion.max("version", {
           where: { indicador_id: indicador.id },
@@ -288,30 +326,38 @@ indicadoresRouter.put(
 
         const nextVersion = (maxVersion ?? 0) + 1;
 
-        await IndicadorVersion.create({
-          id: uuidv4(),
-          indicador_id: indicador.id,
+        versionToCreate = {
           version: nextVersion,
           definicion: newDefinicion as unknown as Record<string, unknown>,
-          creado_en: new Date(),
-        });
+        };
       }
     }
 
-    // Always update metadata
-    await indicador.update({
-      nombre: body.nombre.trim(),
-      descripcion: body.descripcion ?? null,
+    // A failed version or metadata write must not leave a partial edit.
+    await sequelize.transaction(async (transaction) => {
+      if (versionToCreate) {
+        await IndicadorVersion.create({
+          id: uuidv4(),
+          indicador_id: indicador.id,
+          ...versionToCreate,
+          creado_en: new Date(),
+        }, { transaction });
+      }
+      await indicador.update({
+        nombre: body.nombre.trim(),
+        descripcion: body.descripcion ?? null,
+      }, { transaction });
     });
 
     res.json(indicador.toJSON());
   }),
 );
 
-// ── DELETE /indicadores/:id ────────────────────────────────────────────
+// ── DELETE /indicadores/:id ────────────────────────────────────────────────
 
 indicadoresRouter.delete(
   "/:id",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
     const id = req.params["id"] as string;
     const indicador = await Indicador.findByPk(id);
@@ -325,202 +371,21 @@ indicadoresRouter.delete(
   }),
 );
 
-// ── POST /indicadores/:id/versiones ────────────────────────────────────
+// ── POST /indicadores/:id/versiones ────────────────────────────────────────
 
 indicadoresRouter.post(
   "/:id/versiones",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params["id"] as string;
-    const indicador = await Indicador.findByPk(id);
-    if (!indicador) {
-      res.status(404).json({ detail: "Indicador no encontrado" });
-      return;
-    }
-
-    const body = req.body as { definicion?: unknown };
-    if (!body.definicion) {
-      res.status(422).json({
-        detail: {
-          field: "definicion",
-          message: "definicion es obligatorio",
-        },
-      });
-      return;
-    }
-
-    // Reject inbound periodo
-    try {
-      rejectPeriodoInPayload(body.definicion);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Validation error";
-      res.status(422).json({
-        detail: { field: "definicion.periodo", message },
-      });
-      return;
-    }
-
-    let definicion: DefinicionIndicador;
-    try {
-      definicion = parseDefinicionIndicador(body.definicion);
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Validation error";
-      res.status(422).json({
-        detail: { field: "definicion", message },
-      });
-      return;
-    }
-
-    // Validate location_uuids against OpenMRS
-    try {
-      const unknownUuids = await validarDefinicionLocationUuids(definicion);
-      if (unknownUuids.length > 0) {
-        res.status(422).json({
-          detail: {
-            field: "location_uuids",
-            unknown_uuids: unknownUuids,
-          },
-        });
-        return;
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "OpenMRS no disponible";
-      res.status(502).json({ detail: message });
-      return;
-    }
-
-    const maxVersion: number | null = await IndicadorVersion.max("version", {
-      where: { indicador_id: indicador.id },
-    });
-    const nextVersion = (maxVersion ?? 0) + 1;
-
-    try {
-      const nuevaVersion = await IndicadorVersion.create({
-        id: uuidv4(),
-        indicador_id: indicador.id,
-        version: nextVersion,
-        definicion: definicion as unknown as Record<string, unknown>,
-        creado_en: new Date(),
-      });
-
-      // Auto-copy metas from previous version (non-fatal)
-      try {
-        const previousVersion = await IndicadorVersion.findOne({
-          where: { indicador_id: indicador.id, version: nextVersion - 1 },
-          attributes: ["id"],
-        });
-        if (previousVersion) {
-          await sequelize.query(
-            `INSERT INTO indicador_meta (id, indicador_version_id, anio, valor_meta, creado_en)
-             SELECT gen_random_uuid(), :newVersionId, anio, valor_meta, NOW()
-             FROM indicador_meta
-             WHERE indicador_version_id = :oldVersionId
-             ON CONFLICT (indicador_version_id, anio) DO NOTHING`,
-            { replacements: { newVersionId: nuevaVersion.id, oldVersionId: previousVersion.id } },
-          );
-        }
-      } catch (copyErr) {
-        logger.warn("Failed to auto-copy metas to new version", { error: String(copyErr) });
-      }
-
-      res.status(201).json(nuevaVersion.toJSON());
-    } catch (err: unknown) {
-      // UNIQUE constraint violation → 409 Conflict
-      const message = err instanceof Error ? err.message : "";
-      if (
-        message.includes("duplicate") ||
-        message.includes("unique") ||
-        message.includes("violates")
-      ) {
-        res.status(409).json({
-          detail:
-            "Conflicto de versión — otro proceso creó la misma versión. Intente nuevamente.",
-        });
-        return;
-      }
-      throw err;
-    }
+    await handleCreateVersion(req, res);
   }),
 );
 
-// ── GET /indicadores/:id/preview-sql ───────────────────────────────────
+// ── GET /indicadores/:id/preview-sql ───────────────────────────────────────
 
 indicadoresRouter.get(
   "/:id/preview-sql",
   asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params["id"] as string;
-    const indicador = await Indicador.findByPk(id);
-    if (!indicador) {
-      res.status(404).json({ detail: "Indicador no encontrado" });
-      return;
-    }
-
-    // Fetch version (specific or latest)
-    // Accept both camelCase (versionId) and snake_case (version_id).
-    // If both are present, versionId takes precedence as the canonical JS name.
-    const versionId = (req.query["versionId"] ?? req.query["version_id"]) as string | undefined;
-
-    let version: IndicadorVersion | null;
-    if (versionId) {
-      version = await IndicadorVersion.findOne({
-        where: {
-          id: versionId,
-          indicador_id: indicador.id,
-        },
-      });
-      if (!version) {
-        res.status(404).json({
-          detail: "Versión no encontrada para este indicador",
-        });
-        return;
-      }
-    } else {
-      version = await IndicadorVersion.findOne({
-        where: { indicador_id: indicador.id },
-        order: [["version", "DESC"]],
-      });
-      if (!version) {
-        res.status(404).json({
-          detail: "El indicador no tiene versiones definidas",
-        });
-        return;
-      }
-    }
-
-    // Parse definicion and compute current month period
-    const definicion = parseDefinicionIndicador(version.definicion);
-    const { inicio: periodoInicio, fin: periodoFin } = calcularMesActual();
-
-    // Resolve concept_map for ordenes from OpenMRS MySQL
-    const ordenes = definicion.evento?.ordenes;
-    const conceptMap = await resolveOrcenesConceptMapOrNull(ordenes);
-
-
-    // Build query
-    const { sql, params } = buildQuery(
-      definicion,
-      periodoInicio,
-      periodoFin,
-      conceptMap,
-    );
-
-    // Serialize params for JSON (Date → string)
-    const serializableParams: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(params)) {
-      if (val instanceof Date) {
-        serializableParams[key] = val.toISOString().slice(0, 10);
-      } else {
-        serializableParams[key] = val;
-      }
-    }
-
-    res.json({
-      sql,
-      params: serializableParams,
-      periodo_inicio: periodoInicio.toISOString().slice(0, 10),
-      periodo_fin: periodoFin.toISOString().slice(0, 10),
-      version_id: version.id,
-      version_num: version.version,
-    });
+    await handlePreviewSql(req, res);
   }),
 );

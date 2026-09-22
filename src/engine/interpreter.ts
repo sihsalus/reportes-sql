@@ -43,10 +43,19 @@ export function buildQuery(
 ): { sql: string; params: Record<string, unknown> } {
   const finExcl = addDays(periodoFin, 1);
 
-  if (definicion.tipo === "conteo_atenciones") {
-    return buildConteoAtenciones(definicion, periodoInicio, finExcl, conceptMap ?? null);
+  switch (definicion.tipo) {
+    case "conteo_atenciones":
+      return buildConteoAtenciones(definicion, periodoInicio, finExcl, conceptMap ?? null);
+    case "conteo_pacientes":
+      return buildConteoPacientes(definicion, periodoInicio, finExcl, conceptMap ?? null);
+    case "conteo_pacientes_ventana":
+      return buildConteoPacientesVentana(definicion, periodoInicio, finExcl, conceptMap ?? null);
+    default:
+      // Defensive: the Zod schema already restricts `tipo`.
+      throw new Error(
+        `Tipo de indicador no soportado: ${String(definicion.tipo)}`,
+      );
   }
-  return buildConteoPacientes(definicion, periodoInicio, finExcl, conceptMap ?? null);
 }
 
 // ── Internal builders ─────────────────────────────────────────────────
@@ -62,7 +71,7 @@ function buildConteoAtenciones(
     fin_excl: formatDate(finExcl),
   };
 
-  const selectCols = ["COUNT(*) as valor"];
+  const selectCols = ["COUNT(DISTINCT e.encounter_id) as valor"];
   let tables = "encounter e";
   let joins = "";
   const conditions: string[] = [
@@ -77,15 +86,16 @@ function buildConteoAtenciones(
       ? evento.location_uuids
       : [];
 
+  const typeFilter = buildEncounterTypesFilterBlock(evento?.encounter_type_uuids ?? [], params);
+  if (typeFilter.clause) {
+    joins += "\n" + typeFilter.joins;
+    conditions.push(typeFilter.clause);
+  }
+
   if (locationUuids.length > 0) {
-    joins += "\nJOIN location l ON e.location_id = l.location_id";
-    const locPlaceholders = locationUuids
-      .map((_, i) => `:${paramName("loc", i)}`)
-      .join(", ");
-    conditions.push(`l.uuid IN (${locPlaceholders})`);
-    for (let i = 0; i < locationUuids.length; i++) {
-      params[paramName("loc", i)] = locationUuids[i];
-    }
+    const core = buildCoreFilterBlock(locationUuids, params);
+    joins += "\n" + core.joins;
+    conditions.push(core.clause);
   }
 
   const hasMinimo =
@@ -105,13 +115,26 @@ function buildConteoAtenciones(
     Object.assign(params, diagResult.params);
   }
 
-  // ── Poblacion (age filter) ──
-  if (d.poblacion != null && hasAgeFilter(d.poblacion) && !hasMinimo) {
-    joins += "\nJOIN person p ON e.patient_id = p.person_id";
-    conditions.push("p.voided = 0");
-    const ageResult = buildAgeFilter(d.poblacion);
-    conditions.push(ageResult.clause);
-    Object.assign(params, ageResult.params);
+  // ── Poblacion (age + sexo filters) ──
+  // JOIN person when either filter is present. sexo must never be
+  // silently dropped: a missing gender condition changes the population
+  // without any error (same contract as buildConteoPacientes).
+  if (d.poblacion != null && !hasMinimo) {
+    const necesitaPerson =
+      hasAgeFilter(d.poblacion) || d.poblacion.sexo != null;
+    if (necesitaPerson) {
+      joins += "\nJOIN person p ON e.patient_id = p.person_id";
+      conditions.push("p.voided = 0");
+      if (hasAgeFilter(d.poblacion)) {
+        const ageResult = buildAgeFilter(d.poblacion);
+        conditions.push(ageResult.clause);
+        Object.assign(params, ageResult.params);
+      }
+      if (d.poblacion.sexo != null) {
+        params["sexo"] = d.poblacion.sexo;
+        conditions.push("p.gender = :sexo");
+      }
+    }
   }
 
   // ── Ordenes filter ──
@@ -136,6 +159,7 @@ function buildConteoAtenciones(
     params["min_oc"] = minOc;
     const subquery = buildMinimoOcurrenciasSubquery({
       locationUuids,
+      encounterTypeUuids: evento?.encounter_type_uuids ?? [],
       poblacion: d.poblacion ?? null,
       diagnosticos,
       params,
@@ -183,6 +207,7 @@ function buildConteoPacientes(
     params["min_oc"] = minOc;
     const subquery = buildMinimoOcurrenciasSubquery({
       locationUuids,
+      encounterTypeUuids: evento?.encounter_type_uuids ?? [],
       poblacion: d.poblacion ?? null,
       diagnosticos,
       params,
@@ -209,15 +234,16 @@ function buildConteoPacientes(
     "p.voided = 0",
   ];
 
+  const typeFilter = buildEncounterTypesFilterBlock(evento?.encounter_type_uuids ?? [], params);
+  if (typeFilter.clause) {
+    joins += "\n" + typeFilter.joins;
+    conditions.push(typeFilter.clause);
+  }
+
   if (locationUuids.length > 0) {
-    joins += "\nJOIN location l ON e.location_id = l.location_id";
-    const locPlaceholders = locationUuids
-      .map((_, i) => `:${paramName("loc", i)}`)
-      .join(", ");
-    conditions.push(`l.uuid IN (${locPlaceholders})`);
-    for (let i = 0; i < locationUuids.length; i++) {
-      params[paramName("loc", i)] = locationUuids[i];
-    }
+    const core = buildCoreFilterBlock(locationUuids, params);
+    joins += "\n" + core.joins;
+    conditions.push(core.clause);
   }
 
   // ── Diagnosticos filter ──
@@ -263,7 +289,150 @@ function buildConteoPacientes(
 
 // ── Subquery builder ──────────────────────────────────────────────────
 
+/**
+ * Windowed patient-count builder (`conteo_pacientes_ventana`).
+ *
+ * Counts patients with at least `minimo_ocurrencias` qualifying encounters
+ * inside an age window (poblacion bounds, evaluated per encounter) and
+ * attributes each patient to the month of their LAST qualifying control:
+ * `MAX(e.encounter_datetime)` must fall inside the measurement period.
+ * Encounters are not bound to the period — earlier controls in previous
+ * months still count toward the minimum.
+ *
+ * The scan is bounded by a sargable window: every counted encounter is at
+ * most `ventana_dias` older than the last control (which is inside the
+ * period), so `e.encounter_datetime >= DATE_SUB(:inicio, INTERVAL
+ * :ventana_dias DAY)` is a safe lower bound derived from the max age bound.
+ */
+function buildConteoPacientesVentana(
+  d: DefinicionIndicador,
+  inicio: Date,
+  finExcl: Date,
+  conceptMap: Record<string, number> | null,
+): { sql: string; params: Record<string, unknown> } {
+  const params: Record<string, unknown> = {
+    inicio: formatDate(inicio),
+    fin_excl: formatDate(finExcl),
+  };
+
+  const evento = d.evento;
+  const locationUuids: string[] =
+    evento?.location_uuids && evento.location_uuids.length > 0
+      ? evento.location_uuids
+      : [];
+  const encounterTypeUuids: string[] =
+    evento?.encounter_type_uuids && evento.encounter_type_uuids.length > 0
+      ? evento.encounter_type_uuids
+      : [];
+  const diagnosticos: FiltroDiagnostico[] | null =
+    evento?.diagnosticos ?? null;
+  const ordenes: FiltroOrden[] | null = evento?.ordenes ?? null;
+  const minOc: number = evento?.minimo_ocurrencias ?? 1;
+  const poblacion = d.poblacion ?? null;
+
+  let tables = "encounter e";
+  let joins = "";
+
+  const conditions: string[] = ["e.voided = 0"];
+
+  // ── Encounter types filter ──
+  if (encounterTypeUuids.length > 0) {
+    const etResult = buildEncounterTypesFilterBlock(
+      encounterTypeUuids,
+      params,
+    );
+    joins += "\n" + etResult.joins;
+    conditions.push(etResult.clause);
+  }
+
+  // ── Locations filter ──
+  if (locationUuids.length > 0) {
+    const core = buildCoreFilterBlock(locationUuids, params);
+    joins += "\n" + core.joins;
+    conditions.push(core.clause);
+  }
+
+  // ── Person join for age/sexo ──
+  if (poblacion != null) {
+    const necesitaPerson =
+      hasAgeFilter(poblacion) || poblacion.sexo != null;
+    if (necesitaPerson) {
+      joins += "\nJOIN person p ON e.patient_id = p.person_id";
+      conditions.push("p.voided = 0");
+      if (hasAgeFilter(poblacion)) {
+        const ageResult = buildAgeFilter(poblacion);
+        conditions.push(ageResult.clause);
+        Object.assign(params, ageResult.params);
+      }
+      if (poblacion.sexo != null) {
+        params["sexo"] = poblacion.sexo;
+        conditions.push("p.gender = :sexo");
+      }
+    }
+  }
+
+  // ── Diagnosticos filter ──
+  const diagResult = buildDiagnosticosFilter(diagnosticos);
+  if (diagResult.joins) {
+    joins += "\n" + diagResult.joins;
+  }
+  if (diagResult.clause) {
+    conditions.push(diagResult.clause);
+    Object.assign(params, diagResult.params);
+  }
+
+  // ── Ordenes filter ──
+  const ordResult = buildOrdenesFilter(ordenes, conceptMap);
+  if (ordResult.clause) {
+    conditions.push(ordResult.clause);
+    Object.assign(params, ordResult.params);
+  }
+
+  // ── Sargable window lower bound ──
+  const ventanaDias = maxWindowDays(poblacion);
+  if (ventanaDias != null) {
+    params["ventana_dias"] = ventanaDias;
+    conditions.push(
+      "e.encounter_datetime >= DATE_SUB(:inicio, INTERVAL :ventana_dias DAY)",
+    );
+  }
+
+  params["min_oc"] = minOc;
+
+  const whereClause = "WHERE " + conditions.join("\n  AND ");
+  const selectCols = ["e.patient_id"];
+  const subquery =
+    `SELECT ${selectCols.join(", ")}\n` +
+    `FROM ${tables}\n` +
+    `${joins}\n` +
+    `${whereClause}\n` +
+    `GROUP BY e.patient_id\n` +
+    `HAVING COUNT(DISTINCT e.encounter_id) >= :min_oc\n` +
+    `   AND MAX(e.encounter_datetime) >= :inicio\n` +
+    `   AND MAX(e.encounter_datetime) < :fin_excl`;
+
+  const query =
+    `SELECT COUNT(*) as valor\n` +
+    `FROM (\n${subquery}\n) AS _sub`.trim() + ";";
+
+  return { sql: query, params };
+}
+
+/**
+ * Upper bound in days of the age window defined by the poblacion max
+ * bounds. Used to bound the encounter scan in buildConteoPacientesVentana.
+ * Returns null when no max bound is configured (unbounded window).
+ */
+function maxWindowDays(poblacion: FiltrosPoblacion | null): number | null {
+  if (poblacion == null) return null;
+  if (poblacion.max_dias != null) return poblacion.max_dias;
+  if (poblacion.max_meses_excl != null) return poblacion.max_meses_excl * 31;
+  if (poblacion.max_anios_excl != null) return poblacion.max_anios_excl * 366;
+  return null;
+}
+
 interface SubqueryInput {
+  encounterTypeUuids: string[];
   locationUuids: string[];
   poblacion: FiltrosPoblacion | null;
   diagnosticos: FiltroDiagnostico[] | null;
@@ -277,6 +446,7 @@ function buildMinimoOcurrenciasSubquery(
   input: SubqueryInput,
 ): string {
   const {
+    encounterTypeUuids,
     locationUuids,
     poblacion,
     diagnosticos,
@@ -294,15 +464,16 @@ function buildMinimoOcurrenciasSubquery(
     "e.voided = 0",
   ];
 
+  const typeFilter = buildEncounterTypesFilterBlock(encounterTypeUuids, params);
+  if (typeFilter.clause) {
+    joins += "\n" + typeFilter.joins;
+    conditions.push(typeFilter.clause);
+  }
+
   if (locationUuids.length > 0) {
-    joins += "JOIN location l ON e.location_id = l.location_id";
-    const locPlaceholders = locationUuids
-      .map((_, i) => `:${paramName("loc", i)}`)
-      .join(", ");
-    conditions.push(`l.uuid IN (${locPlaceholders})`);
-    for (let i = 0; i < locationUuids.length; i++) {
-      params[paramName("loc", i)] = locationUuids[i];
-    }
+    const core = buildCoreFilterBlock(locationUuids, params);
+    joins += "\n" + core.joins;
+    conditions.push(core.clause);
   }
 
   // ── Person join for poblacion filters ──
@@ -349,7 +520,7 @@ function buildMinimoOcurrenciasSubquery(
   const whereClause = "WHERE " + conditions.join("\n  AND ");
   const selectCols = ["e.patient_id"];
   const groupClause = "GROUP BY e.patient_id";
-  const havingClause = `HAVING COUNT(e.encounter_id) >= :${paramKey}`;
+  const havingClause = `HAVING COUNT(DISTINCT e.encounter_id) >= :${paramKey}`;
 
   return (
     `SELECT ${selectCols.join(", ")}\n` +
@@ -363,11 +534,78 @@ function buildMinimoOcurrenciasSubquery(
 
 // ── Filter builders ───────────────────────────────────────────────────
 
+interface CoreFilterResult {
+  joins: string;
+  clause: string;
+  params: Record<string, unknown>;
+}
+
+/**
+ * Core location filter block shared by the two top-level builders and the
+ * min-occurrences subquery. Builds the `location l` join and the
+ * `l.uuid IN (...)` condition for a list of location UUIDs. Emits no joins
+ * or conditions when `locationUuids` is empty.
+ *
+ * Note: callers prepend their own newline (or none) when concatenating
+ * `joins`, preserving the existing SQL byte-for-byte.
+ */
+function buildCoreFilterBlock(
+  locationUuids: string[],
+  params: Record<string, unknown>,
+): CoreFilterResult {
+  if (locationUuids.length === 0) {
+    return { joins: "", clause: "", params: {} };
+  }
+  const locPlaceholders = locationUuids
+    .map((_, i) => `:${paramName("loc", i)}`)
+    .join(", ");
+  for (let i = 0; i < locationUuids.length; i++) {
+    params[paramName("loc", i)] = locationUuids[i];
+  }
+  return {
+    joins: "JOIN location l ON e.location_id = l.location_id",
+    clause: `l.uuid IN (${locPlaceholders})`,
+    params: {},
+  };
+}
+
+/**
+ * Encounter-type filter block mirroring `buildCoreFilterBlock`. Builds the
+ * `encounter_type et` join and the `et.uuid IN (...)` condition for a list
+ * of encounter-type UUIDs, excluding retired types. Emits no joins or
+ * conditions when `encounterTypeUuids` is empty.
+ */
+function buildEncounterTypesFilterBlock(
+  encounterTypeUuids: string[],
+  params: Record<string, unknown>,
+): CoreFilterResult {
+  if (encounterTypeUuids.length === 0) {
+    return { joins: "", clause: "", params: {} };
+  }
+  const etPlaceholders = encounterTypeUuids
+    .map((_, i) => `:${paramName("et", i)}`)
+    .join(", ");
+  for (let i = 0; i < encounterTypeUuids.length; i++) {
+    params[paramName("et", i)] = encounterTypeUuids[i];
+  }
+  return {
+    joins:
+      "JOIN encounter_type et ON e.encounter_type = et.encounter_type_id AND et.retired = 0",
+    clause: `et.uuid IN (${etPlaceholders})`,
+    params: {},
+  };
+}
+
 function buildOrdenesFilter(
   ordenes: FiltroOrden[] | null,
   conceptMap: Record<string, number> | null,
 ): { clause: string; params: Record<string, unknown> } {
-  if (!ordenes || !conceptMap) return { clause: "", params: {} };
+  if (!ordenes || ordenes.length === 0) return { clause: "", params: {} };
+  if (!conceptMap) {
+    throw new Error(
+      "No se pudo resolver el mapa de conceptos de órdenes - abortando para no calcular sin el filtro de órdenes",
+    );
+  }
 
   const clauses: string[] = [];
   const oparams: Record<string, unknown> = {};
@@ -375,7 +613,11 @@ function buildOrdenesFilter(
   for (let i = 0; i < ordenes.length; i++) {
     const f = ordenes[i];
     const conceptId = conceptMap[f.concepto_uuid];
-    if (conceptId == null) continue;
+    if (conceptId == null) {
+      throw new Error(
+        `Concepto de órdenes no resuelto: ${f.concepto_uuid}`,
+      );
+    }
 
     const paramKey = `ord_${i}`;
     oparams[paramKey] = conceptId;
@@ -388,8 +630,6 @@ function buildOrdenesFilter(
       `)`,
     );
   }
-
-  if (clauses.length === 0) return { clause: "", params: {} };
 
   return { clause: clauses.join("\nAND "), params: oparams };
 }
