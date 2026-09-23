@@ -50,6 +50,7 @@ jest.mock("../src/models/indicador.js", () => ({
 jest.mock("../src/validators/openmrs.js", () => ({
   validarDefinicionLocationUuids: jest.fn().mockResolvedValue([]),
   validarDefinicionEncounterTypeUuids: jest.fn().mockResolvedValue([]),
+  validarDefinicionDiagnosticoUuids: jest.fn().mockResolvedValue([]),
   resolveConceptMap: jest.fn().mockResolvedValue({}),
   validarLocations: jest.fn().mockResolvedValue([]),
 }));
@@ -74,7 +75,7 @@ jest.mock("../src/config/index.js", () => ({
     port: 8000,
     cors_origins: [],
     base_path: "",
-    auto_seed_default_indicator: false,
+    auto_register_catalog: false,
   },
   getIndicadoresDatabaseUrl: () =>
     "postgres://test:test@localhost:5432/test",
@@ -86,7 +87,10 @@ import type { Request, Response } from "express";
 import supertest from "supertest";
 import { indicadoresRouter } from "../src/routers/indicadores.js";
 import { metasRouter } from "../src/routers/metas.js";
-import { validarDefinicionEncounterTypeUuids } from "../src/validators/openmrs.js";
+import {
+  validarDefinicionDiagnosticoUuids,
+  validarDefinicionEncounterTypeUuids,
+} from "../src/validators/openmrs.js";
 
 // Simulates the requireSession middleware: an authenticated user holding the
 // configured write privilege.
@@ -296,6 +300,29 @@ describe("Indicadores Router", () => {
       expect(mockIndicadorCreate).not.toHaveBeenCalled();
     });
 
+    test("rejects unknown diagnostico uuids with 422", async () => {
+      (validarDefinicionDiagnosticoUuids as jest.Mock).mockResolvedValueOnce([
+        "unknown-diag-uuid",
+      ]);
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post("/indicadores")
+        .send({
+          nombre: "Test",
+          definicion: {
+            tipo: "conteo_atenciones",
+            evento: {
+              diagnosticos: [{ concepto_uuids: ["unknown-diag-uuid"] }],
+            },
+          },
+        });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("diagnosticos");
+      expect(res.body.detail.unknown_uuids).toEqual(["unknown-diag-uuid"]);
+      expect(mockIndicadorCreate).not.toHaveBeenCalled();
+    });
+
     test("returns 502 when encounter type validation hits an OpenMRS outage", async () => {
       (validarDefinicionEncounterTypeUuids as jest.Mock).mockRejectedValueOnce(
         new Error("OpenMRS no disponible"),
@@ -429,6 +456,30 @@ describe("Indicadores Router", () => {
 
       expect(res.status).toBe(422);
       expect(res.body.detail.field).toContain("periodo");
+      expect(mockVersionCreate).not.toHaveBeenCalled();
+    });
+
+    test("rejects unknown encounter_type_uuids with 422 (shared validation)", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      mockVersionFindOne.mockResolvedValue(makeVersionRow());
+      (validarDefinicionEncounterTypeUuids as jest.Mock).mockResolvedValueOnce([
+        "unknown-et-uuid",
+      ]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .put(`/indicadores/${UUID}`)
+        .send({
+          nombre: "Updated",
+          definicion: {
+            tipo: "conteo_pacientes_ventana",
+            evento: { encounter_type_uuids: ["unknown-et-uuid"] },
+          },
+        });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("encounter_type_uuids");
+      expect(res.body.detail.unknown_uuids).toEqual(["unknown-et-uuid"]);
       expect(mockVersionCreate).not.toHaveBeenCalled();
     });
 
@@ -575,6 +626,30 @@ describe("Indicadores Router", () => {
       expect(res.status).toBe(422);
       expect(res.body.detail.field).toBe("encounter_type_uuids");
       expect(res.body.detail.unknown_uuids).toEqual(["unknown-et-uuid"]);
+      expect(mockVersionCreate).not.toHaveBeenCalled();
+    });
+
+    test("rejects unknown diagnostico uuids with 422 (shared validation)", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      (validarDefinicionDiagnosticoUuids as jest.Mock).mockResolvedValueOnce([
+        "unknown-diag-uuid",
+      ]);
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .post(`/indicadores/${UUID}/versiones`)
+        .send({
+          definicion: {
+            tipo: "conteo_atenciones",
+            evento: {
+              diagnosticos: [{ concepto_uuids: ["unknown-diag-uuid"] }],
+            },
+          },
+        });
+
+      expect(res.status).toBe(422);
+      expect(res.body.detail.field).toBe("diagnosticos");
+      expect(res.body.detail.unknown_uuids).toEqual(["unknown-diag-uuid"]);
       expect(mockVersionCreate).not.toHaveBeenCalled();
     });
 

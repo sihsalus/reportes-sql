@@ -48,7 +48,7 @@ jest.mock("../src/config/index.js", () => ({
     port: 8000,
     cors_origins: [],
     base_path: "",
-    auto_seed_default_indicator: false,
+    auto_register_catalog: false,
   },
   getIndicadoresDatabaseUrl: () =>
     "postgres://test:test@localhost:5432/test",

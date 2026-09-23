@@ -29,7 +29,7 @@ Copy `.env.example` to `.env` and adjust for your environment.
 | `PORT` | `8000` | HTTP listen port |
 | `BASE_PATH` | _(empty)_ | Path prefix when behind a gateway (see below) |
 | `CORS_ORIGINS` | `localhost:5173,localhost:8080` | Comma-separated allowed CORS origins |
-| `AUTO_SEED_DEFAULT_INDICATOR` | `true` | Seed a default indicator on startup |
+| `AUTO_REGISTER_CATALOG` | `true` | Register the official indicator catalog on startup (`AUTO_SEED_DEFAULT_INDICATOR` still honored as fallback) |
 | `INDICATORS_DB_HOST` | `localhost` | PostgreSQL host |
 | `INDICATORS_DB_PORT` | `5432` | PostgreSQL port |
 | `INDICATORS_DB_NAME` | `indicators` | PostgreSQL database name |

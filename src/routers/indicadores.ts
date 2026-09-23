@@ -11,7 +11,6 @@
  */
 
 import { Router, type Request, type Response } from "express";
-import { v4 as uuidv4 } from "uuid";
 import { ZodError } from "zod";
 import {
   Indicador,
@@ -20,7 +19,6 @@ import {
 } from "../models/indicador.js";
 import {
   parseDefinicionIndicador,
-  rejectPeriodoInPayload,
   type DefinicionIndicador,
 } from "../types/definicion.js";
 import {
@@ -28,9 +26,14 @@ import {
   IndicadorUpdateSchema,
 } from "../types/indicador.js";
 import {
-  validarDefinicionLocationUuids,
-  validarDefinicionEncounterTypeUuids,
-} from "../validators/openmrs.js";
+  createIndicatorWithVersion,
+  createIndicatorVersion,
+  parseRegistrationDefinition,
+  PeriodRejectedError,
+  nextVersion as fetchNextVersion,
+  UnknownUuidsError,
+  validateRegistrationUuids,
+} from "../indicators/registration.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { requirePrivilege } from "../middleware/auth.js";
 import { handleCreateVersion } from "./indicadores/versiones.js";
@@ -73,22 +76,19 @@ indicadoresRouter.post(
       return;
     }
 
-    // Reject inbound periodo (breaking contract change)
-    try {
-      rejectPeriodoInPayload(body.definicion);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Validation error";
-      res.status(422).json({
-        detail: { field: "definicion.periodo", message },
-      });
-      return;
-    }
-
-    // Parse and validate definicion
+    // Parse + OpenMRS-validate + persist via the shared registration
+    // service (same rules as the startup catalog, periodo rejection
+    // included). HTTP mapping only.
     let definicion: DefinicionIndicador;
     try {
-      definicion = parseDefinicionIndicador(body.definicion);
+      definicion = parseRegistrationDefinition(body.definicion);
     } catch (err: unknown) {
+      if (err instanceof PeriodRejectedError) {
+        res.status(422).json({
+          detail: { field: err.field, message: err.message },
+        });
+        return;
+      }
       const message =
         err instanceof Error ? err.message : "Validation error";
       res.status(422).json({
@@ -97,62 +97,31 @@ indicadoresRouter.post(
       return;
     }
 
-    // Validate location_uuids exist in OpenMRS before DB write.
     try {
-      const unknownUuids = await validarDefinicionLocationUuids(definicion);
-      if (unknownUuids.length > 0) {
+      await validateRegistrationUuids(definicion);
+    } catch (err: unknown) {
+      if (err instanceof UnknownUuidsError) {
         res.status(422).json({
           detail: {
-            field: "location_uuids",
-            unknown_uuids: unknownUuids,
+            field: err.field,
+            unknown_uuids: err.unknown_uuids,
           },
         });
         return;
       }
-    } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "OpenMRS no disponible";
       res.status(502).json({ detail: message });
       return;
     }
 
-    // Validate encounter_type_uuids exist in OpenMRS before DB write.
-    try {
-      const unknownUuids = await validarDefinicionEncounterTypeUuids(definicion);
-      if (unknownUuids.length > 0) {
-        res.status(422).json({
-          detail: {
-            field: "encounter_type_uuids",
-            unknown_uuids: unknownUuids,
-          },
-        });
-        return;
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "OpenMRS no disponible";
-      res.status(502).json({ detail: message });
-      return;
-    }
-
-    const indicadorId = uuidv4();
-    const now = new Date();
-
-    await Indicador.create({
-      id: indicadorId,
+    const { indicador } = await createIndicatorWithVersion({
       nombre: body.nombre.trim(),
       descripcion: body.descripcion ?? null,
       activo: true,
-      creado_en: now,
+      definicion,
     });
 
-    await IndicadorVersion.create({
-      id: uuidv4(),
-      indicador_id: indicadorId,
-      version: 1,
-      definicion: definicion as unknown as Record<string, unknown>,
-      creado_en: now,
-    });
-
-    const created = await Indicador.findByPk(indicadorId);
+    const created = await Indicador.findByPk(indicador.id);
     res.status(201).json(created?.toJSON());
   }),
 );
@@ -241,21 +210,17 @@ indicadoresRouter.put(
 
     // ── Auto-versioning when definicion is present ──
     if (body.definicion != null) {
-      // Reject inbound periodo
-      try {
-        rejectPeriodoInPayload(body.definicion);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "Validation error";
-        res.status(422).json({
-          detail: { field: "definicion.periodo", message },
-        });
-        return;
-      }
-
+      // Shared parse (periodo rejection + shape) via the service.
       let newDefinicion: DefinicionIndicador;
       try {
-        newDefinicion = parseDefinicionIndicador(body.definicion);
+        newDefinicion = parseRegistrationDefinition(body.definicion);
       } catch (err: unknown) {
+        if (err instanceof PeriodRejectedError) {
+          res.status(422).json({
+            detail: { field: err.field, message: err.message },
+          });
+          return;
+        }
         const message =
           err instanceof Error ? err.message : "Validation error";
         res.status(422).json({
@@ -290,38 +255,27 @@ indicadoresRouter.put(
       }
 
       if (incoming !== existing) {
-        // Validate location UUIDs against OpenMRS
+        // Same shared validation as POST / catalog (locations,
+        // encounter types, diagnosticos) before versioning.
         try {
-          const unknownUuids = await validarDefinicionLocationUuids(newDefinicion);
-          if (unknownUuids.length > 0) {
+          await validateRegistrationUuids(newDefinicion);
+        } catch (err: unknown) {
+          if (err instanceof UnknownUuidsError) {
             res.status(422).json({
               detail: {
-                field: "location_uuids",
-                unknown_uuids: unknownUuids,
+                field: err.field,
+                unknown_uuids: err.unknown_uuids,
               },
             });
             return;
           }
-        } catch (err: unknown) {
           const message = err instanceof Error ? err.message : "OpenMRS no disponible";
           res.status(502).json({ detail: message });
           return;
         }
 
-        // Compute next version number
-        const maxVersion: number | null = await IndicadorVersion.max("version", {
-          where: { indicador_id: indicador.id },
-        });
-
-        const nextVersion = (maxVersion ?? 0) + 1;
-
-        await IndicadorVersion.create({
-          id: uuidv4(),
-          indicador_id: indicador.id,
-          version: nextVersion,
-          definicion: newDefinicion as unknown as Record<string, unknown>,
-          creado_en: new Date(),
-        });
+        const nextVersion = await fetchNextVersion(indicador.id);
+        await createIndicatorVersion(indicador.id, nextVersion, newDefinicion);
       }
     }
 

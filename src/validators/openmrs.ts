@@ -129,6 +129,68 @@ export async function validarDefinicionEncounterTypeUuids(
 }
 
 /**
+ * Collect diagnostico + ordenes concepto UUIDs from a definicion and report
+ * which ones do not exist (or are retired) in the OpenMRS concept table.
+ *
+ * The indicator POST route does not check these at creation time (they
+ * resolve per calculation instead), but the startup catalog must: a typo'd
+ * UUID would otherwise register an indicator that silently computes 0.
+ *
+ * @param definicion - Fully validated DefinicionIndicador.
+ * @returns Array of unknown UUIDs, empty if all valid.
+ */
+export async function validarDefinicionDiagnosticoUuids(
+  definicion: DefinicionIndicador,
+): Promise<string[]> {
+  const allUuids: string[] = [];
+  const seen = new Set<string>();
+  const collect = (u: string): void => {
+    if (!seen.has(u)) {
+      seen.add(u);
+      allUuids.push(u);
+    }
+  };
+
+  for (const d of definicion.evento?.diagnosticos ?? []) {
+    for (const u of d.concepto_uuids) collect(u);
+  }
+  for (const o of definicion.evento?.ordenes ?? []) {
+    collect(o.concepto_uuid);
+  }
+
+  if (allUuids.length === 0) return [];
+  const conceptMap = await resolveConceptMap(allUuids);
+  return allUuids.filter((u) => conceptMap[u] === undefined);
+}
+
+/** Unknown UUIDs grouped by field — all empty means the definition is valid. */
+export interface DefinicionUnknownUuids {
+  location_uuids: string[];
+  encounter_type_uuids: string[];
+  diagnostico_uuids: string[];
+}
+
+/**
+ * Shared OpenMRS existence check for a full definition.
+ *
+ * Used by the startup catalog (and available to the indicator routes):
+ * every UUID referenced by the definition must exist in OpenMRS, otherwise
+ * the indicator would silently compute wrong values. Throws
+ * OpenMRSUnavailableError when the MySQL database cannot be reached.
+ */
+export async function validarDefinicionContraOpenMRS(
+  definicion: DefinicionIndicador,
+): Promise<DefinicionUnknownUuids> {
+  const [location_uuids, encounter_type_uuids, diagnostico_uuids] =
+    await Promise.all([
+      validarDefinicionLocationUuids(definicion),
+      validarDefinicionEncounterTypeUuids(definicion),
+      validarDefinicionDiagnosticoUuids(definicion),
+    ]);
+  return { location_uuids, encounter_type_uuids, diagnostico_uuids };
+}
+
+/**
  * Resolve ordenes concepto UUIDs to OpenMRS concept_ids.
  *
  * Queries the OpenMRS MySQL concept table to map concepto_uuid strings

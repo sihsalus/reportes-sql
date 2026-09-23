@@ -27,13 +27,10 @@ jest.mock("../src/models/indicador.js", () => ({
 }));
 jest.mock("../src/validators/openmrs.js", () => ({
   validarDefinicionLocationUuids: jest.fn().mockResolvedValue([]),
+  validarDefinicionEncounterTypeUuids: jest.fn().mockResolvedValue([]),
+  validarDefinicionDiagnosticoUuids: jest.fn().mockResolvedValue([]),
   resolveConceptMap: jest.fn().mockResolvedValue({}),
   validarLocations: jest.fn().mockResolvedValue([]),
-}));
-jest.mock("../src/seed/default-indicador.js", () => ({
-  seedDefaultIndicador: jest.fn().mockResolvedValue({ indicatorCreated: false, versionCreated: false, indicadorId: "seed-id" }),
-  SEEDED_INDICADOR_NOMBRE: "seed/default-indicator",
-  DEFAULT_DEFINICION: {},
 }));
 global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: jest.fn().mockResolvedValue({ results: [] }), text: jest.fn().mockResolvedValue("") }) as unknown as typeof fetch;
 

@@ -25,6 +25,8 @@ import {
   validarDefinicionLocationUuids,
   validarEncounterTypes,
   validarDefinicionEncounterTypeUuids,
+  validarDefinicionDiagnosticoUuids,
+  validarDefinicionContraOpenMRS,
   resolveConceptMap,
 } from "../src/validators/openmrs.js";
 import type { DefinicionIndicador } from "../src/types/definicion.js";
@@ -236,5 +238,125 @@ describe("resolveConceptMap", () => {
     mockQueryMysql.mockRejectedValueOnce(new Error("connection lost"));
 
     await expect(resolveConceptMap([UUID1])).rejects.toThrow(OpenMRSUnavailableError);
+  });
+});
+
+describe("validarDefinicionDiagnosticoUuids", () => {
+  function makeDefinicion(
+    diagnosticos?: Array<{ concepto_uuids: string[] }>,
+    ordenes?: Array<{ concepto_uuid: string }>,
+  ): DefinicionIndicador {
+    return {
+      tipo: "conteo_atenciones",
+      evento: { diagnosticos, ordenes },
+    } as unknown as DefinicionIndicador;
+  }
+
+  it("returns [] without touching MySQL when there are no diagnosticos/ordenes", async () => {
+    const result = await validarDefinicionDiagnosticoUuids(
+      makeDefinicion(undefined, undefined),
+    );
+
+    expect(result).toEqual([]);
+    expect(mockQueryMysql).not.toHaveBeenCalled();
+  });
+
+  it("returns [] when every diagnostico and orden uuid exists", async () => {
+    mockQueryMysql.mockResolvedValueOnce([
+      { uuid: UUID1, concept_id: 10 },
+      { uuid: UUID2, concept_id: 20 },
+    ]);
+
+    const result = await validarDefinicionDiagnosticoUuids(
+      makeDefinicion(
+        [{ concepto_uuids: [UUID1, UUID2] }],
+        [{ concepto_uuid: UUID1 }],
+      ),
+    );
+
+    expect(result).toEqual([]);
+    // UUID1 deduped across diagnosticos and ordenes.
+    const [, params] = mockQueryMysql.mock.calls[0];
+    expect(Object.keys(params)).toEqual(["uuid_0", "uuid_1"]);
+  });
+
+  it("returns the uuids missing from the concept table", async () => {
+    mockQueryMysql.mockResolvedValueOnce([{ uuid: UUID2, concept_id: 20 }]);
+
+    const result = await validarDefinicionDiagnosticoUuids(
+      makeDefinicion([{ concepto_uuids: [UUID1, UUID2] }], undefined),
+    );
+
+    expect(result).toEqual([UUID1]);
+  });
+
+  it("throws OpenMRSUnavailableError when MySQL rejects", async () => {
+    mockQueryMysql.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+
+    await expect(
+      validarDefinicionDiagnosticoUuids(
+        makeDefinicion([{ concepto_uuids: [UUID1] }], undefined),
+      ),
+    ).rejects.toThrow(OpenMRSUnavailableError);
+  });
+});
+
+describe("validarDefinicionContraOpenMRS", () => {
+  it("returns empty lists when everything exists", async () => {
+    mockQueryMysql
+      .mockResolvedValueOnce([{ uuid: UUID1 }])
+      .mockResolvedValueOnce([{ uuid: UUID2 }])
+      .mockResolvedValueOnce([{ uuid: UUID3, concept_id: 30 }]);
+
+    const result = await validarDefinicionContraOpenMRS({
+      tipo: "conteo_atenciones",
+      evento: {
+        location_uuids: [UUID1],
+        encounter_type_uuids: [UUID2],
+        diagnosticos: [{ concepto_uuids: [UUID3] }],
+      },
+    } as unknown as DefinicionIndicador);
+
+    expect(result).toEqual({
+      location_uuids: [],
+      encounter_type_uuids: [],
+      diagnostico_uuids: [],
+    });
+    expect(mockQueryMysql).toHaveBeenCalledTimes(3);
+  });
+
+  it("groups unknown uuids by field", async () => {
+    mockQueryMysql
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ uuid: UUID2 }])
+      .mockResolvedValueOnce([]);
+
+    const result = await validarDefinicionContraOpenMRS({
+      tipo: "conteo_atenciones",
+      evento: {
+        location_uuids: [UUID1],
+        encounter_type_uuids: [UUID2],
+        diagnosticos: [{ concepto_uuids: [UUID3] }],
+      },
+    } as unknown as DefinicionIndicador);
+
+    expect(result).toEqual({
+      location_uuids: [UUID1],
+      encounter_type_uuids: [],
+      diagnostico_uuids: [UUID3],
+    });
+  });
+
+  it("short-circuits MySQL when the definition references no uuids", async () => {
+    const result = await validarDefinicionContraOpenMRS({
+      tipo: "conteo_atenciones",
+    } as unknown as DefinicionIndicador);
+
+    expect(result).toEqual({
+      location_uuids: [],
+      encounter_type_uuids: [],
+      diagnostico_uuids: [],
+    });
+    expect(mockQueryMysql).not.toHaveBeenCalled();
   });
 });

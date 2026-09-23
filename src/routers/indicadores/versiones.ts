@@ -5,18 +5,17 @@
  * Returns 409 Conflict on race-condition duplicate version creation.
  */
 import type { Request, Response } from "express";
-import { v4 as uuidv4 } from "uuid";
 import { Indicador, IndicadorVersion } from "../../models/indicador.js";
 import { sequelize } from "../../database/postgres.js";
+import type { DefinicionIndicador } from "../../types/definicion.js";
 import {
-  parseDefinicionIndicador,
-  rejectPeriodoInPayload,
-  type DefinicionIndicador,
-} from "../../types/definicion.js";
-import {
-  validarDefinicionLocationUuids,
-  validarDefinicionEncounterTypeUuids,
-} from "../../validators/openmrs.js";
+  createIndicatorVersion,
+  parseRegistrationDefinition,
+  PeriodRejectedError,
+  nextVersion as fetchNextVersion,
+  UnknownUuidsError,
+  validateRegistrationUuids,
+} from "../../indicators/registration.js";
 import { logger } from "../../config/logger.js";
 
 export async function handleCreateVersion(
@@ -52,21 +51,18 @@ export async function handleCreateVersion(
     return;
   }
 
-  // Reject inbound periodo
-  try {
-    rejectPeriodoInPayload(typedBody.definicion);
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Validation error";
-    res.status(422).json({
-      detail: { field: "definicion.periodo", message },
-    });
-    return;
-  }
-
+  // Shared parse + OpenMRS validation via the service (same rules as
+  // POST / and the startup catalog). HTTP mapping only.
   let definicion: DefinicionIndicador;
   try {
-    definicion = parseDefinicionIndicador(typedBody.definicion);
+    definicion = parseRegistrationDefinition(typedBody.definicion);
   } catch (err: unknown) {
+    if (err instanceof PeriodRejectedError) {
+      res.status(422).json({
+        detail: { field: err.field, message: err.message },
+      });
+      return;
+    }
     const message =
       err instanceof Error ? err.message : "Validation error";
     res.status(422).json({
@@ -75,55 +71,31 @@ export async function handleCreateVersion(
     return;
   }
 
-  // Validate location_uuids against OpenMRS
   try {
-    const unknownUuids = await validarDefinicionLocationUuids(definicion);
-    if (unknownUuids.length > 0) {
+    await validateRegistrationUuids(definicion);
+  } catch (err: unknown) {
+    if (err instanceof UnknownUuidsError) {
       res.status(422).json({
         detail: {
-          field: "location_uuids",
-          unknown_uuids: unknownUuids,
+          field: err.field,
+          unknown_uuids: err.unknown_uuids,
         },
       });
       return;
     }
-  } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "OpenMRS no disponible";
     res.status(502).json({ detail: message });
     return;
   }
 
-  // Validate encounter_type_uuids against OpenMRS
-  try {
-    const unknownUuids = await validarDefinicionEncounterTypeUuids(definicion);
-    if (unknownUuids.length > 0) {
-      res.status(422).json({
-        detail: {
-          field: "encounter_type_uuids",
-          unknown_uuids: unknownUuids,
-        },
-      });
-      return;
-    }
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "OpenMRS no disponible";
-    res.status(502).json({ detail: message });
-    return;
-  }
-
-  const maxVersion: number | null = await IndicadorVersion.max("version", {
-    where: { indicador_id: indicador.id },
-  });
-  const nextVersion = (maxVersion ?? 0) + 1;
+  const nextVersion = await fetchNextVersion(indicador.id);
 
   try {
-    const nuevaVersion = await IndicadorVersion.create({
-      id: uuidv4(),
-      indicador_id: indicador.id,
-      version: nextVersion,
-      definicion: definicion as unknown as Record<string, unknown>,
-      creado_en: new Date(),
-    });
+    const nuevaVersion = await createIndicatorVersion(
+      indicador.id,
+      nextVersion,
+      definicion,
+    );
 
     // Auto-copy metas from previous version (non-fatal)
     try {

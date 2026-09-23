@@ -47,7 +47,7 @@ export interface Settings {
 
   // Application
   port: number;
-  auto_seed_default_indicator: boolean;
+  auto_register_catalog: boolean;
   cors_origins: string[];
 
   // Routing
@@ -179,8 +179,8 @@ export const settings: Settings = {
   auth_disabled: parseBoolean(process.env["AUTH_DISABLED"], true),
 
   port: parsePort(process.env["PORT"], 8000),
-  auto_seed_default_indicator: parseBoolean(
-    process.env["AUTO_SEED_DEFAULT_INDICATOR"],
+  auto_register_catalog: parseBoolean(
+    envEither("AUTO_REGISTER_CATALOG", "AUTO_SEED_DEFAULT_INDICATOR"),
     true,
   ),
 

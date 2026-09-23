@@ -34,7 +34,7 @@ import { conceptosRouter } from "./routers/conceptos.js";
 import { metasRouter } from "./routers/metas.js";
 import { requireSession } from "./middleware/auth.js";
 import { buildOpenapiSpec } from "./docs/openapi.js";
-import { seedDefaultIndicador } from "./seed/default-indicador.js";
+import { registerIndicatorCatalog } from "./catalog/indicators.js";
 
 /** Augmented request carrying the request-id used for log correlation. */
 type RequestWithId = Request & { requestId: string };
@@ -236,9 +236,14 @@ async function start(): Promise<void> {
   // Create/refresh rollup views for SQL consumers
   await createRollupViews();
 
-  if (settings.auto_seed_default_indicator) {
-    const seeded = await seedDefaultIndicador();
-    logger.info("Default indicator seeding finished", { seeded });
+  if (settings.auto_register_catalog) {
+    const registered = await registerIndicatorCatalog();
+    const created = registered.filter((r) => r.indicatorCreated || r.versionCreated);
+    logger.info("Catálogo de indicadores verificado", {
+      verified: registered.length,
+      created: created.length,
+      createdNames: created.map((r) => r.nombre),
+    });
   }
 
   const server = app.listen(settings.port, () => {
