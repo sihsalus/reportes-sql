@@ -41,3 +41,6 @@ node_modules/
 # Local Pi runtime state
 .atl/
 .pi/
+
+# Local commandcode state (never push)
+.commandcode/
