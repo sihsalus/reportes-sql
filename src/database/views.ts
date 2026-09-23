@@ -30,6 +30,43 @@ export async function ensureCanonicalResultIndex(): Promise<void> {
      WHERE es_canonico = true`,
     { type: QueryTypes.RAW },
   );
+  // Hard guard: at most one canonical row per version + month. The executor
+  // supersedes-then-inserts per recalculation, but without this constraint a
+  // missed supersede (or two concurrent recalcs) left several canonical rows
+  // and every series SUM silently multiplied the value.
+  await sequelize.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_resultado_version_mes_canonico
+     ON indicador_resultado (indicador_version_id, mes_referencia)
+     WHERE es_canonico = true`,
+    { type: QueryTypes.RAW },
+  );
+}
+
+/**
+ * Repair rows left duplicated before the unique guard existed.
+ *
+ * Keeps exactly one canonical row per (indicador_version_id, mes_referencia):
+ * the latest by calculado_en (deterministic tie-break on id). Runs before
+ * {@link ensureCanonicalResultIndex} so the UNIQUE index creation never fails
+ * on legacy duplicates. Idempotent — a clean table matches 0 rows.
+ */
+export async function deduplicateCanonicalResults(): Promise<void> {
+  await sequelize.query(
+    `UPDATE indicador_resultado ir
+     SET es_canonico = false
+     WHERE ir.es_canonico = true
+       AND ir.mes_referencia IS NOT NULL
+       AND EXISTS (
+         SELECT 1 FROM indicador_resultado newer
+         WHERE newer.indicador_version_id = ir.indicador_version_id
+           AND newer.mes_referencia = ir.mes_referencia
+           AND newer.es_canonico = true
+           AND (newer.calculado_en > ir.calculado_en
+             OR (newer.calculado_en = ir.calculado_en AND newer.id > ir.id))
+       )`,
+    { type: QueryTypes.UPDATE },
+  );
+  logger.info("Canonical duplicates deduplicated (kept latest per version+month).");
 }
 
 /**

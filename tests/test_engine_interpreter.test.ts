@@ -4,6 +4,7 @@
  * Legacy note: the old Python engine used %(name)s placeholders; mysql2 uses :name.
  */
 import { buildQuery } from "../src/engine/interpreter";
+import { calcularMesEspecifico } from "../src/engine/periodo";
 import {
   FiltrosEventoSchema,
   FiltrosPoblacionSchema,
@@ -733,5 +734,59 @@ describe("ConteoPacientesVentana", () => {
     const { sql: sql2 } = buildQuery(d2, INICIO, FIN, { [UUID_ORD]: 42 });
     expect(sql2).toContain("EXISTS");
     expect(sql2).toContain("orders");
+  });
+});
+
+// ── Annual recalculation: monthly ranges must tile the year ─────────────
+// Regression for duplicated values after POST /resultados/recalcular-anio:
+// if two consecutive months overlapped (or left a gap), the same encounter
+// would be counted twice (or lost) in a single annual pass. The executor
+// unique-canonical guard covers repeated presses; this covers a single pass.
+describe("recalcular-anio monthly tiling", () => {
+  const tipos = ["conteo_atenciones", "conteo_pacientes"] as const;
+
+  test.each(tipos)(
+    "%s: fin_excl of month M equals inicio of month M+1 (no overlap, no gap)",
+    (tipo) => {
+      const definicion = parseDefinicionIndicador({ tipo });
+
+      const inicios: string[] = [];
+      const finesExcl: string[] = [];
+      for (let mes = 1; mes <= 12; mes++) {
+        const { inicio, fin } = calcularMesEspecifico(2026, mes);
+        const { params } = buildQuery(definicion, inicio, fin);
+        inicios.push(params["inicio"] as string);
+        finesExcl.push(params["fin_excl"] as string);
+      }
+
+      // Each month starts on its first day…
+      for (let mes = 1; mes <= 12; mes++) {
+        const esperado = `2026-${String(mes).padStart(2, "0")}-01`;
+        expect(inicios[mes - 1]).toBe(esperado);
+      }
+      // …ends where the next one starts, December spills into 2027-01-01.
+      for (let mes = 1; mes <= 12; mes++) {
+        const siguiente =
+          mes < 12
+            ? `2026-${String(mes + 1).padStart(2, "0")}-01`
+            : "2027-01-01";
+        expect(finesExcl[mes - 1]).toBe(siguiente);
+        if (mes < 12) {
+          expect(finesExcl[mes - 1]).toBe(inicios[mes]);
+        }
+      }
+    },
+  );
+
+  test("conteo_pacientes without age window counts distinct patients in range", () => {
+    const definicion = parseDefinicionIndicador({ tipo: "conteo_pacientes" });
+    const { inicio, fin } = calcularMesEspecifico(2026, 8);
+    const { sql, params } = buildQuery(definicion, inicio, fin);
+
+    expect(sql).toContain("COUNT(DISTINCT");
+    expect(params["inicio"]).toBe("2026-08-01");
+    expect(params["fin_excl"]).toBe("2026-09-01");
+    // No age join when no poblacion filter is configured.
+    expect(sql).not.toContain("JOIN person");
   });
 });

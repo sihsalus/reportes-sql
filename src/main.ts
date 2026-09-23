@@ -24,6 +24,7 @@ import { sequelize } from "./database/postgres.js";
 import { disposeMysql } from "./database/mysql.js";
 import {
   ensureCanonicalResultIndex,
+  deduplicateCanonicalResults,
   backfillResultadoCanonical,
   createRollupViews,
 } from "./database/views.js";
@@ -223,6 +224,9 @@ async function start(): Promise<void> {
   await sequelize.sync();
   logger.info("PostgreSQL models synced.");
 
+  // Dedup first: legacy data may hold several canonical rows per month,
+  // which would make the UNIQUE index creation below fail.
+  await deduplicateCanonicalResults();
   await ensureCanonicalResultIndex();
   logger.info("Canonical result index ensured.");
 

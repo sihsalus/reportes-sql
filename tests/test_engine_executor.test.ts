@@ -114,13 +114,120 @@ describe("executeAndPersist", () => {
       expect.objectContaining({
         where: {
           indicador_version_id: "version-1",
-          mes_referencia: mesRef,
+          mes_referencia: "2026-08-01",
           es_canonico: true,
         },
       }),
     );
     expect(mockBulkCreate).toHaveBeenCalled();
     expect(mockTransaction.commit).toHaveBeenCalled();
+  });
+
+  test("persists DATEONLY values as UTC strings (TZ-independent)", async () => {
+    mockMysqlQuery.mockResolvedValue([
+      [{ valor: 2 }],
+      [],
+    ]);
+    mockBuild.mockImplementation((values: unknown) => ({
+      toJSON: () => values,
+    }));
+    mockBulkCreate.mockResolvedValue([]);
+    mockSequelizeQuery.mockResolvedValue([undefined, 1]);
+
+    // 2026-08-01T00:00:00Z renders as 2026-07-31 under America/Lima with
+    // moment local formatting — the executor must still persist 2026-08-01.
+    await executeAndPersist(
+      "SELECT 1",
+      {},
+      "version-1",
+      new Date("2026-08-01T00:00:00.000Z"),
+      new Date("2026-08-31T00:00:00.000Z"),
+      new Date("2026-08-01T00:00:00.000Z"),
+      { indicadorId: "indicador-1", persistirCeroSiVacio: true },
+    );
+
+    expect(mockBuild).toHaveBeenCalledWith(
+      expect.objectContaining({
+        periodo_inicio: "2026-08-01",
+        periodo_fin: "2026-08-31",
+        mes_referencia: "2026-08-01",
+        es_canonico: true,
+      }),
+    );
+    expect(mockSequelizeQuery).toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE indicador_resultado ir"),
+      expect.objectContaining({
+        replacements: {
+          indicador_id: "indicador-1",
+          mes_referencia: "2026-08-01",
+        },
+      }),
+    );
+  });
+
+  test("retries once when a concurrent recalc wins the canonical insert", async () => {
+    mockMysqlQuery.mockResolvedValue([
+      [{ valor: 1 }],
+      [],
+    ]);
+    mockBuild.mockImplementation((values: unknown) => ({
+      toJSON: () => values,
+    }));
+    const uniqueErr = new Error("duplicate key");
+    uniqueErr.name = "SequelizeUniqueConstraintError";
+    mockBulkCreate
+      .mockRejectedValueOnce(uniqueErr)
+      .mockResolvedValueOnce([]);
+    mockSequelizeQuery.mockResolvedValue([undefined, 1]);
+
+    const mesRef = new Date("2026-08-01T00:00:00.000Z");
+    const results = await executeAndPersist(
+      "SELECT 1",
+      {},
+      "version-1",
+      new Date("2026-08-01"),
+      new Date("2026-08-31"),
+      mesRef,
+      { indicadorId: "indicador-1", fuente: "recalcular-anio" },
+    );
+
+    expect(results).toHaveLength(1);
+    // Supersede ran again on retry, then the insert succeeded.
+    expect(mockSequelizeQuery).toHaveBeenCalledTimes(2);
+    expect(mockBulkCreate).toHaveBeenCalledTimes(2);
+    expect(mockTransaction.commit).toHaveBeenCalledTimes(1);
+    expect(mockTransaction.rollback).toHaveBeenCalledTimes(1);
+  });
+
+  test("throws when the retry also hits a unique violation", async () => {
+    mockMysqlQuery.mockResolvedValue([
+      [{ valor: 1 }],
+      [],
+    ]);
+    mockBuild.mockImplementation((values: unknown) => ({
+      toJSON: () => values,
+    }));
+    const uniqueErr = new Error("duplicate key");
+    uniqueErr.name = "SequelizeUniqueConstraintError";
+    mockBulkCreate.mockRejectedValue(uniqueErr);
+    mockSequelizeQuery.mockResolvedValue([undefined, 1]);
+
+    const mesRef = new Date("2026-08-01T00:00:00.000Z");
+    await expect(
+      executeAndPersist(
+        "SELECT 1",
+        {},
+        "version-1",
+        new Date("2026-08-01"),
+        new Date("2026-08-31"),
+        mesRef,
+        { indicadorId: "indicador-1", fuente: "recalcular-anio" },
+      ),
+    ).rejects.toThrow("duplicate key");
+
+    expect(mockBulkCreate).toHaveBeenCalledTimes(2);
+    expect(mockTransaction.commit).not.toHaveBeenCalled();
+    expect(mockTransaction.rollback).toHaveBeenCalledTimes(2);
   });
 
   test("rolls back on error", async () => {
@@ -186,7 +293,7 @@ describe("executeAndPersist", () => {
       expect.objectContaining({
         where: {
           indicador_version_id: "version-1",
-          mes_referencia: mesRef,
+          mes_referencia: "2026-08-01",
           es_canonico: true,
         },
       }),
@@ -263,7 +370,7 @@ describe("executeAndPersist", () => {
       expect.objectContaining({
         indicador_version_id: "version-1",
         valor: 0,
-        mes_referencia: mesRef,
+        mes_referencia: "2026-08-01",
         es_canonico: true,
       }),
     );

@@ -33,6 +33,7 @@ jest.spyOn(console, "debug").mockImplementation(() => {});
 
 import {
   ensureCanonicalResultIndex,
+  deduplicateCanonicalResults,
   backfillResultadoCanonical,
   createRollupViews,
 } from "../src/database/views.js";
@@ -50,13 +51,38 @@ describe("ensureCanonicalResultIndex", () => {
   test("creates the partial canonical month index idempotently", async () => {
     await ensureCanonicalResultIndex();
 
-    expect(mockQuery).toHaveBeenCalledTimes(1);
+    expect(mockQuery).toHaveBeenCalledTimes(2);
     expect(mockQuery.mock.calls[0]?.[0]).toContain(
       "CREATE INDEX IF NOT EXISTS idx_resultado_canonico_mes",
     );
     expect(mockQuery.mock.calls[0]?.[0]).toContain(
       "WHERE es_canonico = true",
     );
+  });
+
+  test("creates a unique guard so only one canonical row survives per version+month", async () => {
+    await ensureCanonicalResultIndex();
+
+    const calls = mockQuery.mock.calls;
+    const uniqueSql = calls.find((c) =>
+      (c[0] as string).includes("uq_resultado_version_mes_canonico"),
+    );
+    expect(uniqueSql).toBeDefined();
+    expect(uniqueSql![0]).toContain("CREATE UNIQUE INDEX IF NOT EXISTS");
+    expect(uniqueSql![0]).toContain("indicador_version_id, mes_referencia");
+    expect(uniqueSql![0]).toContain("WHERE es_canonico = true");
+  });
+});
+
+describe("deduplicateCanonicalResults", () => {
+  test("keeps the latest canonical row per version+month (single UPDATE)", async () => {
+    await deduplicateCanonicalResults();
+
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    const sql = (mockQuery.mock.calls[0]?.[0] as string) ?? "";
+    expect(sql).toContain("UPDATE indicador_resultado ir");
+    expect(sql).toContain("SET es_canonico = false");
+    expect(sql).toContain("newer.calculado_en > ir.calculado_en");
   });
 });
 

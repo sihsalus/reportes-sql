@@ -188,6 +188,12 @@ IndicadorResultado.init(
         where: { es_canonico: true },
       },
       {
+        name: "uq_resultado_version_mes_canonico",
+        unique: true,
+        fields: ["indicador_version_id", "mes_referencia"],
+        where: { es_canonico: true },
+      },
+      {
         name: "idx_resultado_periodo",
         fields: ["periodo_inicio", "periodo_fin"],
       },

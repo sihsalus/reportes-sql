@@ -33,9 +33,29 @@ export interface ExecuteAndPersistOpts {
   persistirCeroSiVacio?: boolean;
 }
 
-/** Render a Date as a YYYY-MM-DD day (mes_referencia is a day, not a timestamp). */
+/**
+ * Render a Date as a YYYY-MM-DD day (DATEONLY columns are days, not timestamps).
+ *
+ * All persisted day values (periodo_inicio, periodo_fin, mes_referencia) MUST
+ * go through this helper instead of passing Date objects to Sequelize.
+ * Rationale: `Sequelize.DATEONLY` stringifies Date objects with
+ * `moment(date).format('YYYY-MM-DD')` in the process LOCAL timezone, while the
+ * canonical supersede UPDATE below matches on this UTC rendering. With a
+ * non-UTC server timezone (e.g. America/Lima) `Date.UTC(2026,7,1)` would be
+ * stored as '2026-07-31' but superseded as '2026-08-01' — the UPDATE would
+ * match 0 rows and every recalculation would add another canonical row.
+ */
 function formatDia(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+/** True when the error is a Sequelize unique-constraint violation. */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    err != null &&
+    typeof err === "object" &&
+    (err as { name?: unknown }).name === "SequelizeUniqueConstraintError"
+  );
 }
 
 /**
@@ -73,6 +93,12 @@ export async function executeAndPersist(
     const rows = await queryMysql<{ valor: number | string }>(querySql, params);
 
     const now = new Date();
+    // Normalize every DATEONLY value to a UTC YYYY-MM-DD string (see
+    // formatDia). Never pass Date objects for these columns: Sequelize would
+    // stringify them in local time and diverge from the supersede predicate.
+    const diaInicio = formatDia(periodoInicio);
+    const diaFin = formatDia(periodoFin);
+    const diaMes = mesReferencia ? formatDia(mesReferencia) : null;
     const results: IndicadorResultado[] = [];
 
     for (const row of rows) {
@@ -82,82 +108,98 @@ export async function executeAndPersist(
       results.push(
         IndicadorResultado.build({
           indicador_version_id: indicadorVersionId,
-          periodo_inicio: periodoInicio,
-          periodo_fin: periodoFin,
+          // Casts: DATEONLY columns accept YYYY-MM-DD strings at runtime;
+          // the casts only silence the Date-typed model declarations.
+          periodo_inicio: diaInicio as unknown as Date,
+          periodo_fin: diaFin as unknown as Date,
           valor,
           calculado_en: now,
-          mes_referencia: mesReferencia ?? null,
-          es_canonico: Boolean(mesReferencia),
+          mes_referencia: diaMes as unknown as Date | null,
+          es_canonico: diaMes != null,
         }),
       );
     }
 
     // A month that yields no rows is still a computed month: persist 0 so it
     // is distinguishable from a never-calculated month in series/views.
-    if (results.length === 0 && opts.persistirCeroSiVacio && mesReferencia) {
+    if (results.length === 0 && opts.persistirCeroSiVacio && diaMes != null) {
       results.push(
         IndicadorResultado.build({
           indicador_version_id: indicadorVersionId,
-          periodo_inicio: periodoInicio,
-          periodo_fin: periodoFin,
+          periodo_inicio: diaInicio as unknown as Date,
+          periodo_fin: diaFin as unknown as Date,
           valor: 0,
           calculado_en: now,
-          mes_referencia: mesReferencia,
+          mes_referencia: diaMes as unknown as Date,
           es_canonico: true,
         }),
       );
     }
 
     // ── Canonical upsert in transaction ──
+    // Retried once on unique violation: two concurrent recalculations of the
+    // same month (e.g. double-clicking "calcular año") can both pass the
+    // supersede UPDATE before either inserts. The partial unique index
+    // (uq_resultado_version_mes_canonico) rejects the loser; the retry then
+    // supersedes the winner and inserts exactly one canonical row.
     if (results.length > 0) {
-      const tx = await sequelize.transaction();
-      try {
-        if (mesReferencia) {
-          if (opts.indicadorId) {
-            // Cross-version supersede: a version change must not leave two
-            // canonical rows for the same indicator + month.
-            await sequelize.query(
-              `UPDATE indicador_resultado ir
-               SET es_canonico = false
-               FROM indicador_version iv
-               WHERE ir.indicador_version_id = iv.id
-                 AND iv.indicador_id = :indicador_id
-                 AND ir.mes_referencia = :mes_referencia
-                 AND ir.es_canonico = true`,
-              {
-                replacements: {
-                  indicador_id: opts.indicadorId,
-                  mes_referencia: formatDia(mesReferencia),
+      const payloads = results.map((r) => r.toJSON());
+      let attempt = 0;
+      for (;;) {
+        const tx = await sequelize.transaction();
+        try {
+          if (diaMes != null) {
+            if (opts.indicadorId) {
+              // Cross-version supersede: a version change must not leave two
+              // canonical rows for the same indicator + month.
+              await sequelize.query(
+                `UPDATE indicador_resultado ir
+                 SET es_canonico = false
+                 FROM indicador_version iv
+                 WHERE ir.indicador_version_id = iv.id
+                   AND iv.indicador_id = :indicador_id
+                   AND ir.mes_referencia = :mes_referencia
+                   AND ir.es_canonico = true`,
+                {
+                  replacements: {
+                    indicador_id: opts.indicadorId,
+                    mes_referencia: diaMes,
+                  },
+                  transaction: tx,
+                  type: QueryTypes.UPDATE,
                 },
-                transaction: tx,
-                type: QueryTypes.UPDATE,
-              },
-            );
-          } else {
-            // Legacy: supersede canonical rows for the same version + month.
-            await IndicadorResultado.update(
-              { es_canonico: false },
-              {
-                where: {
-                  indicador_version_id: indicadorVersionId,
-                  mes_referencia: mesReferencia,
-                  es_canonico: true,
+              );
+            } else {
+              // Legacy: supersede canonical rows for the same version + month.
+              await IndicadorResultado.update(
+                { es_canonico: false },
+                {
+                  where: {
+                    indicador_version_id: indicadorVersionId,
+                    mes_referencia: diaMes,
+                    es_canonico: true,
+                  },
+                  transaction: tx,
                 },
-                transaction: tx,
-              },
-            );
+              );
+            }
           }
+
+          await IndicadorResultado.bulkCreate(payloads, {
+            validate: true,
+            transaction: tx,
+          });
+
+          await tx.commit();
+          break;
+        } catch (err) {
+          await tx.rollback();
+          if (attempt === 0 && isUniqueViolation(err)) {
+            attempt += 1;
+            continue;
+          }
+          throw err;
         }
-
-        await IndicadorResultado.bulkCreate(
-          results.map((r) => r.toJSON()),
-          { validate: true, transaction: tx },
-        );
-
-        await tx.commit();
-      } catch (err) {
-        await tx.rollback();
-        throw err;
       }
     }
 
