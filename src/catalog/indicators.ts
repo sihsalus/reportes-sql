@@ -1,13 +1,15 @@
 /**
  * Official indicator catalog — registered on every service startup.
  *
- * Each entry is registered as-is: indicador + version 1 with its complete
- * definition, immediately ready to calculate (calcular-ahora and
- * recalcular-anio always take each indicator's latest version).
+ * The entries live in ./indicators.json (data, not code): adding an
+ * indicator means editing that file and restarting the service. Each entry
+ * is registered as-is: indicador + version 1 with its complete definition,
+ * immediately ready to calculate (calcular-ahora and recalcular-anio always
+ * take each indicator's latest version).
  *
- * To add an indicator, append an entry to INDICATOR_CATALOG with its
- * canonical definition (the same shape accepted by POST /indicadores)
- * and restart the service.
+ * The file is a JSON array of entries; each `definicion` uses the same
+ * canonical shape accepted by POST /indicadores and is validated on
+ * registration.
  *
  * Idempotent, conservative semantics:
  * - matching is by `nombre` (natural key);
@@ -17,6 +19,9 @@
  *   versioning API, never through this catalog.
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { z } from "zod";
 import { Indicador, IndicadorVersion } from "../models/indicador.js";
 import type { DefinicionIndicador } from "../types/definicion.js";
 import { OpenMRSUnavailableError } from "../validators/openmrs.js";
@@ -43,60 +48,81 @@ export interface RegisterIndicatorResult {
 }
 
 /**
- * Official catalog. Example with a complete definition (population + event):
- *
- * {
- *   nombre: "Diarrea en menores de 5 años",
- *   descripcion: "Atenciones por diarrea en menores de 5 años.",
- *   definicion: {
- *     tipo: "conteo_atenciones",
- *     poblacion: { max_anios_excl: 5 },
- *     evento: { location_uuids: ["<uuid-del-establecimiento>"] },
- *   },
- *   activo: true,
- * },
+ * Shape of a single entry in ./indicators.json. Strict: unknown keys are
+ * rejected so typos surface at startup instead of being silently ignored.
  */
-export const INDICATOR_CATALOG: CatalogEntry[] = [
-  {
-    nombre: "seed/default-indicator",
-    descripcion: "Auto-seeded default indicator for bootstrap/testing.",
-    definicion: {
-      tipo: "conteo_atenciones",
-    },
-    activo: true,
-  },
-  {
-    // 3331101 — Caso tratado: atención de menores de 5 años con diagnóstico
-    // de IRA no complicada (CIE-10 J00.X, J04.0-J04.2, J06.0, J06.8-J06.9,
-    // J20.9, tipo definitivo), atendida en UPSS Consulta Externa.
-    nombre: "Infección respiratoria aguda (IRA) no complicada en menores de 5 años",
-    descripcion:
-      "Sumatoria mensual de atenciones ambulatorias de menores de 5 años con diagnóstico definitivo de IRA no complicada (J00.X, J04.0, J04.1, J04.2, J06.0, J06.8, J06.9, J20.9). Fuente: HIS MINSA.",
-    definicion: {
-      tipo: "conteo_atenciones",
-      poblacion: { max_anios_excl: 5 },
-      evento: {
-        location_uuids: ["35d2234e-129a-4c40-abb2-1ae0b2400001"],
-        diagnosticos: [
-          {
-            concepto_uuids: [
-              "608a5958-7c4c-42db-8a1c-094761a70f26", // J00.X RINOFARINGITIS AGUDA
-              "d55a179d-86fb-4b72-8808-824d28288ead", // J04.0 LARINGITIS AGUDA
-              "1b19caf0-4bd3-4d0c-9277-cd6c9be636bb", // J04.1 TRAQUEITIS AGUDA
-              "1b719d74-8318-4350-b2ba-bc301cd62a7d", // J04.2 LARINGOTRAQUEITIS AGUDA
-              "b4bb0bc8-4eb8-4bb9-b8f3-983bd97dbcdb", // J06.0 LARINGOFARINGITIS AGUDA
-              "e65af4e3-be05-4ac7-b703-fef24c2a4230", // J06.8 FARINGO AMIGDALITIS AGUDA
-              "ae96015f-3a89-484c-bccd-5309b26bdcdb", // J06.9 INFECCION AGUDA VAS NO ESPECIFICADA
-              "e01f5787-6897-4447-9879-9eaad59e6d35", // J20.9 BRONQUITIS AGUDA NO ESPECIFICADA
-            ],
-            tipo_diagnostico: "definitivo",
-          },
-        ],
-      },
-    },
-    activo: true,
-  },
+const CatalogEntrySchema = z
+  .object({
+    nombre: z.string().min(1),
+    descripcion: z.string().nullable().default(null),
+    definicion: z.unknown(),
+    activo: z.boolean().optional(),
+  })
+  .strict();
+
+const CatalogFileSchema = z.array(CatalogEntrySchema);
+
+/**
+ * Candidate locations for the catalog file, resolved against the working
+ * directory at call time (there is no module-dir API that works under both
+ * the ESM runtime and jest's CJS transform):
+ * - `src/catalog/indicators.json` in development (tsx) and under jest;
+ * - `dist/catalog/indicators.json` in production, where the image ships only
+ *   `dist` (copied by scripts/copy-assets.mjs during `yarn build`).
+ */
+const CATALOG_CANDIDATES = [
+  join(process.cwd(), "src", "catalog", "indicators.json"),
+  join(process.cwd(), "dist", "catalog", "indicators.json"),
 ];
+
+function resolveCatalogPath(): string {
+  for (const candidate of CATALOG_CANDIDATES) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return CATALOG_CANDIDATES[0];
+}
+
+/**
+ * Reads and validates ./indicators.json.
+ *
+ * Any failure — missing/unreadable file, invalid JSON, wrong shape — aborts
+ * startup with a clear message: better not to boot than to register a
+ * partial or malformed catalog.
+ */
+export function loadIndicatorCatalog(): CatalogEntry[] {
+  const path = resolveCatalogPath();
+
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Catálogo: no se pudo leer ${path}: ${message}. Arranque frenado.`,
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Catálogo: ${path} no es JSON válido: ${message}. Arranque frenado.`,
+    );
+  }
+
+  const result = CatalogFileSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(
+      `Catálogo: ${path} no tiene el formato esperado: ` +
+        `${result.error.message}. Arranque frenado.`,
+    );
+  }
+  return result.data as CatalogEntry[];
+}
 
 /**
  * Registers one catalog entry (indicador + version 1).
@@ -194,7 +220,7 @@ export async function ensureCatalogIndicator(
  * left half-registered — fix the entry and restart.
  */
 export async function registerIndicatorCatalog(
-  catalog: CatalogEntry[] = INDICATOR_CATALOG,
+  catalog: CatalogEntry[] = loadIndicatorCatalog(),
 ): Promise<RegisterIndicatorResult[]> {
   const results: RegisterIndicatorResult[] = [];
   for (const entry of catalog) {

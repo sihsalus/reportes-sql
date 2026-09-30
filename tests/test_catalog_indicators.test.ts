@@ -39,8 +39,8 @@ jest.mock("../src/validators/openmrs.js", () => ({
 }));
 
 import {
-  INDICATOR_CATALOG,
   ensureCatalogIndicator,
+  loadIndicatorCatalog,
   registerIndicatorCatalog,
 } from "../src/catalog/indicators.js";
 import { parseDefinicionIndicador } from "../src/types/definicion.js";
@@ -184,12 +184,12 @@ describe("registerIndicatorCatalog", () => {
   });
 
   test("catalog includes the legacy default indicator", () => {
-    const nombres = INDICATOR_CATALOG.map((e) => e.nombre);
+    const nombres = loadIndicatorCatalog().map((e) => e.nombre);
     expect(nombres).toContain("seed/default-indicator");
   });
 
   test("catalog includes IRA with a complete definition", () => {
-    const entry = INDICATOR_CATALOG.find((e) =>
+    const entry = loadIndicatorCatalog().find((e) =>
       e.nombre.includes("Infección respiratoria aguda"),
     );
     expect(entry).toBeDefined();

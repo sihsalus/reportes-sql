@@ -8,6 +8,7 @@ RUN corepack enable && yarn install --immutable
 
 COPY tsconfig.json ./
 COPY src ./src
+COPY scripts ./scripts
 RUN yarn build
 
 # ── Dev stage (docker compose target) ────────────────────────────────────

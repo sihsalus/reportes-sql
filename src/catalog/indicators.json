@@ -1,0 +1,41 @@
+[
+  {
+    "nombre": "seed/default-indicator",
+    "descripcion": "Auto-seeded default indicator for bootstrap/testing.",
+    "definicion": {
+      "tipo": "conteo_atenciones"
+    },
+    "activo": true
+  },
+  {
+    "nombre": "Infección respiratoria aguda (IRA) no complicada en menores de 5 años",
+    "descripcion": "Sumatoria mensual de atenciones ambulatorias de menores de 5 años con diagnóstico definitivo de IRA no complicada (J00.X, J04.0, J04.1, J04.2, J06.0, J06.8, J06.9, J20.9). Fuente: HIS MINSA.",
+    "definicion": {
+      "tipo": "conteo_atenciones",
+      "poblacion": {
+        "max_anios_excl": 5
+      },
+      "evento": {
+        "location_uuids": [
+          "35d2234e-129a-4c40-abb2-1ae0b2400001"
+        ],
+        "diagnosticos": [
+          {
+            "concepto_uuids": [
+              "608a5958-7c4c-42db-8a1c-094761a70f26",
+              "d55a179d-86fb-4b72-8808-824d28288ead",
+              "1b19caf0-4bd3-4d0c-9277-cd6c9be636bb",
+              "1b719d74-8318-4350-b2ba-bc301cd62a7d",
+              "b4bb0bc8-4eb8-4bb9-b8f3-983bd97dbcdb",
+              "e65af4e3-be05-4ac7-b703-fef24c2a4230",
+              "ae96015f-3a89-484c-bccd-5309b26bdcdb",
+              "e01f5787-6897-4447-9879-9eaad59e6d35"
+            ],
+            "tipo_diagnostico": "definitivo"
+          }
+        ]
+      }
+    },
+    "activo": true
+  }
+]

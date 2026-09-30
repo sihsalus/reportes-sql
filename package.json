@@ -6,7 +6,7 @@
   "packageManager": "yarn@4.13.0",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-assets.mjs",
     "start": "node dist/main.js",
     "dev": "tsx watch src/main.ts",
     "test": "jest",
