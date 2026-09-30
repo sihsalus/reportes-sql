@@ -5,6 +5,8 @@ build/
 # Environment
 .env
 .env.*
+# ...but the documented template stays tracked
+!.env.example
 
 # IDE
 .vscode/
