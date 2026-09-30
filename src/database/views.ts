@@ -17,13 +17,23 @@ import { logger } from "../config/logger.js";
 const CANONICAL_BACKFILL_KEY = "canonical_backfill_v1";
 
 /**
- * Ensure the partial index used by cross-version canonical supersede exists.
+ * Ensure the resultado indexes match the model declaration.
  *
- * The model declaration covers fresh tables, but `sequelize.sync()` does not
- * add indexes to an existing table. Keep this idempotent guard until schema
- * migrations replace startup schema maintenance.
+ * The model declaration covers fresh tables, but `sequelize.sync()` neither
+ * adds indexes to nor removes them from an existing table. Keep this
+ * idempotent guard until schema migrations replace startup schema
+ * maintenance.
  */
 export async function ensureCanonicalResultIndex(): Promise<void> {
+  // Overlaps uq_resultado_version_mes_canonico, which serves every
+  // es_canonico = true lookup (the executor's supersede plus the dedup and
+  // backfill repairs). Dropped so existing tables converge on the same index
+  // set as fresh ones instead of carrying a duplicate.
+  await sequelize.query(
+    `DROP INDEX IF EXISTS idx_resultado_version_mes_canonico`,
+    { type: QueryTypes.RAW },
+  );
+
   await sequelize.query(
     `CREATE INDEX IF NOT EXISTS idx_resultado_canonico_mes
      ON indicador_resultado (mes_referencia)
@@ -38,6 +48,13 @@ export async function ensureCanonicalResultIndex(): Promise<void> {
     `CREATE UNIQUE INDEX IF NOT EXISTS uq_resultado_version_mes_canonico
      ON indicador_resultado (indicador_version_id, mes_referencia)
      WHERE es_canonico = true`,
+    { type: QueryTypes.RAW },
+  );
+  // GET /resultados filters on periodo_inicio/periodo_fin; without this the
+  // listing degrades to a sequential scan on pre-existing tables.
+  await sequelize.query(
+    `CREATE INDEX IF NOT EXISTS idx_resultado_periodo
+     ON indicador_resultado (periodo_inicio, periodo_fin)`,
     { type: QueryTypes.RAW },
   );
 }

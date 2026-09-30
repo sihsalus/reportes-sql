@@ -143,7 +143,7 @@ describe("executeAndPersist", () => {
       new Date("2026-08-01T00:00:00.000Z"),
       new Date("2026-08-31T00:00:00.000Z"),
       new Date("2026-08-01T00:00:00.000Z"),
-      { indicadorId: "indicador-1", persistirCeroSiVacio: true },
+      { indicadorId: "indicador-1" },
     );
 
     expect(mockBuild).toHaveBeenCalledWith(
@@ -310,7 +310,6 @@ describe("executeAndPersist", () => {
       {
         indicadorId: "indicador-1",
         fuente: "test-fuente",
-        persistirCeroSiVacio: true,
       },
     );
 
@@ -339,18 +338,8 @@ describe("executeAndPersist", () => {
     );
   });
 
-  test("persists a zero-valued row when MySQL returns empty and persistirCeroSiVacio is enabled", async () => {
+  test("persists nothing when MySQL returns no usable rows", async () => {
     mockMysqlQuery.mockResolvedValue([[], []]);
-    const zeroInstance = {
-      toJSON: () => ({
-        indicador_version_id: "version-1",
-        valor: 0,
-        es_canonico: true,
-      }),
-    };
-    mockBuild.mockReturnValue(zeroInstance);
-    mockBulkCreate.mockResolvedValue([zeroInstance]);
-    mockSequelizeQuery.mockResolvedValue([undefined, 1]);
 
     const mesRef = new Date("2026-08-01T00:00:00.000Z");
     const results = await executeAndPersist(
@@ -360,28 +349,17 @@ describe("executeAndPersist", () => {
       new Date("2026-08-01"),
       new Date("2026-08-15"),
       mesRef,
-      {
-        indicadorId: "indicador-1",
-        persistirCeroSiVacio: true,
-      },
+      { indicadorId: "indicador-1" },
     );
 
-    expect(mockBuild).toHaveBeenCalledWith(
-      expect.objectContaining({
-        indicador_version_id: "version-1",
-        valor: 0,
-        mes_referencia: "2026-08-01",
-        es_canonico: true,
-      }),
-    );
-    expect(mockBulkCreate).toHaveBeenCalled();
-    expect(results).toHaveLength(1);
-    // Ledger: 0 rows returned, 1 row persisted
+    expect(results).toEqual([]);
+    expect(mockBuild).not.toHaveBeenCalled();
+    expect(mockBulkCreate).not.toHaveBeenCalled();
     expect(mockCalculoLogCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "success",
         filas_devueltas: 0,
-        filas_persistidas: 1,
+        filas_persistidas: 0,
       }),
     );
   });

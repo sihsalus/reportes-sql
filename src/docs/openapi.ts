@@ -122,16 +122,45 @@ export const openapiSpec = {
     "/health": {
       get: {
         tags: ["Health"],
-        summary: "Verificar estado del servicio",
+        summary: "Verificar estado del servicio y sus dependencias",
         operationId: "healthCheck",
         responses: {
           "200": {
-            description: "Servicio operativo",
+            description: "Servicio operativo con todas sus dependencias accesibles",
             content: {
               "application/json": {
                 schema: {
                   type: "object",
-                  properties: { status: { type: "string", example: "ok" } },
+                  properties: {
+                    status: { type: "string", example: "ok" },
+                    checks: {
+                      type: "object",
+                      properties: {
+                        postgres: { type: "string", example: "ok" },
+                        openmrs_mysql: { type: "string", example: "ok" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "503": {
+            description: "Una o más dependencias no responden",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    status: { type: "string", example: "error" },
+                    checks: {
+                      type: "object",
+                      properties: {
+                        postgres: { type: "string", example: "ok" },
+                        openmrs_mysql: { type: "string", example: "error" },
+                      },
+                    },
+                  },
                 },
               },
             },

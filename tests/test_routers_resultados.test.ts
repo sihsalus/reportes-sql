@@ -9,7 +9,6 @@ import { jest } from "@jest/globals";
 // ── Mock factory fns ────────────────────────────────────────────────────
 const mockResultadoFindAndCountAll = jest.fn();
 const mockIndicadorFindAll = jest.fn();
-const mockVersionFindAll = jest.fn();
 const mockExecuteAndPersist = jest.fn();
 const mockResolveConceptMap = jest.fn();
 const mockQueryMysql = jest.fn();
@@ -30,9 +29,9 @@ jest.mock("../src/models/indicador.js", () => ({
   Indicador: {
     findAll: (...args: unknown[]) => mockIndicadorFindAll(...args),
   },
-  IndicadorVersion: {
-    findAll: (...args: unknown[]) => mockVersionFindAll(...args),
-  },
+  // Latest versions are resolved via raw SQL (indicators/latest-version.ts),
+  // so the model itself is only referenced as an include target.
+  IndicadorVersion: {},
   IndicadorResultado: {
     findAndCountAll: (...args: unknown[]) =>
       mockResultadoFindAndCountAll(...args),
@@ -157,7 +156,7 @@ beforeEach(() => {
   resetRateLimitStore();
   mockResolveConceptMap.mockResolvedValue({});
   mockQueryMysql.mockResolvedValue([]);
-  mockVersionFindAll.mockResolvedValue([]);
+  mockSequelizeQuery.mockResolvedValue([]);
   mockExecuteAndPersist.mockResolvedValue([]);
   mockCalculoLogCreate.mockResolvedValue(undefined);
 });
@@ -440,12 +439,11 @@ describe("Resultados Router", () => {
       expect(res.body.items[0].versiones).toEqual([1, 2]);
     });
 
-    test("annual SQL uses an aggregate-safe period label (regression: 500 on /series?granularity=anual)", async () => {
-      // PostgreSQL rejects SELECT TO_CHAR(mes_referencia, 'YYYY') when the
-      // query only groups by EXTRACT(YEAR FROM mes_referencia) — the column
-      // must appear inside an aggregate (e.g. MIN(mes_referencia)) to match
-      // the GROUP BY clause. This test pins the contract to the same pattern
-      // used in src/database/views.ts (vw_resultado_anual).
+    test("annual series reads the aggregate-safe rollup view (regression: 500 on /series?granularity=anual)", async () => {
+      // The period label and the aggregation now live in vw_resultado_anual,
+      // which derives the label from MIN(mes_referencia). The unaggregated
+      // TO_CHAR(mes_referencia, 'YYYY') form used to 500 because that column
+      // was not in the GROUP BY clause.
       mockSequelizeQuery.mockResolvedValue([
         { periodo_label: "2026", valor: "1500", meses_disponibles: 12, anio: 2026 },
       ]);
@@ -459,11 +457,11 @@ describe("Resultados Router", () => {
       const sqlArg = mockSequelizeQuery.mock.calls[0]?.[0];
       expect(typeof sqlArg).toBe("string");
 
-      // Aggregate-safe: period label derived from MIN(mes_referencia) like the view.
-      expect(sqlArg as string).toMatch(/TO_CHAR\(\s*MIN\(\s*mes_referencia\s*\)\s*,\s*'YYYY'\s*\)/i);
+      // Aggregation is delegated to the view instead of being re-derived.
+      expect(sqlArg as string).toContain("vw_resultado_anual");
 
-      // Regression guard: the unaggregated form that triggered the 500 must not
-      // be present (TO_CHAR(mes_referencia, 'YYYY') without MIN/Max/Sum wrapper).
+      // Regression guard: the unaggregated form that triggered the 500 must
+      // not reappear in the API query.
       expect(sqlArg as string).not.toMatch(/TO_CHAR\(\s*mes_referencia\s*,\s*'YYYY'\s*\)/i);
     });
 
@@ -622,7 +620,7 @@ describe("Resultados Router", () => {
   describe("POST /resultados/calcular-ahora — batch calculation", () => {
     test("calculates active indicators for current month and returns summary", async () => {
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-      mockVersionFindAll.mockResolvedValue([makeVersion()]);
+      mockSequelizeQuery.mockResolvedValue([makeVersion()]);
       mockExecuteAndPersist.mockResolvedValue([]);
 
       const app = createTestApp();
@@ -638,7 +636,7 @@ describe("Resultados Router", () => {
       expect(res.body.mes_referencia).toBeDefined();
       // Verify executeAndPersist was called with mesReferencia and the
       // calcular-ahora execution options (indicadorId enables cross-version
-      // canonical supersede; zero-fill persists 0-valued months).
+      // canonical supersede).
       expect(mockExecuteAndPersist).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(Object),
@@ -649,7 +647,6 @@ describe("Resultados Router", () => {
         expect.objectContaining({
           indicadorId: UUID,
           fuente: "calcular-ahora",
-          persistirCeroSiVacio: true,
         }),
       );
     });
@@ -660,7 +657,7 @@ describe("Resultados Router", () => {
       const order1 = "concept-order-1";
       const order2 = "concept-order-2";
       mockIndicadorFindAll.mockResolvedValue([ind1, ind2]);
-      mockVersionFindAll.mockResolvedValue([
+      mockSequelizeQuery.mockResolvedValue([
         makeVersion({ indicador_id: ind1.id, definicion: {
           tipo: "conteo_atenciones",
           evento: { ordenes: [{ concepto_uuid: order1 }] },
@@ -679,7 +676,11 @@ describe("Resultados Router", () => {
       const res = await supertest(app).post("/resultados/calcular-ahora");
 
       expect(res.status).toBe(200);
-      expect(mockVersionFindAll).toHaveBeenCalledTimes(1);
+      // One batched DISTINCT ON lookup for every active indicator.
+      expect(mockSequelizeQuery).toHaveBeenCalledWith(
+        expect.stringContaining("DISTINCT ON"),
+        expect.objectContaining({ type: expect.any(String) }),
+      );
       expect(mockResolveConceptMap).toHaveBeenCalledTimes(1);
       expect(mockResolveConceptMap).toHaveBeenCalledWith([order1, order2]);
       expect(mockExecuteAndPersist).toHaveBeenCalledTimes(2);
@@ -689,7 +690,7 @@ describe("Resultados Router", () => {
       jest.useFakeTimers().setSystemTime(new Date("2026-08-15T22:30:00.000Z"));
       try {
         mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-        mockVersionFindAll.mockResolvedValue([makeVersion()]);
+        mockSequelizeQuery.mockResolvedValue([makeVersion()]);
 
         const app = createTestApp();
         const res = await supertest(app).post("/resultados/calcular-ahora");
@@ -720,7 +721,7 @@ describe("Resultados Router", () => {
 
     test("reports error for indicator without versions", async () => {
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-      mockVersionFindAll.mockResolvedValue([]);
+      mockSequelizeQuery.mockResolvedValue([]);
 
       const app = createTestApp();
       const res = await supertest(app).post(
@@ -746,7 +747,7 @@ describe("Resultados Router", () => {
 
     test("does not expose calculation errors but records the raw error", async () => {
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-      mockVersionFindAll.mockResolvedValue([makeVersion()]);
+      mockSequelizeQuery.mockResolvedValue([makeVersion()]);
       mockExecuteAndPersist.mockRejectedValue(new Error("raw DB error"));
 
       const app = createTestApp();
@@ -774,7 +775,7 @@ describe("Resultados Router", () => {
     test("ledger write failure does not break the calculation response", async () => {
       mockCalculoLogCreate.mockRejectedValue(new Error("ledger db down"));
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
-      mockVersionFindAll.mockResolvedValue([makeVersion()]);
+      mockSequelizeQuery.mockResolvedValue([makeVersion()]);
 
       const app = createTestApp();
       const res = await supertest(app).post(
@@ -790,7 +791,7 @@ describe("Resultados Router", () => {
       const ind1 = makeIndicador({ id: "uuid-1", nombre: "Ind 1" });
       const ind2 = makeIndicador({ id: "uuid-2", nombre: "Ind 2" });
       mockIndicadorFindAll.mockResolvedValue([ind1, ind2]);
-      mockVersionFindAll.mockResolvedValue([
+      mockSequelizeQuery.mockResolvedValue([
         makeVersion({ indicador_id: "uuid-1" }),
       ]);
 
@@ -903,7 +904,6 @@ describe("Resultados Router", () => {
         expect.objectContaining({
           indicadorId: UUID,
           fuente: "recalcular-anio",
-          persistirCeroSiVacio: true,
         }),
       );
       // Batch version query was used (not per-month findOne)

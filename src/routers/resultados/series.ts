@@ -1,12 +1,14 @@
 /**
  * GET /resultados/series handler — time-series rollups.
  *
- * Returns monthly, quarterly, semestral, or annual aggregations from
- * canonical monthly results. Optionally enriches with annual meta targets.
+ * Returns monthly, quarterly, semestral, or annual aggregations from the
+ * rollup views over canonical monthly results. Optionally enriches with
+ * annual meta targets.
  */
 import type { Request, Response } from "express";
 import { QueryTypes } from "sequelize";
 import { sequelize } from "../../database/postgres.js";
+import { findLatestVersion } from "../../indicators/latest-version.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -26,6 +28,14 @@ interface SeriesRow {
 }
 
 // ── SQL templates ──────────────────────────────────────────────────────────
+//
+// These read the rollup views created in src/database/views.ts rather than
+// re-deriving the quarterly/semestral/annual aggregation, so the time-series
+// math has a single definition shared with direct SQL consumers.
+//
+// The views split results by version; each template groups that version
+// dimension away to keep the per-indicator contract of one row per period,
+// with `versiones` listing every contributing version.
 
 const GRANULARITY_SQL: Record<Granularity, string> = {
   mensual: `
@@ -33,69 +43,54 @@ const GRANULARITY_SQL: Record<Granularity, string> = {
       TO_CHAR(mes_referencia, 'YYYY-MM') AS periodo_label,
       mes_referencia,
       EXTRACT(YEAR FROM mes_referencia)::int AS anio,
-      SUM(valor)::numeric AS valor,
-      COUNT(*)::int AS meses_disponibles,
-      iv.version AS version_num,
-      iv.id AS version_id
-    FROM indicador_resultado ir
-    JOIN indicador_version iv ON iv.id = ir.indicador_version_id
-    WHERE iv.indicador_id = :indicador_id
-      AND ir.es_canonico = true
-      AND EXTRACT(YEAR FROM ir.mes_referencia) = :anio
-    GROUP BY mes_referencia, iv.version, iv.id
+      1 AS meses_disponibles,
+      valor,
+      version AS version_num,
+      version_id
+    FROM vw_resultado_mensual
+    WHERE indicador_id = :indicador_id
+      AND EXTRACT(YEAR FROM mes_referencia) = :anio
     ORDER BY mes_referencia
   `,
   trimestral: `
     SELECT
-      EXTRACT(YEAR FROM mes_referencia)::int AS anio,
-      EXTRACT(QUARTER FROM mes_referencia)::int AS trimestre,
-      'Q' || EXTRACT(QUARTER FROM mes_referencia)::int AS periodo_label,
+      anio,
+      trimestre,
+      periodo_label,
       SUM(valor)::numeric AS valor,
-      COUNT(*)::int AS meses_disponibles,
-      ARRAY_AGG(DISTINCT iv.version ORDER BY iv.version)::int[] AS versiones
-    FROM indicador_resultado ir
-    JOIN indicador_version iv ON iv.id = ir.indicador_version_id
-    WHERE iv.indicador_id = :indicador_id
-      AND ir.es_canonico = true
-      AND EXTRACT(YEAR FROM ir.mes_referencia) = :anio
-    GROUP BY EXTRACT(YEAR FROM mes_referencia), EXTRACT(QUARTER FROM mes_referencia)
+      SUM(meses_disponibles)::int AS meses_disponibles,
+      ARRAY_AGG(DISTINCT version ORDER BY version)::int[] AS versiones
+    FROM vw_resultado_trimestral
+    WHERE indicador_id = :indicador_id
+      AND anio = :anio
+    GROUP BY anio, trimestre, periodo_label
     ORDER BY trimestre
   `,
   semestral: `
     SELECT
-      EXTRACT(YEAR FROM mes_referencia)::int AS anio,
-      CASE
-        WHEN EXTRACT(MONTH FROM mes_referencia) <= 6 THEN 1 ELSE 2
-      END AS semestre,
-      'H' || CASE
-        WHEN EXTRACT(MONTH FROM mes_referencia) <= 6 THEN 1 ELSE 2
-      END AS periodo_label,
+      anio,
+      semestre,
+      periodo_label,
       SUM(valor)::numeric AS valor,
-      COUNT(*)::int AS meses_disponibles,
-      ARRAY_AGG(DISTINCT iv.version ORDER BY iv.version)::int[] AS versiones
-    FROM indicador_resultado ir
-    JOIN indicador_version iv ON iv.id = ir.indicador_version_id
-    WHERE iv.indicador_id = :indicador_id
-      AND ir.es_canonico = true
-      AND EXTRACT(YEAR FROM ir.mes_referencia) = :anio
-    GROUP BY
-      EXTRACT(YEAR FROM mes_referencia),
-      CASE WHEN EXTRACT(MONTH FROM mes_referencia) <= 6 THEN 1 ELSE 2 END
+      SUM(meses_disponibles)::int AS meses_disponibles,
+      ARRAY_AGG(DISTINCT version ORDER BY version)::int[] AS versiones
+    FROM vw_resultado_semestral
+    WHERE indicador_id = :indicador_id
+      AND anio = :anio
+    GROUP BY anio, semestre, periodo_label
     ORDER BY semestre
   `,
   anual: `
     SELECT
-      EXTRACT(YEAR FROM mes_referencia)::int AS anio,
-      TO_CHAR(MIN(mes_referencia), 'YYYY') AS periodo_label,
+      anio,
+      anio::text AS periodo_label,
       SUM(valor)::numeric AS valor,
-      COUNT(*)::int AS meses_disponibles,
-      ARRAY_AGG(DISTINCT iv.version ORDER BY iv.version)::int[] AS versiones
-    FROM indicador_resultado ir
-    JOIN indicador_version iv ON iv.id = ir.indicador_version_id
-    WHERE iv.indicador_id = :indicador_id
-      AND ir.es_canonico = true
-      AND EXTRACT(YEAR FROM ir.mes_referencia) = :anio
-    GROUP BY EXTRACT(YEAR FROM mes_referencia)
+      SUM(meses_disponibles)::int AS meses_disponibles,
+      ARRAY_AGG(DISTINCT version ORDER BY version)::int[] AS versiones
+    FROM vw_resultado_anual
+    WHERE indicador_id = :indicador_id
+      AND anio = :anio
+    GROUP BY anio
     ORDER BY anio
   `,
 };
@@ -188,13 +183,7 @@ export async function handleSeries(req: Request, res: Response): Promise<void> {
   // Enrich with meta values when requested
   if (includeMeta && indicadorId) {
     const distinctYears = [...new Set(items.map((r) => r.anio as number))];
-    const [latestVersion] = await sequelize.query<{ id: string }>(
-      `SELECT iv.id FROM indicador_version iv
-       JOIN indicador i ON i.id = iv.indicador_id
-       WHERE iv.indicador_id = :iId AND i.activo = true
-       ORDER BY iv.version DESC LIMIT 1`,
-      { replacements: { iId: indicadorId }, type: QueryTypes.SELECT },
-    );
+    const latestVersion = await findLatestVersion(indicadorId, true);
     const metaMap = new Map<number, number | null>();
     if (latestVersion && distinctYears.length > 0) {
       const metaRows = await sequelize.query<{ anio: number; valor_meta: string }>(

@@ -6,6 +6,7 @@
  */
 import type { Request, Response } from "express";
 import { Indicador, IndicadorVersion } from "../../models/indicador.js";
+import { findLatestVersion, type LatestVersion } from "../../indicators/latest-version.js";
 import { parseDefinicionIndicador } from "../../types/definicion.js";
 import { buildQuery } from "../../engine/interpreter.js";
 import { calcularMesActual } from "../../engine/periodo.js";
@@ -30,7 +31,7 @@ export async function handlePreviewSql(
     | string
     | undefined;
 
-  let version: IndicadorVersion | null;
+  let version: LatestVersion | null;
   if (versionId) {
     version = await IndicadorVersion.findOne({
       where: {
@@ -45,10 +46,7 @@ export async function handlePreviewSql(
       return;
     }
   } else {
-    version = await IndicadorVersion.findOne({
-      where: { indicador_id: indicador.id },
-      order: [["version", "DESC"]],
-    });
+    version = await findLatestVersion(indicador.id, false);
     if (!version) {
       res.status(404).json({
         detail: "El indicador no tiene versiones definidas",

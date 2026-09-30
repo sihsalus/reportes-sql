@@ -48,16 +48,46 @@ beforeEach(() => {
 });
 
 describe("ensureCanonicalResultIndex", () => {
+  test("drops the redundant index superseded by the unique guard", async () => {
+    await ensureCanonicalResultIndex();
+
+    const dropSql = mockQuery.mock.calls
+      .map((c) => c[0] as string)
+      .find((sql) => sql.includes("DROP INDEX IF EXISTS"));
+    expect(dropSql).toBeDefined();
+    expect(dropSql).toContain("idx_resultado_version_mes_canonico");
+  });
+
   test("creates the partial canonical month index idempotently", async () => {
     await ensureCanonicalResultIndex();
 
-    expect(mockQuery).toHaveBeenCalledTimes(2);
-    expect(mockQuery.mock.calls[0]?.[0]).toContain(
+    const canonicoSql = mockQuery.mock.calls
+      .map((c) => c[0] as string)
+      .find((sql) => sql.includes("idx_resultado_canonico_mes"));
+    expect(canonicoSql).toBeDefined();
+    expect(canonicoSql).toContain(
       "CREATE INDEX IF NOT EXISTS idx_resultado_canonico_mes",
     );
-    expect(mockQuery.mock.calls[0]?.[0]).toContain(
-      "WHERE es_canonico = true",
+    expect(canonicoSql).toContain("WHERE es_canonico = true");
+  });
+
+  test("creates the period index used by GET /resultados on existing tables", async () => {
+    await ensureCanonicalResultIndex();
+
+    const periodoSql = mockQuery.mock.calls
+      .map((c) => c[0] as string)
+      .find((sql) => sql.includes("idx_resultado_periodo"));
+    expect(periodoSql).toBeDefined();
+    expect(periodoSql).toContain(
+      "CREATE INDEX IF NOT EXISTS idx_resultado_periodo",
     );
+    expect(periodoSql).toContain("periodo_inicio, periodo_fin");
+  });
+
+  test("issues four idempotent DDL statements", async () => {
+    await ensureCanonicalResultIndex();
+
+    expect(mockQuery).toHaveBeenCalledTimes(4);
   });
 
   test("creates a unique guard so only one canonical row survives per version+month", async () => {
@@ -194,6 +224,16 @@ describe("createRollupViews", () => {
     expect(anualSql).toBeDefined();
     expect(anualSql![0]).toContain("EXTRACT(YEAR FROM");
     expect(anualSql![0]).toContain("TO_CHAR");
+
+    // Aggregate-safe period label: TO_CHAR(mes_referencia, 'YYYY') without an
+    // aggregate is invalid when the query groups by EXTRACT(YEAR ...). This is
+    // the guard that /resultados/series no longer has to duplicate.
+    expect(anualSql![0]).toMatch(
+      /TO_CHAR\(\s*MIN\(\s*(?:ir\.)?mes_referencia\s*\)\s*,\s*'YYYY'\s*\)/i,
+    );
+    expect(anualSql![0]).not.toMatch(
+      /TO_CHAR\(\s*(?:ir\.)?mes_referencia\s*,\s*'YYYY'\s*\)/i,
+    );
   });
 
   test("all views use RAW query type", async () => {

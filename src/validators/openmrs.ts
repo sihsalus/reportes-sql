@@ -18,7 +18,7 @@ export { OpenMRSUnavailableError };
  * Validate all UUID strings exist in the OpenMRS location table.
  *
  * Queries the sync MySQL database with a single parameterized SELECT
- * to avoid N+1 queries.
+ * to avoid N+1 queries. Retired locations are excluded.
  *
  * @param uuids - Set of UUID strings to validate.
  * @returns Array of unknown UUIDs. Empty array means all valid.
@@ -38,7 +38,10 @@ export async function validarLocations(
       params[`uuid_${i}`] = u;
     });
 
-    const rows = await queryMysql<{ uuid: string }>(`SELECT uuid FROM location WHERE uuid IN (${placeholders})`, params);
+    const rows = await queryMysql<{ uuid: string }>(
+      `SELECT uuid FROM location WHERE uuid IN (${placeholders}) AND retired = 0`,
+      params,
+    );
 
     const encontrados = new Set(rows.map((r) => r.uuid));
     const desconocidos = uuidArray.filter((u) => !encontrados.has(u));

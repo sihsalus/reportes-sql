@@ -66,6 +66,7 @@ describe("validarLocations", () => {
     const [sql, params] = mockQueryMysql.mock.calls[0];
     expect(sql).toContain("SELECT uuid FROM location");
     expect(sql).toContain("WHERE uuid IN");
+    expect(sql).toContain("retired = 0");
     expect(params).toEqual({ uuid_0: UUID1, uuid_1: UUID2 });
   });
 

@@ -20,8 +20,8 @@ import swaggerUi from "swagger-ui-express";
 import { ZodError } from "zod";
 import { settings, warnDefaultCredentials } from "./config/index.js";
 import { logger, requestLogger } from "./config/logger.js";
-import { sequelize } from "./database/postgres.js";
-import { disposeMysql } from "./database/mysql.js";
+import { sequelize, testPostgresConnection, disposePostgres } from "./database/postgres.js";
+import { disposeMysql, queryMysql } from "./database/mysql.js";
 import {
   ensureCanonicalResultIndex,
   deduplicateCanonicalResults,
@@ -74,6 +74,43 @@ function accessLogMiddleware(req: Request, res: Response, next: NextFunction): v
   });
 
   next();
+}
+
+/**
+ * Probe the OpenMRS MySQL database without throwing.
+ *
+ * `queryMysql` already bounds the connect/acquire/query waits, so the probe
+ * cannot hang indefinitely: it fails fast with a 503 when OpenMRS is down.
+ */
+async function probeOpenmrsMysql(): Promise<boolean> {
+  try {
+    await queryMysql("SELECT 1", {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Readiness probe — reports whether the service can reach its data stores.
+ *
+ * Both databases are required to serve traffic: PostgreSQL stores results and
+ * the OpenMRS MySQL database backs concept resolution and every calculation.
+ * A degraded dependency returns 503 so gateways stop routing to this instance.
+ */
+async function healthHandler(_req: Request, res: Response): Promise<void> {
+  const [postgres, openmrsMysql] = await Promise.all([
+    testPostgresConnection(),
+    probeOpenmrsMysql(),
+  ]);
+  const ok = postgres && openmrsMysql;
+  res.status(ok ? 200 : 503).json({
+    status: ok ? "ok" : "error",
+    checks: {
+      postgres: postgres ? "ok" : "error",
+      openmrs_mysql: openmrsMysql ? "ok" : "error",
+    },
+  });
 }
 
 /** Fallback UUID for runtimes without `globalThis.crypto.randomUUID`. */
@@ -137,9 +174,7 @@ app.use(accessLogMiddleware);
     res.json(spec);
   });
   publicRouter.use("/docs", swaggerUi.serve, swaggerUi.setup(spec));
-  publicRouter.get("/health", (_req: Request, res: Response) => {
-    res.json({ status: "ok" });
-  });
+  publicRouter.get("/health", healthHandler);
 
   // ── Mount public router ───────────────────────────────────────────────
 
@@ -148,9 +183,7 @@ app.use(accessLogMiddleware);
 
   // Root-level health always available when prefix is set (gateway probes)
   if (basePath) {
-    app.get("/health", (_req: Request, res: Response) => {
-      res.json({ status: "ok" });
-    });
+    app.get("/health", healthHandler);
   }
 
   // ── Error middleware ──────────────────────────────────────────────────
@@ -260,7 +293,7 @@ async function start(): Promise<void> {
     server.closeIdleConnections?.();
     server.close();
     await disposeMysql();
-    await sequelize.close();
+    await disposePostgres();
     logger.info("Shutdown complete.");
     process.exit(0);
   };

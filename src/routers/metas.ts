@@ -10,6 +10,7 @@ import { Router, type Request, type Response } from "express";
 import { QueryTypes } from "sequelize";
 import { IndicadorVersion, IndicadorMeta } from "../models/indicador.js";
 import { sequelize } from "../database/postgres.js";
+import { findLatestVersion } from "../indicators/latest-version.js";
 import {
   MetaUpsertSchema,
   MetaQuerySchema,
@@ -109,19 +110,10 @@ metasRouter.get(
     if (query.indicador_version_id) {
       versionId = query.indicador_version_id;
     } else {
+      // MetaQuerySchema guarantees exactly one of the two ids is present.
+      const indicadorId = query.indicador_id as string;
       // Resolve latest active version for indicador_id
-      const [latestVersion] = await sequelize.query<{ id: string }>(
-        `SELECT iv.id
-         FROM indicador_version iv
-         JOIN indicador i ON i.id = iv.indicador_id
-         WHERE iv.indicador_id = :indicador_id AND i.activo = true
-         ORDER BY iv.version DESC
-         LIMIT 1`,
-        {
-          replacements: { indicador_id: query.indicador_id },
-          type: QueryTypes.SELECT,
-        },
-      );
+      const latestVersion = await findLatestVersion(indicadorId, true);
 
       if (!latestVersion) {
         res.status(404).json({

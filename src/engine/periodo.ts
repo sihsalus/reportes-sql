@@ -32,11 +32,22 @@ export function calcularMesActual(): {
 /**
  * Calculate the boundaries for a specific month given its first day.
  * Used when recalculating historical months.
+ *
+ * @throws RangeError when `anio` is not an integer or `mes` is outside 1-12.
+ *   `Date.UTC` would otherwise normalize out-of-range values silently
+ *   (month 13 becomes January of the next year, month 0 December of the
+ *   previous one), producing results attributed to the wrong month.
  */
 export function calcularMesEspecifico(
   anio: number,
   mes: number, // 1-indexed (January = 1)
 ): { inicio: Date; fin: Date; mes_referencia: Date } {
+  if (!Number.isInteger(anio)) {
+    throw new RangeError(`anio debe ser un entero: ${String(anio)}`);
+  }
+  if (!Number.isInteger(mes) || mes < 1 || mes > 12) {
+    throw new RangeError(`mes debe estar entre 1 y 12: ${String(mes)}`);
+  }
   const inicio = new Date(Date.UTC(anio, mes - 1, 1));
   const fin = new Date(Date.UTC(anio, mes, 0)); // last day of month
   return { inicio, fin, mes_referencia: inicio };

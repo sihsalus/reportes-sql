@@ -29,8 +29,6 @@ export interface ExecuteAndPersistOpts {
   indicadorId?: string;
   /** Origin label for the ledger (e.g. 'calcular-ahora', 'recalcular-anio'). */
   fuente?: string;
-  /** Persist a 0-valued canonical row when MySQL returns no rows for a month. */
-  persistirCeroSiVacio?: boolean;
 }
 
 /**
@@ -68,7 +66,7 @@ function isUniqueViolation(err: unknown): boolean {
  * @param periodoInicio - Start date of the calculation period.
  * @param periodoFin - End date of the calculation period.
  * @param mesReferencia - Canonical month reference (first day of month).
- * @param opts - Optional execution context (indicator id, ledger source, zero-fill).
+ * @param opts - Optional execution context (indicator id, ledger source).
  * @returns The list of persisted IndicadorResultado instances.
  */
 export async function executeAndPersist(
@@ -116,22 +114,6 @@ export async function executeAndPersist(
           calculado_en: now,
           mes_referencia: diaMes as unknown as Date | null,
           es_canonico: diaMes != null,
-        }),
-      );
-    }
-
-    // A month that yields no rows is still a computed month: persist 0 so it
-    // is distinguishable from a never-calculated month in series/views.
-    if (results.length === 0 && opts.persistirCeroSiVacio && diaMes != null) {
-      results.push(
-        IndicadorResultado.build({
-          indicador_version_id: indicadorVersionId,
-          periodo_inicio: diaInicio as unknown as Date,
-          periodo_fin: diaFin as unknown as Date,
-          valor: 0,
-          calculado_en: now,
-          mes_referencia: diaMes as unknown as Date,
-          es_canonico: true,
         }),
       );
     }

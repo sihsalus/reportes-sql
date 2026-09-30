@@ -754,7 +754,8 @@ describe("Indicadores Router", () => {
   describe("GET /indicadores/:id/preview-sql — SQL preview", () => {
     test("returns SQL preview for latest version (no version param)", async () => {
       mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
-      mockVersionFindOne.mockResolvedValue(makeVersionRow());
+      // Latest version is resolved through the shared helper (raw SQL).
+      mockSequelizeQuery.mockResolvedValue([makeVersionRow()]);
 
       const app = createTestApp();
       const res = await supertest(app).get(

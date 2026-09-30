@@ -24,6 +24,7 @@ import {
 import { parseDefinicionIndicador } from "../types/definicion.js";
 import { buildQuery } from "../engine/interpreter.js";
 import { executeAndPersist } from "../engine/executor.js";
+import { findLatestVersions } from "../indicators/latest-version.js";
 import { writeCalcLog } from "../engine/calc-log.js";
 import { queryMysql } from "../database/mysql.js";
 import { calcularMesActual } from "../engine/periodo.js";
@@ -219,20 +220,10 @@ resultadosRouter.post(
     const { inicio, fin, finPersistencia, mes_referencia } = calcularMesActual();
 
     // Batch the latest-version lookup instead of issuing one query per
-    // indicator. Ordering lets us keep the first row for each indicator.
-    const indicadorIds = indicadores.map((indicador) => indicador.id);
-    const versions = indicadorIds.length > 0
-      ? await IndicadorVersion.findAll({
-          where: { indicador_id: indicadorIds },
-          order: [["indicador_id", "ASC"], ["version", "DESC"]],
-        })
-      : [];
-    const latestVersionByIndicador = new Map<string, IndicadorVersion>();
-    for (const version of versions) {
-      if (!latestVersionByIndicador.has(version.indicador_id)) {
-        latestVersionByIndicador.set(version.indicador_id, version);
-      }
-    }
+    // indicator.
+    const latestVersionByIndicador = await findLatestVersions(
+      indicadores.map((indicador) => indicador.id),
+    );
 
     // Parse definitions and collect all order concepts before making one
     // OpenMRS lookup for the complete batch.
@@ -354,7 +345,6 @@ resultadosRouter.post(
           {
             indicadorId: indicador.id,
             fuente: "calcular-ahora",
-            persistirCeroSiVacio: true,
           },
         );
 

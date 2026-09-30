@@ -87,6 +87,8 @@ IndicadorVersion.init(
         model: Indicador,
         key: "id",
       },
+      onDelete: "CASCADE",
+      onUpdate: "CASCADE",
     },
     version: {
       type: DataTypes.INTEGER,
@@ -145,6 +147,8 @@ IndicadorResultado.init(
         model: IndicadorVersion,
         key: "id",
       },
+      onDelete: "CASCADE",
+      onUpdate: "CASCADE",
     },
     periodo_inicio: {
       type: DataTypes.DATEONLY,
@@ -178,10 +182,6 @@ IndicadorResultado.init(
     tableName: "indicador_resultado",
     timestamps: false,
     indexes: [
-      {
-        name: "idx_resultado_version_mes_canonico",
-        fields: ["indicador_version_id", "mes_referencia", "es_canonico"],
-      },
       {
         name: "idx_resultado_canonico_mes",
         fields: ["mes_referencia"],
@@ -228,6 +228,8 @@ IndicadorMeta.init(
         model: IndicadorVersion,
         key: "id",
       },
+      onDelete: "CASCADE",
+      onUpdate: "CASCADE",
     },
     anio: {
       type: DataTypes.INTEGER,
@@ -289,6 +291,9 @@ IndicadorCalculoLog.init(
         model: Indicador,
         key: "id",
       },
+      // The ledger is an audit trail: keep the row when its indicator goes.
+      onDelete: "SET NULL",
+      onUpdate: "CASCADE",
     },
     indicador_version_id: {
       type: DataTypes.UUID,
@@ -297,6 +302,8 @@ IndicadorCalculoLog.init(
         model: IndicadorVersion,
         key: "id",
       },
+      onDelete: "SET NULL",
+      onUpdate: "CASCADE",
     },
     mes_referencia: {
       type: DataTypes.DATEONLY,
@@ -380,39 +387,55 @@ AppMetadata.init(
 );
 
 // ── Associations ───────────────────────────────────────────────────────
+//
+// Referential actions mirror the FK declarations above: deleting an indicator
+// removes its versions, and deleting a version removes its results and metas.
+// The ledger keeps its rows (its FKs are SET NULL).
 
 Indicador.hasMany(IndicadorVersion, {
   sourceKey: "id",
   foreignKey: "indicador_id",
   as: "versiones",
+  onDelete: "CASCADE",
+  onUpdate: "CASCADE",
 });
 
 IndicadorVersion.belongsTo(Indicador, {
   targetKey: "id",
   foreignKey: "indicador_id",
   as: "indicador",
+  onDelete: "CASCADE",
+  onUpdate: "CASCADE",
 });
 
 IndicadorVersion.hasMany(IndicadorResultado, {
   sourceKey: "id",
   foreignKey: "indicador_version_id",
   as: "resultados",
+  onDelete: "CASCADE",
+  onUpdate: "CASCADE",
 });
 
 IndicadorResultado.belongsTo(IndicadorVersion, {
   targetKey: "id",
   foreignKey: "indicador_version_id",
   as: "indicador_version",
+  onDelete: "CASCADE",
+  onUpdate: "CASCADE",
 });
 
 IndicadorVersion.hasMany(IndicadorMeta, {
   sourceKey: "id",
   foreignKey: "indicador_version_id",
   as: "metas",
+  onDelete: "CASCADE",
+  onUpdate: "CASCADE",
 });
 
 IndicadorMeta.belongsTo(IndicadorVersion, {
   targetKey: "id",
   foreignKey: "indicador_version_id",
   as: "indicador_version",
+  onDelete: "CASCADE",
+  onUpdate: "CASCADE",
 });

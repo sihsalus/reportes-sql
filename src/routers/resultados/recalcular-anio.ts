@@ -8,14 +8,13 @@
  * then per-indicator × per-month execution with error isolation.
  */
 import type { Request, Response } from "express";
-import { QueryTypes } from "sequelize";
-import { Indicador, IndicadorVersion } from "../../models/indicador.js";
-import { sequelize } from "../../database/postgres.js";
+import { Indicador } from "../../models/indicador.js";
 import { parseDefinicionIndicador } from "../../types/definicion.js";
 import { buildQuery } from "../../engine/interpreter.js";
 import { executeAndPersist } from "../../engine/executor.js";
 import { writeCalcLog } from "../../engine/calc-log.js";
 import { calcularMesEspecifico } from "../../engine/periodo.js";
+import { findLatestVersions } from "../../indicators/latest-version.js";
 import { resolveConceptMap, OpenMRSUnavailableError } from "../../validators/openmrs.js";
 import { rateLimit } from "./rate-limit.js";
 
@@ -90,34 +89,7 @@ export async function handleRecalcularAnio(
   for (let m = 1; m <= maxMes; m++) meses.push(m);
 
   // ── Phase 1: Batch version lookup (single DISTINCT ON query) ──
-  const indicadorIds = indicadores.map((i) => i.id);
-
-  interface VersionRow {
-    id: string;
-    indicador_id: string;
-    version: number;
-    definicion: Record<string, unknown>;
-  }
-
-  const versionRows: VersionRow[] =
-    indicadorIds.length > 0
-      ? await sequelize.query<VersionRow>(
-          `SELECT DISTINCT ON (indicador_id)
-             id, indicador_id, version, definicion
-           FROM indicador_version
-           WHERE indicador_id IN (:indicador_ids)
-           ORDER BY indicador_id, version DESC`,
-          {
-            replacements: { indicador_ids: indicadorIds },
-            type: QueryTypes.SELECT,
-          },
-        )
-      : [];
-
-  const versionMap = new Map<string, VersionRow>();
-  for (const row of versionRows) {
-    versionMap.set(row.indicador_id, row);
-  }
+  const versionMap = await findLatestVersions(indicadores.map((i) => i.id));
 
   // ── Phase 2: Parse definitions + collect all concept UUIDs ──
   const definicionMap = new Map<string, ReturnType<typeof parseDefinicionIndicador>>();
@@ -271,7 +243,6 @@ export async function handleRecalcularAnio(
           {
             indicadorId: indicador.id,
             fuente: "recalcular-anio",
-            persistirCeroSiVacio: true,
           },
         );
 

@@ -126,6 +126,8 @@ import supertest from "supertest";
 import type { Express } from "express";
 import { createApp } from "../src/main.js";
 import { normalizeBasePath } from "../src/config/index.js";
+import { queryMysql } from "../src/database/mysql.js";
+import { testPostgresConnection } from "../src/database/postgres.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -133,6 +135,13 @@ function requestFor(basePath: string) {
   const app: Express = createApp(normalizeBasePath(basePath));
   return { app, request: supertest(app) };
 }
+
+// /health is a readiness probe: it reports each data store. The database
+// modules are mocked above as reachable, so every probe returns "ok".
+const HEALTHY_BODY = {
+  status: "ok",
+  checks: { postgres: "ok", openmrs_mysql: "ok" },
+};
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -192,7 +201,7 @@ describe("default routing — BASE_PATH empty", () => {
   it("serves /health at root", async () => {
     const res = await request.get("/health");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: "ok" });
+    expect(res.body).toEqual(HEALTHY_BODY);
   });
 
   it("serves /indicadores at root", async () => {
@@ -235,6 +244,36 @@ describe("default routing — BASE_PATH empty", () => {
   });
 });
 
+// ── Readiness probe failure modes ───────────────────────────────────────
+
+describe("/health readiness probe", () => {
+  it("returns 503 when the OpenMRS MySQL database is unreachable", async () => {
+    const { request } = requestFor("");
+    jest.mocked(queryMysql).mockRejectedValueOnce(new Error("mysql down"));
+
+    const res = await request.get("/health");
+
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({
+      status: "error",
+      checks: { postgres: "ok", openmrs_mysql: "error" },
+    });
+  });
+
+  it("returns 503 when PostgreSQL is unreachable", async () => {
+    const { request } = requestFor("");
+    jest.mocked(testPostgresConnection).mockResolvedValueOnce(false);
+
+    const res = await request.get("/health");
+
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({
+      status: "error",
+      checks: { postgres: "error", openmrs_mysql: "ok" },
+    });
+  });
+});
+
 // ── Prefixed routing (BASE_PATH set) ────────────────────────────────────
 
 describe("prefixed routing — BASE_PATH=/openmrs/services/reportes-sql", () => {
@@ -244,13 +283,13 @@ describe("prefixed routing — BASE_PATH=/openmrs/services/reportes-sql", () => 
   it("serves /health at root (unprefixed gateway probe)", async () => {
     const res = await request.get("/health");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: "ok" });
+    expect(res.body).toEqual(HEALTHY_BODY);
   });
 
   it("serves /health at prefixed path too", async () => {
     const res = await request.get(`${prefix}/health`);
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: "ok" });
+    expect(res.body).toEqual(HEALTHY_BODY);
   });
 
   it("serves /indicadores at prefixed path", async () => {
@@ -311,7 +350,7 @@ describe("routing normalization edge cases", () => {
     const { request } = requestFor("/prefix/"); // normalizeBasePath strips trailing
     const res = await request.get("/prefix/health");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: "ok" });
+    expect(res.body).toEqual(HEALTHY_BODY);
   });
 
   it("root-prefixed /health does not interfere with prefix /health", async () => {
@@ -398,11 +437,11 @@ describe("incoming auth — requireSession gate", () => {
 
     const rootRes = await request.get("/health");
     expect(rootRes.status).toBe(200);
-    expect(rootRes.body).toEqual({ status: "ok" });
+    expect(rootRes.body).toEqual(HEALTHY_BODY);
 
     const prefixedRes = await request.get(`${prefix}/health`);
     expect(prefixedRes.status).toBe(200);
-    expect(prefixedRes.body).toEqual({ status: "ok" });
+    expect(prefixedRes.body).toEqual(HEALTHY_BODY);
 
     expect(mockFetch).not.toHaveBeenCalled();
   });
