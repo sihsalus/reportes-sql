@@ -173,7 +173,7 @@ describe("validarDefinicionEncounterTypeUuids", () => {
     encounterTypeUuids: string[] | undefined,
   ): DefinicionIndicador {
     return {
-      tipo: "conteo_pacientes_ventana",
+      tipo: "conteo_atenciones",
       evento: encounterTypeUuids
         ? { encounter_type_uuids: encounterTypeUuids }
         : undefined,

@@ -289,7 +289,7 @@ describe("Indicadores Router", () => {
         .send({
           nombre: "Test",
           definicion: {
-            tipo: "conteo_pacientes_ventana",
+            tipo: "conteo_atenciones",
             evento: { encounter_type_uuids: ["unknown-et-uuid"] },
           },
         });
@@ -333,7 +333,7 @@ describe("Indicadores Router", () => {
         .send({
           nombre: "Test",
           definicion: {
-            tipo: "conteo_pacientes_ventana",
+            tipo: "conteo_atenciones",
             evento: { encounter_type_uuids: ["et-uuid"] },
           },
         });
@@ -472,7 +472,7 @@ describe("Indicadores Router", () => {
         .send({
           nombre: "Updated",
           definicion: {
-            tipo: "conteo_pacientes_ventana",
+            tipo: "conteo_pacientes",
             evento: { encounter_type_uuids: ["unknown-et-uuid"] },
           },
         });
@@ -618,7 +618,7 @@ describe("Indicadores Router", () => {
         .post(`/indicadores/${INDICADOR_ID}/versiones`)
         .send({
           definicion: {
-            tipo: "conteo_pacientes_ventana",
+            tipo: "conteo_atenciones",
             evento: { encounter_type_uuids: ["unknown-et-uuid"] },
           },
         });

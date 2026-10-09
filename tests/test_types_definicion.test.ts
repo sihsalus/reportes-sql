@@ -76,21 +76,6 @@ describe("DefinicionIndicador", () => {
     ).toThrow(ZodError);
   });
 
-  test("conteo_pacientes_ventana accepted", () => {
-    const d = DefinicionIndicadorSchema.parse({
-      tipo: "conteo_pacientes_ventana",
-      evento: {
-        encounter_type_uuids: ["uuid-et"],
-        minimo_ocurrencias: 4,
-      },
-      poblacion: { max_dias: 28 },
-    });
-    expect(d.tipo).toBe("conteo_pacientes_ventana");
-    expect(d.evento!.encounter_type_uuids).toEqual(["uuid-et"]);
-    expect(d.evento!.minimo_ocurrencias).toBe(4);
-    expect(d.poblacion!.max_dias).toBe(28);
-  });
-
   test("invalid minimo_ocurrencias rejected", () => {
     expect(() =>
       FiltrosEventoSchema.parse({

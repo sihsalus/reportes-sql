@@ -22,7 +22,6 @@ import { z } from "zod";
 export const TipoIndicador = z.enum([
   "conteo_atenciones",
   "conteo_pacientes",
-  "conteo_pacientes_ventana",
 ]);
 export type TipoIndicador = z.infer<typeof TipoIndicador>;
 
