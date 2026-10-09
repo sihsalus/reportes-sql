@@ -7,6 +7,14 @@
  */
 import { jest } from "@jest/globals";
 
+// `src/config/index.ts` calls `dotenv.config()` at import time. Stub dotenv so
+// these unit tests are hermetic: they must assert the code defaults and
+// explicit process.env overrides, never a developer's local `.env`.
+jest.mock("dotenv", () => {
+  const config = () => ({ parsed: {} });
+  return { __esModule: true, config, default: { config } };
+});
+
 // Static import for env-independent pure functions
 import {
   parseCorsOrigins,

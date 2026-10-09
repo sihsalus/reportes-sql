@@ -46,3 +46,6 @@ node_modules/
 
 # Local commandcode state (never push)
 .commandcode/
+
+# Local engram memory state (never push)
+.engram/

@@ -20,6 +20,24 @@ yarn dev                     # http://localhost:8000
 - PostgreSQL 12+ (for indicator storage)
 - Access to an OpenMRS instance (MySQL + REST API)
 
+## Database schema
+
+The PostgreSQL schema (indicator tables and rollup views) is created on
+startup with `sequelize.sync()`. That call only **creates missing tables and
+views**; it never alters existing ones, and there are no migrations yet.
+
+Changing a column type therefore does **not** upgrade an existing database.
+Recreate the affected tables and restart the service:
+
+```sql
+DROP TABLE IF EXISTS indicador_meta, indicador_calculo_log, indicador_resultado,
+                     indicador_version, indicador CASCADE;
+```
+
+The official catalog is re-registered on startup when `AUTO_REGISTER_CATALOG`
+is enabled, and results/metas can be recomputed. `app_metadata` is left
+untouched on purpose.
+
 ## Environment variables
 
 Copy `.env.example` to `.env` and adjust for your environment.

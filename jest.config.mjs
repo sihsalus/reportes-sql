@@ -19,7 +19,6 @@ export default {
     ],
     "^.+\\.js$": "ts-jest",
   },
-  transformIgnorePatterns: ["node_modules/(?!(uuid)/)"],
   clearMocks: true,
   extensionsToTreatAsEsm: [".ts"],
   globalSetup: "<rootDir>/tests/jest-no-focused.mjs",
