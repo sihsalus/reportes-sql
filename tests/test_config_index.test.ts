@@ -106,9 +106,22 @@ beforeEach(() => {
   jest.spyOn(console, "error").mockImplementation(() => {});
   jest.spyOn(console, "info").mockImplementation(() => {});
   jest.spyOn(console, "debug").mockImplementation(() => {});
-  // Clear relevant env vars
+  // Clear relevant env vars so the defaults are asserted against a known
+  // environment, never the developer's shell or local `.env`.
+  delete process.env["INDICATORS_DB_HOST"];
+  delete process.env["INDICADORES_DB_HOST"];
+  delete process.env["INDICATORS_DB_PORT"];
+  delete process.env["INDICADORES_DB_PORT"];
+  delete process.env["INDICATORS_DB_NAME"];
+  delete process.env["INDICADORES_DB_NAME"];
+  delete process.env["INDICATORS_DB_USER"];
+  delete process.env["INDICADORES_DB_USER"];
   delete process.env["INDICATORS_DB_PASSWORD"];
   delete process.env["INDICADORES_DB_PASSWORD"];
+  delete process.env["OPENMRS_DB_HOST"];
+  delete process.env["OPENMRS_DB_PORT"];
+  delete process.env["OPENMRS_DB_NAME"];
+  delete process.env["OPENMRS_DB_USER"];
   delete process.env["OPENMRS_DB_PASSWORD"];
   delete process.env["OPENMRS_API_PASSWORD"];
   delete process.env["OPENMRS_DB_CONNECT_TIMEOUT_MS"];
