@@ -369,13 +369,83 @@ describe("Conceptos Router", () => {
       expect(res.body).toHaveLength(2);
     });
 
-    test("returns 400 when q is empty", async () => {
-      const app = createTestApp();
-      const res = await supertest(app).get(
-        "/conceptos/locations?q=",
+    test("lists the first page with an empty q, sorted by display", async () => {
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, {
+          results: [
+            { uuid: "l2", display: "UPSS Pediatría" },
+            { uuid: "l3", display: "Farmacia" },
+            { uuid: "l1", display: "UPSS Cirugía" },
+          ],
+        }),
       );
 
-      expect(res.status).toBe(400);
+      const app = createTestApp();
+      const res = await supertest(app).get("/conceptos/locations?q=");
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([
+        { uuid: "l3", display: "Farmacia" },
+        { uuid: "l1", display: "UPSS Cirugía" },
+        { uuid: "l2", display: "UPSS Pediatría" },
+      ]);
+      // The listing queries the services seed ("upss"), not a bare/empty q.
+      expect(
+        String((globalThis.fetch as jest.Mock).mock.calls[0]?.[0]),
+      ).toContain("q=upss");
+    });
+
+    test("lists when q is absent", async () => {
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, {
+          results: [{ uuid: "l1", display: "UPSS Cirugía" }],
+        }),
+      );
+
+      const app = createTestApp();
+      const res = await supertest(app).get("/conceptos/locations");
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([{ uuid: "l1", display: "UPSS Cirugía" }]);
+    });
+
+    test("applies limit and offset to the listing", async () => {
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, {
+          results: [
+            { uuid: "c", display: "C" },
+            { uuid: "a", display: "A" },
+            { uuid: "b", display: "B" },
+          ],
+        }),
+      );
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/locations?limit=1&offset=1",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([{ uuid: "b", display: "B" }]);
+    });
+
+    test("defaults to 50 and caps limit at 50", async () => {
+      const results = Array.from({ length: 60 }, (_, i) => ({
+        uuid: `u${String(i).padStart(3, "0")}`,
+        display: `Loc ${String(i).padStart(3, "0")}`,
+      }));
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, { results }),
+      );
+
+      const app = createTestApp();
+      const defaultRes = await supertest(app).get("/conceptos/locations");
+      const cappedRes = await supertest(app).get(
+        "/conceptos/locations?limit=100",
+      );
+
+      expect(defaultRes.body).toHaveLength(50);
+      expect(cappedRes.body).toHaveLength(50);
     });
   });
 

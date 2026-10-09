@@ -96,8 +96,8 @@ export const openapiSpec = {
     version: "0.1.0",
     description:
       "Microservicio para definición, versionado y cálculo de indicadores clínicos. " +
-      "Provee CRUD de indicadores con versionado semántico, cálculo bajo demanda, " +
-      "y proxy a conceptos y ubicaciones de OpenMRS.",
+      "Provee CRUD de indicadores con versionado semántico, cálculo bajo demanda y " +
+      "programado, y proxy a conceptos y ubicaciones de OpenMRS.",
   },
   servers: [
     { url: "http://localhost:8000", description: "Desarrollo local" },
@@ -854,20 +854,35 @@ export const openapiSpec = {
     "/conceptos/locations": {
       get: {
         tags: ["Conceptos"],
-        summary: "Buscar ubicaciones (locations) en OpenMRS",
+        summary: "Buscar o listar ubicaciones (locations) en OpenMRS",
         operationId: "buscarLocations",
         parameters: [
           {
             name: "q",
             in: "query",
-            required: true,
+            required: false,
             schema: { type: "string" },
-            description: "Término de búsqueda (mínimo 3 caracteres)",
+            description:
+              "Término de búsqueda. Si se omite o viene vacío, devuelve la primera página de servicios (UPSS).",
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: { type: "integer", default: 50, minimum: 1, maximum: 50 },
+            description: "Máximo de resultados (1-50, por defecto 50)",
+          },
+          {
+            name: "offset",
+            in: "query",
+            required: false,
+            schema: { type: "integer", default: 0, minimum: 0 },
+            description: "Desplazamiento para paginar (por defecto 0)",
           },
         ],
         responses: {
           "200": {
-            description: "Ubicaciones encontradas",
+            description: "Ubicaciones (orden estable por display ascendente)",
             content: {
               "application/json": {
                 schema: {
@@ -883,7 +898,6 @@ export const openapiSpec = {
               },
             },
           },
-          "400": { description: "Parámetro 'q' faltante" },
           "502": {
             description: "Error conectando a OpenMRS",
             content: { "application/json": { schema: Error502 } },

@@ -19,8 +19,50 @@ function shouldLog(level: Level): boolean {
   return LEVELS[level] >= LEVELS[currentLevel];
 }
 
+/**
+ * Time zone for log timestamps, fixed in code so logs always show the
+ * deployment's wall clock (Peru, UTC-5, no DST) regardless of the host or
+ * container TZ.
+ */
+const LOG_TIME_ZONE = "America/Lima";
+
+/**
+ * ISO-8601 timestamp in {@link LOG_TIME_ZONE} with an explicit offset
+ * (e.g. `2026-10-09T09:23:45.123-05:00`). Replaces the previous UTC-only
+ * `toISOString()` so log times match the local wall clock.
+ */
+function localIsoString(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: LOG_TIME_ZONE,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(date);
+  const part = (type: string): string =>
+    parts.find((p) => p.type === type)?.value ?? "";
+
+  const offsetName =
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: LOG_TIME_ZONE,
+      timeZoneName: "longOffset",
+    })
+      .formatToParts(date)
+      .find((p) => p.type === "timeZoneName")?.value ?? "GMT";
+  const offset = offsetName.replace("GMT", "") || "+00:00";
+
+  const ms = String(date.getMilliseconds()).padStart(3, "0");
+  return (
+    `${part("year")}-${part("month")}-${part("day")}` +
+    `T${part("hour")}:${part("minute")}:${part("second")}.${ms}${offset}`
+  );
+}
+
 function fmt(level: Level, msg: string, meta?: unknown): string {
-  const ts = new Date().toISOString();
+  const ts = localIsoString(new Date());
   if (meta !== undefined) {
     return isProduction
       ? JSON.stringify({ ts, level, msg, ...(meta as object) })

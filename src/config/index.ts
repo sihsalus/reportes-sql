@@ -47,6 +47,10 @@ export interface Settings {
   auto_register_catalog: boolean;
   cors_origins: string[];
 
+  // Scheduled recalculation
+  recalc_hour: number;
+  recalc_ventana_meses: number;
+
   // Routing
   base_path: string;
 }
@@ -76,6 +80,24 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   if (["1", "true", "yes", "on"].includes(normalized)) return true;
   if (["0", "false", "no", "off"].includes(normalized)) return false;
   return fallback;
+}
+
+/**
+ * Parse an integer env var within an inclusive range. Falls back when unset,
+ * empty, non-numeric, or out of range. Used for the scheduled-recalculation
+ * day (1-28) and hour (0-23), so a bad value never silently disables the run
+ * or fires on an impossible date.
+ */
+function parseIntInRange(
+  value: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (value === undefined || value === "") return fallback;
+  const parsed = parseInt(value, 10);
+  if (isNaN(parsed) || parsed < min || parsed > max) return fallback;
+  return parsed;
 }
 
 /**
@@ -176,8 +198,18 @@ export const settings: Settings = {
 
   port: parsePort(process.env["PORT"], 8000),
   auto_register_catalog: parseBoolean(
-    envEither("AUTO_REGISTER_CATALOG", "AUTO_SEED_DEFAULT_INDICATOR"),
+    process.env["AUTO_REGISTER_CATALOG"],
     true,
+  ),
+
+  recalc_hour: parseIntInRange(process.env["RECALC_HOUR"], 2, 0, 23),
+  // Rolling window of months to recalculate each nightly run: the current
+  // month plus this many minus one previous ones (to absorb late data entry).
+  recalc_ventana_meses: parseIntInRange(
+    process.env["RECALC_VENTANA_MESES"],
+    3,
+    1,
+    24,
   ),
 
   cors_origins: parseCorsOrigins(process.env["CORS_ORIGINS"]),

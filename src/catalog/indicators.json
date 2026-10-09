@@ -1,13 +1,5 @@
 [
   {
-    "nombre": "seed/default-indicator",
-    "descripcion": "Auto-seeded default indicator for bootstrap/testing.",
-    "definicion": {
-      "tipo": "conteo_atenciones"
-    },
-    "activo": true
-  },
-  {
     "nombre": "5000027 Infección respiratoria aguda (IRA) no complicada en menores de 5 años",
     "descripcion": "Sumatoria mensual de atenciones ambulatorias de menores de 5 años con diagnóstico definitivo de IRA no complicada (J00.X, J04.0, J04.1, J04.2, J06.0, J06.8, J06.9, J20.9).",
     "definicion": {

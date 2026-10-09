@@ -114,6 +114,8 @@ beforeEach(() => {
   delete process.env["OPENMRS_DB_CONNECT_TIMEOUT_MS"];
   delete process.env["OPENMRS_DB_ACQUIRE_TIMEOUT_MS"];
   delete process.env["OPENMRS_DB_QUERY_TIMEOUT_MS"];
+  delete process.env["RECALC_HOUR"];
+  delete process.env["RECALC_VENTANA_MESES"];
 });
 
 afterEach(() => {
@@ -225,6 +227,35 @@ describe("OpenMRS MySQL timeouts", () => {
     expect(freshSettings.openmrs_db_connect_timeout_ms).toBe(10_000);
     expect(freshSettings.openmrs_db_acquire_timeout_ms).toBe(10_000);
     expect(freshSettings.openmrs_db_query_timeout_ms).toBe(30_000);
+  });
+});
+
+describe("scheduled recalculation", () => {
+  test("defaults: hour 2, window 3", async () => {
+    const { settings: freshSettings } = await importConfigFresh();
+
+    expect(freshSettings.recalc_hour).toBe(2);
+    expect(freshSettings.recalc_ventana_meses).toBe(3);
+  });
+
+  test("parses RECALC_HOUR / RECALC_VENTANA_MESES", async () => {
+    process.env["RECALC_HOUR"] = "0";
+    process.env["RECALC_VENTANA_MESES"] = "6";
+
+    const { settings: freshSettings } = await importConfigFresh();
+
+    expect(freshSettings.recalc_hour).toBe(0);
+    expect(freshSettings.recalc_ventana_meses).toBe(6);
+  });
+
+  test("falls back when values are invalid or out of range", async () => {
+    process.env["RECALC_HOUR"] = "24";
+    process.env["RECALC_VENTANA_MESES"] = "0";
+
+    const { settings: freshSettings } = await importConfigFresh();
+
+    expect(freshSettings.recalc_hour).toBe(2);
+    expect(freshSettings.recalc_ventana_meses).toBe(3);
   });
 });
 

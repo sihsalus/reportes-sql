@@ -21,15 +21,9 @@ import {
   IndicadorVersion,
   IndicadorResultado,
 } from "../models/indicador.js";
-import { parseDefinicionIndicador } from "../types/definicion.js";
-import { buildQuery } from "../engine/interpreter.js";
-import { executeAndPersist } from "../engine/executor.js";
-import { findLatestVersions } from "../indicators/latest-version.js";
-import { writeCalcLog } from "../engine/calc-log.js";
 import { queryMysql } from "../database/mysql.js";
-import { calcularMesActual } from "../engine/periodo.js";
-import { resolveConceptMap } from "../validators/openmrs.js";
 import { OpenMRSUnavailableError } from "../errors.js";
+import { calcularAhora, type CalcularAhoraResultado } from "../engine/batch.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { requirePrivilege } from "../middleware/auth.js";
 import { rateLimit, resetRateLimitStore } from "./resultados/rate-limit.js";
@@ -221,169 +215,26 @@ resultadosRouter.post(
       return;
     }
 
-    const indicadores = await Indicador.findAll({
-      where: { activo: true },
-    });
-
-    // Always calculate for the current month (canonical monthly semantics)
-    const { inicio, fin, finPersistencia, mes_referencia } = calcularMesActual();
-
-    // Batch the latest-version lookup instead of issuing one query per
-    // indicator.
-    const latestVersionByIndicador = await findLatestVersions(
-      indicadores.map((indicador) => indicador.id),
-    );
-
-    // Parse definitions and collect all order concepts before making one
-    // OpenMRS lookup for the complete batch.
-    const definicionByIndicador = new Map<number, ReturnType<typeof parseDefinicionIndicador>>();
-    const allConceptUuids = new Set<string>();
-    for (const indicador of indicadores) {
-      const version = latestVersionByIndicador.get(indicador.id);
-      if (!version) continue;
-
-      const definicion = parseDefinicionIndicador(version.definicion);
-      definicionByIndicador.set(indicador.id, definicion);
-      for (const orden of definicion.evento?.ordenes ?? []) {
-        allConceptUuids.add(orden.concepto_uuid);
+    let result: CalcularAhoraResultado;
+    try {
+      result = await calcularAhora();
+    } catch (err) {
+      if (err instanceof OpenMRSUnavailableError) {
+        res.status(502).json({ detail: "OpenMRS no disponible" });
+        return;
       }
-    }
-
-    let globalConceptMap: Record<string, number> = {};
-    if (allConceptUuids.size > 0) {
-      try {
-        globalConceptMap = await resolveConceptMap(Array.from(allConceptUuids));
-      } catch (err) {
-        if (err instanceof OpenMRSUnavailableError) {
-          res.status(502).json({ detail: "OpenMRS no disponible" });
-          return;
-        }
-        throw err;
-      }
-    }
-
-    const conceptMapByIndicador = new Map<number, Record<string, number> | null>();
-    const conceptErrorByIndicador = new Map<number, string>();
-    for (const indicador of indicadores) {
-      const definicion = definicionByIndicador.get(indicador.id);
-      const ordenes = definicion?.evento?.ordenes;
-      if (!ordenes || ordenes.length === 0) {
-        conceptMapByIndicador.set(indicador.id, null);
-        continue;
-      }
-
-      const conceptMap: Record<string, number> = {};
-      const missing: string[] = [];
-      for (const orden of ordenes) {
-        const conceptId = globalConceptMap[orden.concepto_uuid];
-        if (conceptId === undefined) missing.push(orden.concepto_uuid);
-        else conceptMap[orden.concepto_uuid] = conceptId;
-      }
-
-      if (missing.length > 0) {
-        conceptErrorByIndicador.set(
-          indicador.id,
-          `Conceptos de órdenes no encontrados: ${missing.join(", ")}`,
-        );
-      } else {
-        conceptMapByIndicador.set(indicador.id, conceptMap);
-      }
-    }
-
-    let calculados = 0;
-    const errores: Array<{
-      indicador_id: number;
-      indicador_nombre: string;
-      error: string;
-    }> = [];
-    const total = indicadores.length;
-
-    for (const indicador of indicadores) {
-      const latest = latestVersionByIndicador.get(indicador.id);
-      try {
-        if (!latest) {
-          errores.push({
-            indicador_id: indicador.id,
-            indicador_nombre: indicador.nombre,
-            error: "Sin versiones definidas",
-          });
-          await writeCalcLog({
-            indicador_id: indicador.id,
-            indicador_version_id: null,
-            mes_referencia,
-            error: "Sin versiones definidas",
-            fuente: "calcular-ahora",
-          });
-          continue;
-        }
-        const conceptError = conceptErrorByIndicador.get(indicador.id);
-        if (conceptError) {
-          errores.push({
-            indicador_id: indicador.id,
-            indicador_nombre: indicador.nombre,
-            error: conceptError,
-          });
-          await writeCalcLog({
-            indicador_id: indicador.id,
-            indicador_version_id: latest.id,
-            mes_referencia,
-            error: conceptError,
-            fuente: "calcular-ahora",
-          });
-          continue;
-        }
-
-        const definicion = definicionByIndicador.get(indicador.id)!;
-        const conceptMap = conceptMapByIndicador.get(indicador.id) ?? null;
-
-        // Build query with month boundaries
-        const { sql, params } = buildQuery(
-          definicion,
-          inicio,
-          fin,
-          conceptMap,
-        );
-
-        // Persist the canonical month end as `periodo_fin` (not `fin`, the
-        // query cutoff). The row is keyed by `mes_referencia` and labeled as
-        // the whole month, so its period stays stable across calculation days.
-        await executeAndPersist(
-          sql,
-          params as Record<string, unknown>,
-          latest.id,
-          inicio,
-          finPersistencia,
-          mes_referencia,
-          {
-            indicadorId: indicador.id,
-            fuente: "calcular-ahora",
-          },
-        );
-
-        calculados += 1;
-      } catch (err: unknown) {
-        const internalMessage =
-          err instanceof Error ? err.message : "Error desconocido";
-        errores.push({
-          indicador_id: indicador.id,
-          indicador_nombre: indicador.nombre,
-          error: "Error interno durante el cálculo",
-        });
-        await writeCalcLog({
-          indicador_id: indicador.id,
-          indicador_version_id: latest?.id ?? null,
-          mes_referencia,
-          error: internalMessage,
-          fuente: "calcular-ahora",
-        });
-      }
+      throw err;
     }
 
     res.json({
-      calculados,
-      errores,
-      total,
-      mes_referencia: mes_referencia.toISOString().slice(0, 7),
+      calculados: result.recalculados,
+      errores: result.errores.map((e) => ({
+        indicador_id: e.indicador_id,
+        indicador_nombre: e.indicador_nombre,
+        error: e.error,
+      })),
+      total: result.total,
+      mes_referencia: result.mesReferencia.toISOString().slice(0, 7),
     });
   }),
 );

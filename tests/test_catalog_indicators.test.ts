@@ -183,11 +183,6 @@ describe("registerIndicatorCatalog", () => {
     expect(mockIndicadorCreate).not.toHaveBeenCalled();
   });
 
-  test("catalog includes the legacy default indicator", () => {
-    const nombres = loadIndicatorCatalog().map((e) => e.nombre);
-    expect(nombres).toContain("seed/default-indicator");
-  });
-
   test("catalog includes IRA with a complete definition", () => {
     const entry = loadIndicatorCatalog().find((e) =>
       e.nombre.includes("Infección respiratoria aguda"),

@@ -35,6 +35,11 @@ import { metasRouter } from "./routers/metas.js";
 import { requireSession } from "./middleware/auth.js";
 import { buildOpenapiSpec } from "./docs/openapi.js";
 import { registerIndicatorCatalog } from "./catalog/indicators.js";
+import {
+  startRecalcScheduler,
+  stopRecalcScheduler,
+  runStartupCatchup,
+} from "./scheduler/index.js";
 
 /** Augmented request carrying the request-id used for log correlation. */
 type RequestWithId = Request & { requestId: string };
@@ -280,11 +285,17 @@ async function start(): Promise<void> {
     });
   });
 
+  // Nightly recalculation scheduler.
+  startRecalcScheduler();
+  // One-off catch-up of months missing results (fire-and-forget).
+  void runStartupCatchup();
+
   // Graceful shutdown
   const shutdown = async () => {
     logger.info("Shutting down...");
     server.closeIdleConnections?.();
     server.close();
+    stopRecalcScheduler();
     await disposeMysql();
     await disposePostgres();
     logger.info("Shutdown complete.");

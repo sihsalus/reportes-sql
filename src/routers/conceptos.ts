@@ -177,85 +177,127 @@ conceptosRouter.get(
   },
 );
 
-// ── GET /conceptos/locations?q=... ─────────────────────────────────────────
+// ── GET /conceptos/locations?q=...&limit=...&offset=... ────────────────────
+//
+// Two modes, same response shape ([{uuid, display}] in stable display-ascending
+// order; retired locations are excluded by OpenMRS's default):
+// - with a term (q): seed search + services fallback, filtered locally;
+// - without a term: the first page of services, so a selector can populate on
+//   focus instead of requiring the user to type first.
+
+const LOCATIONS_DEFAULT_LIMIT = 50;
+const LOCATIONS_MAX_LIMIT = 50;
+/** Bounded set fetched before sorting/slicing (OpenMRS location is unsorted). */
+const LOCATIONS_FETCH_LIMIT = 200;
+/**
+ * Broad seed naming the service locations ("UPSS - …"). Used to list services
+ * (no term) and as the search fallback.
+ */
+const LOCATIONS_SERVICES_SEED = "upss";
+
+interface LocationItem {
+  uuid: string;
+  display: string;
+}
+
+function parseLocationsLimit(raw: unknown): number {
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return LOCATIONS_DEFAULT_LIMIT;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) return LOCATIONS_DEFAULT_LIMIT;
+  return Math.min(value, LOCATIONS_MAX_LIMIT);
+}
+
+function parseLocationsOffset(raw: unknown): number {
+  if (typeof raw !== "string" || raw.trim() === "") return 0;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) return 0;
+  return value;
+}
 
 conceptosRouter.get("/locations", async (req: Request, res: Response) => {
   await proxyWithErrorHandling(res, async () => {
     const q = ((req.query["q"] as string) ?? "").trim();
-
-    if (!q) {
-      res.status(400).json({
-        detail:
-          "El parámetro 'q' es obligatorio y no puede estar vacío",
-      });
-      return;
-    }
-
-    const normalizedQuery = q.toLowerCase();
-    const querySeed = normalizedQuery.slice(0, 3);
+    const limit = parseLocationsLimit(req.query["limit"]);
+    const offset = parseLocationsOffset(req.query["offset"]);
 
     const url = openmrsUrl("location");
     const baseParams = new URLSearchParams({
       v: "custom:(uuid,display)",
-      limit: "200",
+      limit: String(LOCATIONS_FETCH_LIMIT),
     });
 
-    const filterLocations = (
-      raw: { results?: Array<{ uuid: string; display: string }> },
-    ) => {
-      return (raw.results ?? [])
-        .filter((item) =>
-          (item.display ?? "").toLowerCase().includes(normalizedQuery),
-        )
-        .map((item) => ({ uuid: item.uuid, display: item.display }));
+    const fetchSeed = async (
+      seed: string,
+    ): Promise<{ status: number; items: LocationItem[] | null }> => {
+      const response = await fetch(
+        `${url}?${baseParams}&q=${encodeURIComponent(seed)}`,
+        {
+          headers: { Authorization: authHeader() },
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (!response.ok) return { status: response.status, items: null };
+      const data = (await response.json()) as {
+        results?: Array<{ uuid: string; display: string }>;
+      };
+      return {
+        status: response.status,
+        items: (data.results ?? []).map((item) => ({
+          uuid: item.uuid,
+          display: item.display,
+        })),
+      };
     };
 
-    // First pass: query-derived seed
-    let response = await fetch(
-      `${url}?${baseParams}&q=${encodeURIComponent(querySeed)}`,
-      {
-        headers: { Authorization: authHeader() },
-        signal: AbortSignal.timeout(10_000),
-      },
-    );
-    if (!response.ok) {
-      res
-        .status(502)
-        .json({
-          detail: `OpenMRS respondió con error: ${response.status}`,
-        });
-      return;
-    }
-    let data = (await response.json()) as {
-      results?: Array<{ uuid: string; display: string }>;
+    const send = (items: LocationItem[]): void => {
+      items.sort((a, b) => a.display.localeCompare(b.display, "es"));
+      res.json(items.slice(offset, offset + limit));
     };
-    let results = filterLocations(data);
-    if (results.length > 0) {
-      res.json(results);
+
+    // No term → list the services (the configured broad seed).
+    if (!q) {
+      const { status, items } = await fetchSeed(LOCATIONS_SERVICES_SEED);
+      if (items === null) {
+        res
+          .status(502)
+          .json({ detail: `OpenMRS respondió con error: ${status}` });
+        return;
+      }
+      send(items);
       return;
     }
 
-    // Fallback pass: broad seed ("upss")
-    response = await fetch(
-      `${url}?${baseParams}&q=upss`,
-      {
-        headers: { Authorization: authHeader() },
-        signal: AbortSignal.timeout(10_000),
-      },
-    );
-    if (!response.ok) {
+    const normalizedQuery = q.toLowerCase();
+    const matches = (items: LocationItem[]): LocationItem[] =>
+      items.filter((item) =>
+        item.display.toLowerCase().includes(normalizedQuery),
+      );
+
+    // First pass: query-derived seed.
+    const first = await fetchSeed(normalizedQuery.slice(0, 3));
+    if (first.items === null) {
       res
         .status(502)
-        .json({
-          detail: `OpenMRS respondió con error: ${response.status}`,
-        });
+        .json({ detail: `OpenMRS respondió con error: ${first.status}` });
       return;
     }
-    data = (await response.json()) as {
-      results?: Array<{ uuid: string; display: string }>;
-    };
-    results = filterLocations(data);
-    res.json(results);
+    let results = matches(first.items);
+
+    // Fallback pass: broad services seed.
+    if (results.length === 0) {
+      const fallback = await fetchSeed(LOCATIONS_SERVICES_SEED);
+      if (fallback.items === null) {
+        res
+          .status(502)
+          .json({ detail: `OpenMRS respondió con error: ${fallback.status}` });
+        return;
+      }
+      results = matches(fallback.items);
+    }
+
+    send(results);
   });
 });
 

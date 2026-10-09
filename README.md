@@ -2,7 +2,7 @@
 
 Microservicio para definición, versionado y cálculo de indicadores clínicos.
 Lee datos desde OpenMRS (MySQL, solo lectura), expone una API REST con
-CRUD de indicadores, versionado semántico, y cálculo bajo demanda, y
+CRUD de indicadores, versionado semántico, cálculo bajo demanda y programado, y
 almacena resultados en PostgreSQL.
 
 ## Quick start (local dev)
@@ -47,7 +47,9 @@ Copy `.env.example` to `.env` and adjust for your environment.
 | `PORT` | `8000` | HTTP listen port |
 | `BASE_PATH` | _(empty)_ | Path prefix when behind a gateway (see below) |
 | `CORS_ORIGINS` | `localhost:5173,localhost:8080` | Comma-separated allowed CORS origins |
-| `AUTO_REGISTER_CATALOG` | `true` | Register the official indicator catalog on startup (`AUTO_SEED_DEFAULT_INDICATOR` still honored as fallback) |
+| `AUTO_REGISTER_CATALOG` | `true` | Register the official indicator catalog on startup |
+| `RECALC_HOUR` | `2` | Hour (0-23, `America/Lima`) the nightly recalculation runs |
+| `RECALC_VENTANA_MESES` | `3` | Rolling window of months to recalculate (current + previous) |
 | `INDICATORS_DB_HOST` | `localhost` | PostgreSQL host |
 | `INDICATORS_DB_PORT` | `5432` | PostgreSQL port |
 | `INDICATORS_DB_NAME` | `indicators` | PostgreSQL database name |
@@ -82,6 +84,21 @@ gateway probes.
 
 The OpenAPI spec server URL, Swagger UI, and all route responses are
 automatically adjusted to include the prefix when BASE_PATH is set.
+
+## Recalculo programado
+
+The service runs an in-process scheduler (no external cron — the calculation
+endpoints require an OpenMRS session) that, once per day at `RECALC_HOUR`
+(America/Lima), recalculates a rolling window of `RECALC_VENTANA_MESES` months
+(the current month plus previous ones) for every active indicator. Recomputing
+recent closed months absorbs late OpenMRS data entry; the current month stays
+fresh and is provisional until it closes. On startup it also runs a one-off
+catch-up of any month of the current year still missing results.
+
+Every attempt is recorded in `indicador_calculo_log` with
+`fuente = "scheduler"` (nightly) or `"scheduler-catchup"` (startup). The
+manual endpoints `POST /resultados/calcular-ahora` and
+`POST /resultados/recalcular-anio` are unaffected.
 
 ## Running
 
