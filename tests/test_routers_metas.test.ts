@@ -80,17 +80,17 @@ function createTestApp() {
   return app;
 }
 
-const VERSION_UUID = "00000000-0000-0000-aaaa-000000000001";
-const INDICADOR_UUID = "00000000-0000-0000-0000-000000000001";
-const META_UUID = "00000000-0000-0000-bbbb-000000000001";
+const VERSION_ID = 11;
+const INDICADOR_ID = 1;
+const META_ID = 7;
 
 const INDICADOR_NOMBRE = "Mortalidad materna";
 const VERSION_NUMERO = 3;
 
 function makeMetaRow(overrides: Record<string, unknown> = {}) {
   return {
-    id: META_UUID,
-    indicador_version_id: VERSION_UUID,
+    id: META_ID,
+    indicador_version_id: VERSION_ID,
     anio: 2025,
     valor_meta: 1500,
     creado_en: new Date("2026-01-01"),
@@ -107,11 +107,11 @@ beforeEach(() => {
 describe("Metas Router", () => {
   describe("PUT /metas — upsert", () => {
     test("SC-01: creates a new meta and returns 200 with full body", async () => {
-      mockVersionFindOne.mockResolvedValue({ id: VERSION_UUID });
+      mockVersionFindOne.mockResolvedValue({ id: VERSION_ID });
       mockSequelizeQuery.mockResolvedValue([
         {
-          id: META_UUID,
-          indicador_version_id: VERSION_UUID,
+          id: META_ID,
+          indicador_version_id: VERSION_ID,
           anio: 2025,
           valor_meta: 1500,
           creado_en: new Date("2026-01-01"),
@@ -120,15 +120,15 @@ describe("Metas Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).put("/metas").send({
-        indicador_version_id: VERSION_UUID,
+        indicador_version_id: VERSION_ID,
         anio: 2025,
         valor_meta: 1500,
       });
 
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({
-        id: META_UUID,
-        indicador_version_id: VERSION_UUID,
+        id: META_ID,
+        indicador_version_id: VERSION_ID,
         anio: 2025,
         valor_meta: 1500,
       });
@@ -137,11 +137,11 @@ describe("Metas Router", () => {
     });
 
     test("SC-02: upserts existing meta and returns updated valor_meta", async () => {
-      mockVersionFindOne.mockResolvedValue({ id: VERSION_UUID });
+      mockVersionFindOne.mockResolvedValue({ id: VERSION_ID });
       mockSequelizeQuery.mockResolvedValue([
         {
-          id: META_UUID,
-          indicador_version_id: VERSION_UUID,
+          id: META_ID,
+          indicador_version_id: VERSION_ID,
           anio: 2025,
           valor_meta: 2000,
           creado_en: new Date("2026-01-02"),
@@ -150,7 +150,7 @@ describe("Metas Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).put("/metas").send({
-        indicador_version_id: VERSION_UUID,
+        indicador_version_id: VERSION_ID,
         anio: 2025,
         valor_meta: 2000,
       });
@@ -164,7 +164,7 @@ describe("Metas Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).put("/metas").send({
-        indicador_version_id: VERSION_UUID,
+        indicador_version_id: VERSION_ID,
         anio: 2025,
         valor_meta: 100,
       });
@@ -177,7 +177,7 @@ describe("Metas Router", () => {
       const app = createTestApp();
 
       const resLow = await supertest(app).put("/metas").send({
-        indicador_version_id: VERSION_UUID,
+        indicador_version_id: VERSION_ID,
         anio: 1999,
         valor_meta: 100,
       });
@@ -185,7 +185,7 @@ describe("Metas Router", () => {
       expect(resLow.body.detail.field).toBe("anio");
 
       const resHigh = await supertest(app).put("/metas").send({
-        indicador_version_id: VERSION_UUID,
+        indicador_version_id: VERSION_ID,
         anio: 2101,
         valor_meta: 100,
       });
@@ -196,7 +196,7 @@ describe("Metas Router", () => {
     test("SC-11: returns 422 when valor_meta is negative", async () => {
       const app = createTestApp();
       const res = await supertest(app).put("/metas").send({
-        indicador_version_id: VERSION_UUID,
+        indicador_version_id: VERSION_ID,
         anio: 2025,
         valor_meta: -1,
       });
@@ -212,13 +212,13 @@ describe("Metas Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        `/metas?indicador_version_id=${VERSION_UUID}&anio=2025`,
+        `/metas?indicador_version_id=${VERSION_ID}&anio=2025`,
       );
 
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({
-        id: META_UUID,
-        indicador_version_id: VERSION_UUID,
+        id: META_ID,
+        indicador_version_id: VERSION_ID,
         anio: 2025,
         valor_meta: 1500,
         indicador_nombre: INDICADOR_NOMBRE,
@@ -230,16 +230,16 @@ describe("Metas Router", () => {
     test("SC-04: returns meta by indicador_id + anio resolving latest version", async () => {
       // First call: resolve latest version; second call: fetch meta with JOINs
       mockSequelizeQuery
-        .mockResolvedValueOnce([{ id: VERSION_UUID }])
+        .mockResolvedValueOnce([{ id: VERSION_ID }])
         .mockResolvedValueOnce([makeMetaRow()]);
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        `/metas?indicador_id=${INDICADOR_UUID}&anio=2025`,
+        `/metas?indicador_id=${INDICADOR_ID}&anio=2025`,
       );
 
       expect(res.status).toBe(200);
-      expect(res.body.indicador_version_id).toBe(VERSION_UUID);
+      expect(res.body.indicador_version_id).toBe(VERSION_ID);
       expect(res.body.valor_meta).toBe(1500);
       expect(res.body.indicador_nombre).toBe(INDICADOR_NOMBRE);
       expect(res.body.version_numero).toBe(VERSION_NUMERO);
@@ -251,7 +251,7 @@ describe("Metas Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        `/metas?indicador_version_id=${VERSION_UUID}&anio=2025`,
+        `/metas?indicador_version_id=${VERSION_ID}&anio=2025`,
       );
 
       expect(res.status).toBe(404);
@@ -261,7 +261,7 @@ describe("Metas Router", () => {
     test("SC-12: returns 422 when both indicador_version_id and indicador_id are provided", async () => {
       const app = createTestApp();
       const res = await supertest(app).get(
-        `/metas?indicador_version_id=${VERSION_UUID}&indicador_id=${INDICADOR_UUID}&anio=2025`,
+        `/metas?indicador_version_id=${VERSION_ID}&indicador_id=${INDICADOR_ID}&anio=2025`,
       );
 
       expect(res.status).toBe(422);
@@ -281,7 +281,7 @@ describe("Metas Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        `/metas?indicador_id=${INDICADOR_UUID}&anio=2025`,
+        `/metas?indicador_id=${INDICADOR_ID}&anio=2025`,
       );
 
       expect(res.status).toBe(404);
@@ -294,13 +294,13 @@ describe("Metas Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).delete(
-        `/metas?indicador_version_id=${VERSION_UUID}&anio=2025`,
+        `/metas?indicador_version_id=${VERSION_ID}&anio=2025`,
       );
 
       expect(res.status).toBe(204);
       expect(mockMetaDestroy).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { indicador_version_id: VERSION_UUID, anio: 2025 },
+          where: { indicador_version_id: VERSION_ID, anio: 2025 },
         }),
       );
     });
@@ -310,7 +310,7 @@ describe("Metas Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).delete(
-        `/metas?indicador_version_id=${VERSION_UUID}&anio=2025`,
+        `/metas?indicador_version_id=${VERSION_ID}&anio=2025`,
       );
 
       expect(res.status).toBe(404);

@@ -141,16 +141,173 @@ describe("Conceptos Router", () => {
   });
 
   describe("GET /conceptos/diagnosticos/buscar", () => {
-    test("extracts CIE-10 code and nombre from names", async () => {
+    test("reads the CIE-10 code from an explicit ICD-10 mapping", async () => {
       (globalThis.fetch as jest.Mock).mockResolvedValue(
         mockFetchRes(200, {
           results: [
             {
-              uuid: "uuid-d1",
+              uuid: "uuid-d50",
+              display: "Anemia ferropénica",
+              names: [
+                {
+                  display: "Anemia ferropénica",
+                  conceptNameType: "FULLY_SPECIFIED",
+                },
+              ],
+              conceptMappings: [
+                {
+                  conceptReferenceTerm: {
+                    code: "D50.9",
+                    conceptSource: { name: "ICD-10-WHO" },
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/diagnosticos/buscar?q=anemia",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body[0].codigo).toBe("D50.9");
+      expect(res.body[0].nombre).toBe("Anemia ferropénica");
+    });
+
+    test("falls back to the catalog SHORT name when there is no mapping", async () => {
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, {
+          results: [
+            {
+              uuid: "uuid-c020",
+              display: "TUMOR MALIGNO DE LA CARA DORSAL DE LA LENGUA",
+              names: [
+                {
+                  display: "TUMOR MALIGNO DE LA CARA DORSAL DE LA LENGUA",
+                  conceptNameType: "FULLY_SPECIFIED",
+                },
+                { display: "C020", conceptNameType: "SHORT" },
+              ],
+              conceptMappings: [],
+            },
+          ],
+        }),
+      );
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/diagnosticos/buscar?q=tumor",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body[0].codigo).toBe("C020");
+      expect(res.body[0].nombre).toBe(
+        "TUMOR MALIGNO DE LA CARA DORSAL DE LA LENGUA",
+      );
+    });
+
+    test("prefers the explicit mapping over the SHORT name", async () => {
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, {
+          results: [
+            {
+              uuid: "uuid-e11",
+              display: "Diabetes mellitus tipo II",
+              names: [
+                { display: "Diabetes mellitus tipo II", conceptNameType: "FULLY_SPECIFIED" },
+                { display: "R51-LOCAL", conceptNameType: "SHORT" },
+              ],
+              conceptMappings: [
+                {
+                  conceptReferenceTerm: {
+                    code: "E11.9",
+                    conceptSource: { name: "ICD-10-WHO" },
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/diagnosticos/buscar?q=e11",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body[0].codigo).toBe("E11.9");
+    });
+
+    test("ignores a SHORT name that is not shaped like a CIE-10 code", async () => {
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, {
+          results: [
+            {
+              uuid: "uuid-hta",
+              display: "Hipertensión arterial",
+              names: [{ display: "HTA", conceptNameType: "SHORT" }],
+              conceptMappings: [],
+            },
+          ],
+        }),
+      );
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/diagnosticos/buscar?q=hipertension",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body[0].codigo).toBeUndefined();
+      expect(res.body[0].nombre).toBe("Hipertensión arterial");
+    });
+
+    test("does not derive the code from display text alone", async () => {
+      // A legacy display can merely look like a CIE-10 code; without a
+      // mapping or a SHORT name it must not be returned as the code.
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, {
+          results: [
+            {
+              uuid: "uuid-i10",
+              display: "I10",
+              names: [{ display: "I10", conceptNameType: "SYNONYM" }],
+              conceptMappings: [],
+            },
+          ],
+        }),
+      );
+
+      const app = createTestApp();
+      const res = await supertest(app).get(
+        "/conceptos/diagnosticos/buscar?q=i10",
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body[0].codigo).toBeUndefined();
+    });
+
+    test("strips a leading code from the display name", async () => {
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, {
+          results: [
+            {
+              uuid: "uuid-j00",
               display: "J00.9 Nasofaringitis aguda",
               names: [
-                { display: "J00.9" },
-                { display: "Nasofaringitis aguda" },
+                { display: "Nasofaringitis aguda", conceptNameType: "FULLY_SPECIFIED" },
+              ],
+              conceptMappings: [
+                {
+                  conceptReferenceTerm: {
+                    code: "J00.9",
+                    conceptSource: { name: "CIE-10 MINSA" },
+                  },
+                },
               ],
             },
           ],
@@ -165,136 +322,6 @@ describe("Conceptos Router", () => {
       expect(res.status).toBe(200);
       expect(res.body[0].codigo).toBe("J00.9");
       expect(res.body[0].nombre).toBe("Nasofaringitis aguda");
-    });
-
-    test("extracts subcategory code with trailing digits (E11.9 Diabetes)", async () => {
-      (globalThis.fetch as jest.Mock).mockResolvedValue(
-        mockFetchRes(200, {
-          results: [
-            {
-              uuid: "uuid-e11",
-              display: "E11.9 Diabetes mellitus no insulinodependiente",
-              names: [
-                { display: "E11.9 Diabetes" },
-                { display: "Diabetes mellitus no insulinodependiente" },
-              ],
-            },
-          ],
-        }),
-      );
-
-      const app = createTestApp();
-      const res = await supertest(app).get(
-        "/conceptos/diagnosticos/buscar?q=e11",
-      );
-
-      expect(res.status).toBe(200);
-      expect(res.body[0].codigo).toBe("E11.9 Diabetes");
-      expect(res.body[0].nombre).toBe("Diabetes mellitus no insulinodependiente");
-    });
-
-    test("extracts bare category code (I10)", async () => {
-      (globalThis.fetch as jest.Mock).mockResolvedValue(
-        mockFetchRes(200, {
-          results: [
-            {
-              uuid: "uuid-i10",
-              display: "I10 Hipertensión esencial",
-              names: [
-                { display: "I10" },
-                { display: "Hipertensión esencial" },
-              ],
-            },
-          ],
-        }),
-      );
-
-      const app = createTestApp();
-      const res = await supertest(app).get(
-        "/conceptos/diagnosticos/buscar?q=i10",
-      );
-
-      expect(res.status).toBe(200);
-      expect(res.body[0].codigo).toBe("I10");
-      expect(res.body[0].nombre).toBe("Hipertensión esencial");
-    });
-
-    test("does not match single-digit prefixes (A1C test)", async () => {
-      (globalThis.fetch as jest.Mock).mockResolvedValue(
-        mockFetchRes(200, {
-          results: [
-            {
-              uuid: "uuid-a1c",
-              display: "A1C test Hemoglobina glicosilada",
-              names: [
-                { display: "A1C test" },
-                { display: "Hemoglobina glicosilada" },
-              ],
-            },
-          ],
-        }),
-      );
-
-      const app = createTestApp();
-      const res = await supertest(app).get(
-        "/conceptos/diagnosticos/buscar?q=a1c",
-      );
-
-      expect(res.status).toBe(200);
-      // "A1C" starts with a single digit, so it is NOT a CIE-10 category
-      expect(res.body[0].codigo).toBeUndefined();
-      expect(res.body[0].nombre).toBe("A1C test");
-    });
-
-    test("known limitation: B12 deficiency still matches as a code", async () => {
-      // Without a CIE-10 catalog there is no perfect regex: "B12 deficiency"
-      // starts with B + two digits (B12), so it matches the category pattern.
-      // This test pins the documented behavior — the name is treated as code.
-      (globalThis.fetch as jest.Mock).mockResolvedValue(
-        mockFetchRes(200, {
-          results: [
-            {
-              uuid: "uuid-b12",
-              display: "B12 deficiency Anemia por deficiencia de B12",
-              names: [
-                { display: "B12 deficiency" },
-                { display: "Anemia por deficiencia de B12" },
-              ],
-            },
-          ],
-        }),
-      );
-
-      const app = createTestApp();
-      const res = await supertest(app).get(
-        "/conceptos/diagnosticos/buscar?q=b12",
-      );
-
-      expect(res.status).toBe(200);
-      expect(res.body[0].codigo).toBe("B12 deficiency");
-      expect(res.body[0].nombre).toBe("Anemia por deficiencia de B12");
-    });
-
-    test("omits codigo when no CIE-10 pattern found", async () => {
-      (globalThis.fetch as jest.Mock).mockResolvedValue(
-        mockFetchRes(200, {
-          results: [
-            {
-              uuid: "uuid-d2",
-              display: "Cefalea",
-              names: [{ display: "Cefalea" }],
-            },
-          ],
-        }),
-      );
-
-      const app = createTestApp();
-      const res = await supertest(app).get(
-        "/conceptos/diagnosticos/buscar?q=cefalea",
-      );
-
-      expect(res.status).toBe(200);
-      expect(res.body[0].codigo).toBeUndefined();
     });
 
     test("returns 400 when q is empty (rejected before OpenMRS)", async () => {
@@ -474,14 +501,24 @@ describe("Conceptos Router", () => {
   });
 
   describe("GET /conceptos/diagnosticos/resolve", () => {
-    test("resolves diagnosis with CIE-10 extraction", async () => {
+    test("resolves diagnosis with the CIE-10 code from the mapping", async () => {
       (globalThis.fetch as jest.Mock).mockResolvedValue(
         mockFetchRes(200, {
           uuid: "00000000-0000-0000-0000-000000000001",
-          display: "J00.9 Nasofaringitis",
+          display: "Faringoamigdalitis aguda",
           names: [
-            { display: "J00.9" },
-            { display: "Nasofaringitis aguda" },
+            {
+              display: "Faringoamigdalitis aguda",
+              conceptNameType: "FULLY_SPECIFIED",
+            },
+          ],
+          conceptMappings: [
+            {
+              conceptReferenceTerm: {
+                code: "J029",
+                conceptSource: { name: "CIE-10 MINSA" },
+              },
+            },
           ],
         }),
       );
@@ -492,7 +529,8 @@ describe("Conceptos Router", () => {
       );
 
       expect(res.status).toBe(200);
-      expect(res.body[0].codigo).toBe("J00.9");
+      expect(res.body[0].codigo).toBe("J029");
+      expect(res.body[0].nombre).toBe("Faringoamigdalitis aguda");
     });
 
     test("returns 400 for empty uuids", async () => {

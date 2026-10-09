@@ -13,7 +13,6 @@
  * - OpenMRSUnavailableError  → 502 (propagates from the validators)
  */
 
-import { v4 as uuidv4 } from "uuid";
 import { Indicador, IndicadorVersion } from "../models/indicador.js";
 import {
   parseDefinicionIndicador,
@@ -115,11 +114,10 @@ export interface CreateIndicatorInput {
 export async function createIndicatorWithVersion(
   input: CreateIndicatorInput,
 ): Promise<{ indicador: Indicador; version: IndicadorVersion }> {
-  const indicadorId = uuidv4();
   const now = new Date();
 
+  // `id` is DB-generated (integer auto-increment).
   const indicador = await Indicador.create({
-    id: indicadorId,
     nombre: input.nombre,
     descripcion: input.descripcion,
     activo: input.activo,
@@ -127,8 +125,7 @@ export async function createIndicatorWithVersion(
   });
 
   const version = await IndicadorVersion.create({
-    id: uuidv4(),
-    indicador_id: indicadorId,
+    indicador_id: indicador.id,
     version: 1,
     definicion: input.definicion as unknown as Record<string, unknown>,
     creado_en: now,
@@ -140,7 +137,7 @@ export async function createIndicatorWithVersion(
 /**
  * Next version number for an indicador (max + 1, starting at 1).
  */
-export async function nextVersion(indicadorId: string): Promise<number> {
+export async function nextVersion(indicadorId: number): Promise<number> {
   const maxVersion: number | null = await IndicadorVersion.max("version", {
     where: { indicador_id: indicadorId },
   });
@@ -152,12 +149,11 @@ export async function nextVersion(indicadorId: string): Promise<number> {
  * No validation — callers validate first.
  */
 export async function createIndicatorVersion(
-  indicadorId: string,
+  indicadorId: number,
   version: number,
   definicion: DefinicionIndicador,
 ): Promise<IndicadorVersion> {
   return IndicadorVersion.create({
-    id: uuidv4(),
     indicador_id: indicadorId,
     version,
     definicion: definicion as unknown as Record<string, unknown>,

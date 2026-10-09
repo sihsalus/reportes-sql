@@ -320,6 +320,82 @@ describe("BuildQuery", () => {
   });
 });
 
+// ── encounter_type_uuids (must not be silently dropped) ───────────────
+
+describe("EncounterTypeFilter", () => {
+  const UUID_ET = "99999999-9999-9999-9999-999999999999";
+  const UUID_ET2 = "88888888-8888-8888-8888-888888888888";
+
+  test("conteo_atenciones joins encounter_type and filters", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      evento: { location_uuids: [UUID_LOC], encounter_type_uuids: [UUID_ET] },
+    });
+    const { sql, params } = buildQuery(d, INICIO, FIN);
+    expect(sql).toContain(
+      "JOIN encounter_type et ON e.encounter_type = et.encounter_type_id AND et.retired = 0",
+    );
+    expect(sql).toContain("et.uuid IN (:et_0)");
+    expect(params["et_0"]).toBe(UUID_ET);
+  });
+
+  test("conteo_atenciones multiple encounter types", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      evento: { encounter_type_uuids: [UUID_ET, UUID_ET2] },
+    });
+    const { sql, params } = buildQuery(d, INICIO, FIN);
+    expect(sql).toContain("et.uuid IN (:et_0, :et_1)");
+    expect(params["et_0"]).toBe(UUID_ET);
+    expect(params["et_1"]).toBe(UUID_ET2);
+  });
+
+  test("conteo_pacientes joins encounter_type and filters", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_pacientes",
+      evento: { location_uuids: [UUID_LOC], encounter_type_uuids: [UUID_ET] },
+    });
+    const { sql, params } = buildQuery(d, INICIO, FIN);
+    expect(sql).toContain("JOIN encounter_type et");
+    expect(sql).toContain("et.uuid IN (:et_0)");
+    expect(params["et_0"]).toBe(UUID_ET);
+  });
+
+  test("conteo_atenciones applies encounter_type inside minimo subquery", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      evento: {
+        location_uuids: [UUID_LOC],
+        encounter_type_uuids: [UUID_ET],
+        minimo_ocurrencias: 3,
+      },
+    });
+    const { sql, params } = buildQuery(d, INICIO, FIN);
+    expect((sql.match(/JOIN encounter_type/g) ?? []).length).toBe(2);
+    expect(sql).toContain("HAVING");
+    expect(params["et_0"]).toBe(UUID_ET);
+  });
+
+  test("conteo_pacientes applies encounter_type inside minimo subquery", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_pacientes",
+      evento: { encounter_type_uuids: [UUID_ET], minimo_ocurrencias: 2 },
+    });
+    const { sql, params } = buildQuery(d, INICIO, FIN);
+    expect(sql).toContain("JOIN encounter_type et");
+    expect(params["et_0"]).toBe(UUID_ET);
+  });
+
+  test("no encounter_type join when absent", () => {
+    const d = parseDefinicionIndicador({
+      tipo: "conteo_atenciones",
+      evento: { location_uuids: [UUID_LOC] },
+    });
+    const { sql } = buildQuery(d, INICIO, FIN);
+    expect(sql).not.toContain("encounter_type");
+  });
+});
+
 // ── Fecha bounds exclusive ────────────────────────────────────────────
 
 describe("FechaBoundsExclusive", () => {

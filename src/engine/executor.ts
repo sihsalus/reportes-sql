@@ -26,7 +26,7 @@ import { writeCalcLog } from "./calc-log.js";
 /** Extra execution options passed by callers that know the indicator context. */
 export interface ExecuteAndPersistOpts {
   /** Indicator id — enables cross-version canonical supersede. */
-  indicadorId?: string;
+  indicadorId?: number;
   /** Origin label for the ledger (e.g. 'calcular-ahora', 'recalcular-anio'). */
   fuente?: string;
 }
@@ -72,7 +72,7 @@ function isUniqueViolation(err: unknown): boolean {
 export async function executeAndPersist(
   querySql: string,
   params: Record<string, unknown>,
-  indicadorVersionId: string,
+  indicadorVersionId: number,
   periodoInicio: Date,
   periodoFin: Date,
   mesReferencia?: Date,

@@ -60,14 +60,14 @@ metasRouter.put(
 
     // Upsert via raw SQL with ON CONFLICT
     const rows = await sequelize.query<{
-      id: string;
-      indicador_version_id: string;
+      id: number;
+      indicador_version_id: number;
       anio: number;
       valor_meta: string;
       creado_en: Date;
     }>(
-      `INSERT INTO indicador_meta (id, indicador_version_id, anio, valor_meta, creado_en)
-       VALUES (gen_random_uuid(), :indicador_version_id, :anio, :valor_meta, NOW())
+      `INSERT INTO indicador_meta (indicador_version_id, anio, valor_meta, creado_en)
+       VALUES (:indicador_version_id, :anio, :valor_meta, NOW())
        ON CONFLICT (indicador_version_id, anio)
        DO UPDATE SET valor_meta = EXCLUDED.valor_meta, creado_en = NOW()
        RETURNING id, indicador_version_id, anio, valor_meta::float8, creado_en`,
@@ -105,13 +105,13 @@ metasRouter.get(
       throw err;
     }
 
-    let versionId: string;
+    let versionId: number;
 
     if (query.indicador_version_id) {
       versionId = query.indicador_version_id;
     } else {
       // MetaQuerySchema guarantees exactly one of the two ids is present.
-      const indicadorId = query.indicador_id as string;
+      const indicadorId = query.indicador_id as number;
       // Resolve latest active version for indicador_id
       const latestVersion = await findLatestVersion(indicadorId, true);
 
@@ -128,8 +128,8 @@ metasRouter.get(
     }
 
     const [meta] = await sequelize.query<{
-      id: string;
-      indicador_version_id: string;
+      id: number;
+      indicador_version_id: number;
       anio: number;
       valor_meta: string;
       creado_en: Date;

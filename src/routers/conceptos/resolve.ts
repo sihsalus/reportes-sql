@@ -9,8 +9,10 @@ import type { Request, Response } from "express";
 import {
   authHeader,
   openmrsUrl,
-  extractCie10FromNames,
-  extractNombreFromNames,
+  DIAGNOSIS_CONCEPT_REPRESENTATION,
+  extractCie10Code,
+  extractNombre,
+  type DiagnosisConcept,
   proxyWithErrorHandling,
   parseUuidList,
   validateUuids,
@@ -192,26 +194,22 @@ export async function handleDiagnosticosResolve(
     const fetched = await mapWithConcurrency(valid, async (uid) => {
       const url = openmrsUrl(`concept/${uid}`);
       try {
-        const resp = await fetch(`${url}?v=full`, {
-          headers: { Authorization: authHeader() },
-          signal: AbortSignal.timeout(10_000),
-        });
+        const resp = await fetch(
+          `${url}?v=${DIAGNOSIS_CONCEPT_REPRESENTATION}`,
+          {
+            headers: { Authorization: authHeader() },
+            signal: AbortSignal.timeout(10_000),
+          },
+        );
         if (resp.status === 404) return null;
         if (!resp.ok) {
           throw new Error(`OpenMRS respondió con error: ${resp.status}`);
         }
-        const item = (await resp.json()) as {
-          uuid: string;
-          display: string;
-          names?: Array<{ display: string }>;
-        };
-        const names = item.names ?? [];
-        const codigo = extractCie10FromNames(names);
-        const nombre =
-          extractNombreFromNames(names) ?? item.display ?? "Sin nombre";
+        const item = (await resp.json()) as DiagnosisConcept;
+        const codigo = extractCie10Code(item);
         const out: { uuid: string; codigo?: string; nombre: string } = {
           uuid: item.uuid,
-          nombre,
+          nombre: extractNombre(item),
         };
         if (codigo) out.codigo = codigo;
         return out;

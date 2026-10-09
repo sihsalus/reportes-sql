@@ -17,8 +17,10 @@ import { Router, type Request, type Response } from "express";
 import {
   authHeader,
   openmrsUrl,
-  extractCie10FromNames,
-  extractNombreFromNames,
+  DIAGNOSIS_CONCEPT_REPRESENTATION,
+  extractCie10Code,
+  extractNombre,
+  type DiagnosisConcept,
   proxyWithErrorHandling,
 } from "./conceptos/helpers.js";
 import {
@@ -139,7 +141,7 @@ conceptosRouter.get(
       const url = openmrsUrl("concept");
       const params = new URLSearchParams({
         q,
-        v: "full",
+        v: DIAGNOSIS_CONCEPT_REPRESENTATION,
         limit: "10",
         class: "Diagnosis",
       });
@@ -157,21 +159,14 @@ conceptosRouter.get(
         return;
       }
       const data = (await response.json()) as {
-        results: Array<{
-          uuid: string;
-          display: string;
-          names?: Array<{ display: string }>;
-        }>;
+        results?: DiagnosisConcept[];
       };
 
       const results = (data.results ?? []).map((item) => {
-        const names = item.names ?? [];
-        const codigo = extractCie10FromNames(names);
-        const nombre =
-          extractNombreFromNames(names) ?? item.display ?? "Sin nombre";
+        const codigo = extractCie10Code(item);
         const out: { uuid: string; codigo?: string; nombre: string } = {
           uuid: item.uuid,
-          nombre,
+          nombre: extractNombre(item),
         };
         if (codigo) out.codigo = codigo;
         return out;

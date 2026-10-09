@@ -104,12 +104,12 @@ function createTestApp() {
   return app;
 }
 
-const UUID = "00000000-0000-0000-0000-000000000001";
-const VERSION_UUID = "00000000-0000-0000-aaaa-000000000001";
+const INDICADOR_ID = 1;
+const VERSION_ID = 11;
 
 function makeIndicador(overrides: Record<string, unknown> = {}) {
   return {
-    id: UUID,
+    id: INDICADOR_ID,
     nombre: "Test Indicador",
     descripcion: null,
     activo: true,
@@ -120,8 +120,8 @@ function makeIndicador(overrides: Record<string, unknown> = {}) {
 
 function makeVersion(overrides: Record<string, unknown> = {}) {
   return {
-    id: VERSION_UUID,
-    indicador_id: UUID,
+    id: VERSION_ID,
+    indicador_id: INDICADOR_ID,
     version: 1,
     definicion: {
       tipo: "conteo_atenciones",
@@ -133,8 +133,8 @@ function makeVersion(overrides: Record<string, unknown> = {}) {
 
 function makeResultadoRow(overrides: Record<string, unknown> = {}) {
   return {
-    id: "r-1",
-    indicador_version_id: VERSION_UUID,
+    id: 1,
+    indicador_version_id: VERSION_ID,
     periodo_inicio: "2026-04-01",
     periodo_fin: "2026-04-30",
     valor: 42.5,
@@ -142,10 +142,10 @@ function makeResultadoRow(overrides: Record<string, unknown> = {}) {
     mes_referencia: "2026-04-01",
     es_canonico: true,
     indicador_version: {
-      id: VERSION_UUID,
+      id: VERSION_ID,
       version: 1,
-      indicador_id: UUID,
-      indicador: { id: UUID, nombre: "Test Indicador" },
+      indicador_id: INDICADOR_ID,
+      indicador: { id: INDICADOR_ID, nombre: "Test Indicador" },
     },
     ...overrides,
   };
@@ -215,7 +215,7 @@ describe("Resultados Router", () => {
     test("include_historicos=true skips the canonical filter", async () => {
       mockResultadoFindAndCountAll.mockResolvedValue({
         count: 2,
-        rows: [makeResultadoRow(), makeResultadoRow({ id: "r-2" })],
+        rows: [makeResultadoRow(), makeResultadoRow({ id: 2 })],
       });
 
       const app = createTestApp();
@@ -236,23 +236,23 @@ describe("Resultados Router", () => {
       });
 
       const app = createTestApp();
-      const res = await supertest(app).get(`/resultados?version_id=${VERSION_UUID}`);
+      const res = await supertest(app).get(`/resultados?version_id=${VERSION_ID}`);
 
       expect(res.status).toBe(200);
       expect(mockResultadoFindAndCountAll).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ indicador_version_id: VERSION_UUID }),
+          where: expect.objectContaining({ indicador_version_id: VERSION_ID }),
         }),
       );
     });
 
     test("rejects invalid version_id with 422", async () => {
       const app = createTestApp();
-      const res = await supertest(app).get("/resultados?version_id=no-es-uuid");
+      const res = await supertest(app).get("/resultados?version_id=no-es-id");
 
       expect(res.status).toBe(422);
       expect(res.body.detail.field).toBe("version_id");
-      expect(res.body.detail.message).toMatch(/UUID/);
+      expect(res.body.detail.message).toMatch(/numérico/);
       expect(mockResultadoFindAndCountAll).not.toHaveBeenCalled();
     });
 
@@ -352,7 +352,7 @@ describe("Resultados Router", () => {
     test("returns 422 for invalid granularity", async () => {
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=invalid",
+        "/resultados/series?indicador_id=99&anio=2026&granularity=invalid",
       );
 
       expect(res.status).toBe(422);
@@ -367,7 +367,7 @@ describe("Resultados Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=mensual",
+        "/resultados/series?indicador_id=99&anio=2026&granularity=mensual",
       );
 
       expect(res.status).toBe(200);
@@ -386,7 +386,7 @@ describe("Resultados Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=trimestral",
+        "/resultados/series?indicador_id=99&anio=2026&granularity=trimestral",
       );
 
       expect(res.status).toBe(200);
@@ -404,18 +404,18 @@ describe("Resultados Router", () => {
           anio: 2026,
           mes_referencia: "2026-01-01",
           version_num: 2,
-          version_id: VERSION_UUID,
+          version_id: VERSION_ID,
         },
       ]);
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=mensual",
+        "/resultados/series?indicador_id=99&anio=2026&granularity=mensual",
       );
 
       expect(res.status).toBe(200);
       expect(res.body.items[0].version_num).toBe(2);
-      expect(res.body.items[0].version_id).toBe(VERSION_UUID);
+      expect(res.body.items[0].version_id).toBe(VERSION_ID);
     });
 
     test("quarterly series rows expose versiones array", async () => {
@@ -432,7 +432,7 @@ describe("Resultados Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=trimestral",
+        "/resultados/series?indicador_id=99&anio=2026&granularity=trimestral",
       );
 
       expect(res.status).toBe(200);
@@ -450,7 +450,7 @@ describe("Resultados Router", () => {
 
       const app = createTestApp();
       await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=anual",
+        "/resultados/series?indicador_id=99&anio=2026&granularity=anual",
       );
 
       expect(mockSequelizeQuery).toHaveBeenCalledTimes(1);
@@ -472,7 +472,7 @@ describe("Resultados Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=anual",
+        "/resultados/series?indicador_id=99&anio=2026&granularity=anual",
       );
 
       expect(res.status).toBe(200);
@@ -483,7 +483,7 @@ describe("Resultados Router", () => {
       expect(res.body.items[0].anio).toBe(2026);
       expect(res.body.granularity).toBe("anual");
       expect(res.body.anio).toBe(2026);
-      expect(res.body.indicador_id).toBe("uuid-x");
+      expect(res.body.indicador_id).toBe(99);
     });
 
     test("returns empty series when no data", async () => {
@@ -491,7 +491,7 @@ describe("Resultados Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=mensual",
+        "/resultados/series?indicador_id=99&anio=2026&granularity=mensual",
       );
 
       expect(res.status).toBe(200);
@@ -505,7 +505,7 @@ describe("Resultados Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=mensual",
+        "/resultados/series?indicador_id=99&anio=2026&granularity=mensual",
       );
 
       expect(res.status).toBe(200);
@@ -519,12 +519,12 @@ describe("Resultados Router", () => {
           { periodo_label: "2026-01", valor: "100", meses_disponibles: 1, anio: 2026, mes_referencia: "2026-01-01" },
           { periodo_label: "2026-02", valor: "200", meses_disponibles: 1, anio: 2026, mes_referencia: "2026-02-01" },
         ])
-        .mockResolvedValueOnce([{ id: VERSION_UUID }])
+        .mockResolvedValueOnce([{ id: VERSION_ID }])
         .mockResolvedValueOnce([{ anio: 2026, valor_meta: "1500" }]);
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2026&granularity=mensual&include_meta=true",
+        "/resultados/series?indicador_id=99&anio=2026&granularity=mensual&include_meta=true",
       );
 
       expect(res.status).toBe(200);
@@ -548,12 +548,12 @@ describe("Resultados Router", () => {
         .mockResolvedValueOnce([
           { periodo_label: "2024-01", valor: "50", meses_disponibles: 1, anio: 2024, mes_referencia: "2024-01-01" },
         ])
-        .mockResolvedValueOnce([{ id: VERSION_UUID }])
+        .mockResolvedValueOnce([{ id: VERSION_ID }])
         .mockResolvedValueOnce([]);
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2024&granularity=mensual&include_meta=true",
+        "/resultados/series?indicador_id=99&anio=2024&granularity=mensual&include_meta=true",
       );
 
       expect(res.status).toBe(200);
@@ -564,7 +564,7 @@ describe("Resultados Router", () => {
     test("rejects missing anio", async () => {
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x",
+        "/resultados/series?indicador_id=99",
       );
 
       expect(res.status).toBe(422);
@@ -575,7 +575,7 @@ describe("Resultados Router", () => {
     test("rejects anio with trailing garbage (e.g. 2026abc)", async () => {
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2026abc",
+        "/resultados/series?indicador_id=99&anio=2026abc",
       );
 
       expect(res.status).toBe(422);
@@ -586,7 +586,7 @@ describe("Resultados Router", () => {
     test("rejects decimal anio", async () => {
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2026.5",
+        "/resultados/series?indicador_id=99&anio=2026.5",
       );
 
       expect(res.status).toBe(422);
@@ -597,7 +597,7 @@ describe("Resultados Router", () => {
     test("rejects anio below 2000", async () => {
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=1999",
+        "/resultados/series?indicador_id=99&anio=1999",
       );
 
       expect(res.status).toBe(422);
@@ -608,7 +608,7 @@ describe("Resultados Router", () => {
     test("rejects anio above 2100", async () => {
       const app = createTestApp();
       const res = await supertest(app).get(
-        "/resultados/series?indicador_id=uuid-x&anio=2101",
+        "/resultados/series?indicador_id=99&anio=2101",
       );
 
       expect(res.status).toBe(422);
@@ -640,20 +640,20 @@ describe("Resultados Router", () => {
       expect(mockExecuteAndPersist).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(Object),
-        VERSION_UUID,
+        VERSION_ID,
         expect.any(Date),
         expect.any(Date),
         expect.any(Date), // mes_referencia
         expect.objectContaining({
-          indicadorId: UUID,
+          indicadorId: INDICADOR_ID,
           fuente: "calcular-ahora",
         }),
       );
     });
 
     test("batches latest versions and OpenMRS concept resolution", async () => {
-      const ind1 = makeIndicador({ id: "uuid-1", nombre: "Ind 1" });
-      const ind2 = makeIndicador({ id: "uuid-2", nombre: "Ind 2" });
+      const ind1 = makeIndicador({ id: 2, nombre: "Ind 1" });
+      const ind2 = makeIndicador({ id: 3, nombre: "Ind 2" });
       const order1 = "concept-order-1";
       const order2 = "concept-order-2";
       mockIndicadorFindAll.mockResolvedValue([ind1, ind2]);
@@ -736,7 +736,7 @@ describe("Resultados Router", () => {
       expect(mockCalculoLogCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           status: "error",
-          indicador_id: UUID,
+          indicador_id: INDICADOR_ID,
           indicador_version_id: null,
           mes_referencia: expect.any(Date),
           error: "Sin versiones definidas",
@@ -763,8 +763,8 @@ describe("Resultados Router", () => {
       expect(mockCalculoLogCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           status: "error",
-          indicador_id: UUID,
-          indicador_version_id: VERSION_UUID,
+          indicador_id: INDICADOR_ID,
+          indicador_version_id: VERSION_ID,
           mes_referencia: expect.any(Date),
           error: "raw DB error",
           fuente: "calcular-ahora",
@@ -788,11 +788,11 @@ describe("Resultados Router", () => {
     });
 
     test("isolates failures — one fails, others succeed", async () => {
-      const ind1 = makeIndicador({ id: "uuid-1", nombre: "Ind 1" });
-      const ind2 = makeIndicador({ id: "uuid-2", nombre: "Ind 2" });
+      const ind1 = makeIndicador({ id: 2, nombre: "Ind 1" });
+      const ind2 = makeIndicador({ id: 3, nombre: "Ind 2" });
       mockIndicadorFindAll.mockResolvedValue([ind1, ind2]);
       mockSequelizeQuery.mockResolvedValue([
-        makeVersion({ indicador_id: "uuid-1" }),
+        makeVersion({ indicador_id: 2 }),
       ]);
 
       const app = createTestApp();
@@ -877,7 +877,7 @@ describe("Resultados Router", () => {
     test("past year processes all 12 months", async () => {
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
       mockSequelizeQuery.mockResolvedValue([
-        { id: VERSION_UUID, indicador_id: UUID, version: 1, definicion: { tipo: "conteo_atenciones" } },
+        { id: VERSION_ID, indicador_id: INDICADOR_ID, version: 1, definicion: { tipo: "conteo_atenciones" } },
       ]);
       mockExecuteAndPersist.mockResolvedValue([]);
 
@@ -897,12 +897,12 @@ describe("Resultados Router", () => {
       expect(mockExecuteAndPersist).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(Object),
-        VERSION_UUID,
+        VERSION_ID,
         expect.any(Date),
         expect.any(Date),
         expect.any(Date),
         expect.objectContaining({
-          indicadorId: UUID,
+          indicadorId: INDICADOR_ID,
           fuente: "recalcular-anio",
         }),
       );
@@ -919,7 +919,7 @@ describe("Resultados Router", () => {
 
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
       mockSequelizeQuery.mockResolvedValue([
-        { id: VERSION_UUID, indicador_id: UUID, version: 1, definicion: { tipo: "conteo_atenciones" } },
+        { id: VERSION_ID, indicador_id: INDICADOR_ID, version: 1, definicion: { tipo: "conteo_atenciones" } },
       ]);
       mockExecuteAndPersist.mockResolvedValue([]);
 
@@ -944,37 +944,37 @@ describe("Resultados Router", () => {
     });
 
     test("scopes to specific indicador_id", async () => {
-      const inactiveInd = makeIndicador({ id: "uuid-inactive", nombre: "Inactive", activo: false });
+      const inactiveInd = makeIndicador({ id: 77, nombre: "Inactive", activo: false });
       mockIndicadorFindAll.mockImplementation(async (options: unknown) => {
-        const opts = options as { where?: { id?: string } };
-        if (opts?.where?.id === "uuid-inactive") {
+        const opts = options as { where?: { id?: number } };
+        if (opts?.where?.id === 77) {
           return [inactiveInd];
         }
         return [];
       });
       mockSequelizeQuery.mockResolvedValue([
-        { id: VERSION_UUID, indicador_id: "uuid-inactive", version: 1, definicion: { tipo: "conteo_atenciones" } },
+        { id: VERSION_ID, indicador_id: 77, version: 1, definicion: { tipo: "conteo_atenciones" } },
       ]);
       mockExecuteAndPersist.mockResolvedValue([]);
 
       const app = createTestApp();
       const res = await supertest(app)
         .post("/resultados/recalcular-anio")
-        .send({ anio: 2025, indicador_id: "uuid-inactive" });
+        .send({ anio: 2025, indicador_id: 77 });
 
       expect(res.status).toBe(200);
-      expect(res.body.indicador_id).toBe("uuid-inactive");
+      expect(res.body.indicador_id).toBe(77);
       expect(res.body.indicadores_considerados).toBe(1);
       expect(res.body.recalculados).toBe(12);
       expect(mockIndicadorFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: "uuid-inactive" } }),
+        expect.objectContaining({ where: { id: 77 } }),
       );
       // Batch query received the right indicador_ids
       expect(mockSequelizeQuery).toHaveBeenCalledWith(
         expect.stringContaining("DISTINCT ON"),
         expect.objectContaining({
           replacements: expect.objectContaining({
-            indicador_ids: ["uuid-inactive"],
+            indicador_ids: [77],
           }),
         }),
       );
@@ -1003,7 +1003,7 @@ describe("Resultados Router", () => {
     test("isolates failures per month and continues", async () => {
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
       mockSequelizeQuery.mockResolvedValue([
-        { id: VERSION_UUID, indicador_id: UUID, version: 1, definicion: { tipo: "conteo_atenciones" } },
+        { id: VERSION_ID, indicador_id: INDICADOR_ID, version: 1, definicion: { tipo: "conteo_atenciones" } },
       ]);
       // Fail month 6 (6th call to executeAndPersist)
       mockExecuteAndPersist
@@ -1032,7 +1032,7 @@ describe("Resultados Router", () => {
     test("records an error ledger per month when execute fails", async () => {
       mockIndicadorFindAll.mockResolvedValue([makeIndicador()]);
       mockSequelizeQuery.mockResolvedValue([
-        { id: VERSION_UUID, indicador_id: UUID, version: 1, definicion: { tipo: "conteo_atenciones" } },
+        { id: VERSION_ID, indicador_id: INDICADOR_ID, version: 1, definicion: { tipo: "conteo_atenciones" } },
       ]);
       mockExecuteAndPersist.mockRejectedValue(new Error("DB error"));
 
@@ -1047,8 +1047,8 @@ describe("Resultados Router", () => {
       expect(mockCalculoLogCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           status: "error",
-          indicador_id: UUID,
-          indicador_version_id: VERSION_UUID,
+          indicador_id: INDICADOR_ID,
+          indicador_version_id: VERSION_ID,
           mes_referencia: new Date("2025-06-01T00:00:00.000Z"),
           error: "DB error",
           fuente: "recalcular-anio",
@@ -1071,7 +1071,7 @@ describe("Resultados Router", () => {
       expect(mockCalculoLogCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           status: "error",
-          indicador_id: UUID,
+          indicador_id: INDICADOR_ID,
           indicador_version_id: null,
           mes_referencia: new Date("2025-01-01T00:00:00.000Z"),
           error: "Sin versiones definidas",

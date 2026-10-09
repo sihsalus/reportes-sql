@@ -8,8 +8,8 @@
     "activo": true
   },
   {
-    "nombre": "Infección respiratoria aguda (IRA) no complicada en menores de 5 años",
-    "descripcion": "Sumatoria mensual de atenciones ambulatorias de menores de 5 años con diagnóstico definitivo de IRA no complicada (J00.X, J04.0, J04.1, J04.2, J06.0, J06.8, J06.9, J20.9). Fuente: HIS MINSA.",
+    "nombre": "5000027 Infección respiratoria aguda (IRA) no complicada en menores de 5 años",
+    "descripcion": "Sumatoria mensual de atenciones ambulatorias de menores de 5 años con diagnóstico definitivo de IRA no complicada (J00.X, J04.0, J04.1, J04.2, J06.0, J06.8, J06.9, J20.9).",
     "definicion": {
       "tipo": "conteo_atenciones",
       "poblacion": {
@@ -30,6 +30,116 @@
               "e65af4e3-be05-4ac7-b703-fef24c2a4230",
               "ae96015f-3a89-484c-bccd-5309b26bdcdb",
               "e01f5787-6897-4447-9879-9eaad59e6d35"
+            ],
+            "tipo_diagnostico": "definitivo"
+          }
+        ]
+      }
+    },
+    "activo": true
+  },
+  {
+    "nombre": "3331102 Faringoamigdalitis purulenta aguda (FAPA) en menores de 5 años",
+    "descripcion": "Atención de menores de 5 años con diagnóstico de Faringoamigdalitis aguda, atendida de manera ambulatoria. Sumatoria mensual de atenciones con diagnóstico definitivo de Faringoamigdalitis purulenta aguda (J020, J029, J030, J038, J039).",
+    "definicion": {
+      "tipo": "conteo_atenciones",
+      "poblacion": {
+        "max_anios_excl": 5
+      },
+      "evento": {
+        "location_uuids": [
+          "35d2234e-129a-4c40-abb2-1ae0b2400001"
+        ],
+        "diagnosticos": [
+          {
+            "concepto_uuids": [
+              "2cc4a9b5-7b1c-4fbc-ba67-8a5c5584162a",
+              "319df75b-920a-401c-a799-8075bbcccced",
+              "6abc8da0-3f8e-4f36-933c-eecf79c07f6e",
+              "4fc6f7e0-9134-4e12-a974-646675edc436",
+              "edb311d0-ee19-410e-ab5d-fa0a5da7f81b"
+            ],
+            "tipo_diagnostico": "definitivo"
+          }
+        ]
+      }
+    },
+    "activo": true
+  },
+  {
+    "nombre": "3331103 Otitis media aguda (OMA) en menores de 5 años",
+    "descripcion": "Atención de menores de 5 años con diagnóstico de otitis media aguda, atendida de manera ambulatoria. Sumatoria mensual de atenciones con diagnóstico definitivo de otitis media aguda (H65.0, H65.1, H66.0, H66.9).",
+    "definicion": {
+      "tipo": "conteo_atenciones",
+      "poblacion": {
+        "max_anios_excl": 5
+      },
+      "evento": {
+        "location_uuids": [
+          "35d2234e-129a-4c40-abb2-1ae0b2400001"
+        ],
+        "diagnosticos": [
+          {
+            "concepto_uuids": [
+              "f96bf9b0-177e-4435-a6a7-e86f577464e1",
+              "cfa9d0dd-119e-4cdd-8d1a-7caff722ab06",
+              "391aee5b-67d7-4d40-8b01-0d5739cb0bbd",
+              "054c172f-5b66-4360-8c8d-9b53f70609ce"
+            ],
+            "tipo_diagnostico": "definitivo"
+          }
+        ]
+      }
+    },
+    "activo": true
+  },
+  {
+    "nombre": "3331104 Sinusitis aguda en menores de 5 años",
+    "descripcion": "Atención de menores de 5 años con diagnóstico de sinusitis aguda, atendida de manera ambulatoria. Sumatoria mensual de atenciones con diagnóstico definitivo de sinusitis aguda (J01.0, J01.1, J01.2, J01.3, J01.4, J01.9).",
+    "definicion": {
+      "tipo": "conteo_atenciones",
+      "poblacion": {
+        "max_anios_excl": 5
+      },
+      "evento": {
+        "location_uuids": [
+          "35d2234e-129a-4c40-abb2-1ae0b2400001"
+        ],
+        "diagnosticos": [
+          {
+            "concepto_uuids": [
+              "6f48eaa6-0815-4073-9225-eb017bc2edd8",
+              "edf39746-93f1-4404-8473-5a33561b3798",
+              "aee3d4c1-cc61-4da1-af0c-b8c9fefd1757",
+              "a2e28752-3f63-4d8e-ae0d-9e0093182620",
+              "e0ad9c7f-2c1b-4d07-a1c3-4092a73723df",
+              "53a593e5-9c8c-4c7b-af33-9ff1cdb2707d"
+            ],
+            "tipo_diagnostico": "definitivo"
+          }
+        ]
+      }
+    },
+    "activo": true
+  },
+  {
+    "nombre": "3331105 Neumonía sin complicaciones y otros en menores de 5 años",
+    "descripcion": "Atención de menores de 5 años con diagnóstico de neumonía no complicada y otros, atendida de manera ambulatoria. Sumatoria mensual de atenciones con diagnóstico definitivo de neumonía sin complicaciones y otros (J12.9, J15.9, J18.9).",
+    "definicion": {
+      "tipo": "conteo_atenciones",
+      "poblacion": {
+        "max_anios_excl": 5
+      },
+      "evento": {
+        "location_uuids": [
+          "35d2234e-129a-4c40-abb2-1ae0b2400001"
+        ],
+        "diagnosticos": [
+          {
+            "concepto_uuids": [
+              "a593d173-0521-45c6-9b33-4b68682a5172",
+              "f895ef4f-9b7f-4a0a-85d9-809b8b624b36",
+              "9f6c9fb8-9e89-40e7-8bec-71ab4ed609e1"
             ],
             "tipo_diagnostico": "definitivo"
           }

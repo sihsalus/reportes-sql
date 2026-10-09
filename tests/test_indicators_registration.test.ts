@@ -103,11 +103,9 @@ describe("validateRegistrationUuids", () => {
 });
 
 describe("createIndicatorWithVersion", () => {
-  test("persists indicador + version 1 with explicit ids", async () => {
-    mockIndicadorCreate.mockImplementation(async (values: unknown) => ({
-      id: (values as { id: string }).id,
-    }));
-    mockVersionCreate.mockResolvedValue({ id: "v-1" });
+  test("persists indicador + version 1 with DB-generated ids", async () => {
+    mockIndicadorCreate.mockResolvedValue({ id: 42 });
+    mockVersionCreate.mockResolvedValue({ id: 100 });
     const definicion = parseDefinicionIndicador({ tipo: "conteo_atenciones" });
 
     const { indicador } = await createIndicatorWithVersion({
@@ -117,16 +115,13 @@ describe("createIndicatorWithVersion", () => {
       definicion,
     });
 
-    expect(mockIndicadorCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: expect.any(String),
-        nombre: "Test",
-        activo: true,
-      }),
-    );
+    // The id is DB-generated: it must NOT be sent on create.
+    const indicadorArgs = mockIndicadorCreate.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(indicadorArgs).toMatchObject({ nombre: "Test", activo: true });
+    expect(indicadorArgs).not.toHaveProperty("id");
+
     expect(mockVersionCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: expect.any(String),
         indicador_id: indicador.id,
         version: 1,
         definicion: expect.objectContaining({ tipo: "conteo_atenciones" }),
@@ -137,14 +132,14 @@ describe("createIndicatorWithVersion", () => {
 
 describe("createIndicatorVersion", () => {
   test("persists the requested version number", async () => {
-    mockVersionCreate.mockResolvedValue({ id: "v-1" });
+    mockVersionCreate.mockResolvedValue({ id: 100 });
     const definicion = parseDefinicionIndicador({ tipo: "conteo_pacientes" });
 
-    await createIndicatorVersion("ind-1", 1, definicion);
+    await createIndicatorVersion(5, 1, definicion);
 
     expect(mockVersionCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        indicador_id: "ind-1",
+        indicador_id: 5,
         version: 1,
       }),
     );

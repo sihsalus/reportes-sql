@@ -7,8 +7,8 @@
  * - IndicadorResultado: computed result for a specific version and period.
  * - IndicadorCalculoLog: ledger of every calculation attempt (success/error).
  *
- * All models use UUID primary keys. Versioning is enforced via
- * UNIQUE(indicador_id, version).
+ * All models use auto-incrementing integer primary keys. Versioning is
+ * enforced via UNIQUE(indicador_id, version).
  */
 
 import { DataTypes, Model, type InferAttributes, type InferCreationAttributes, type CreationOptional } from "sequelize";
@@ -20,7 +20,7 @@ export class Indicador extends Model<
   InferAttributes<Indicador>,
   InferCreationAttributes<Indicador>
 > {
-  declare id: CreationOptional<string>;
+  declare id: CreationOptional<number>;
   declare nombre: string;
   declare descripcion: string | null;
   declare activo: CreationOptional<boolean>;
@@ -30,8 +30,8 @@ export class Indicador extends Model<
 Indicador.init(
   {
     id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
+      type: DataTypes.INTEGER,
+      autoIncrement: true,
       primaryKey: true,
     },
     nombre: {
@@ -66,8 +66,8 @@ export class IndicadorVersion extends Model<
   InferAttributes<IndicadorVersion>,
   InferCreationAttributes<IndicadorVersion>
 > {
-  declare id: CreationOptional<string>;
-  declare indicador_id: string;
+  declare id: CreationOptional<number>;
+  declare indicador_id: number;
   declare version: number;
   declare definicion: Record<string, unknown>;
   declare creado_en: CreationOptional<Date>;
@@ -76,12 +76,12 @@ export class IndicadorVersion extends Model<
 IndicadorVersion.init(
   {
     id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
+      type: DataTypes.INTEGER,
+      autoIncrement: true,
       primaryKey: true,
     },
     indicador_id: {
-      type: DataTypes.UUID,
+      type: DataTypes.INTEGER,
       allowNull: false,
       references: {
         model: Indicador,
@@ -123,8 +123,8 @@ export class IndicadorResultado extends Model<
   InferAttributes<IndicadorResultado>,
   InferCreationAttributes<IndicadorResultado>
 > {
-  declare id: CreationOptional<string>;
-  declare indicador_version_id: string;
+  declare id: CreationOptional<number>;
+  declare indicador_version_id: number;
   declare periodo_inicio: Date;
   declare periodo_fin: Date;
   declare valor: number;
@@ -136,12 +136,12 @@ export class IndicadorResultado extends Model<
 IndicadorResultado.init(
   {
     id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
+      type: DataTypes.INTEGER,
+      autoIncrement: true,
       primaryKey: true,
     },
     indicador_version_id: {
-      type: DataTypes.UUID,
+      type: DataTypes.INTEGER,
       allowNull: false,
       references: {
         model: IndicadorVersion,
@@ -207,8 +207,8 @@ export class IndicadorMeta extends Model<
   InferAttributes<IndicadorMeta>,
   InferCreationAttributes<IndicadorMeta>
 > {
-  declare id: CreationOptional<string>;
-  declare indicador_version_id: string;
+  declare id: CreationOptional<number>;
+  declare indicador_version_id: number;
   declare anio: number;
   declare valor_meta: number;
   declare creado_en: CreationOptional<Date>;
@@ -217,12 +217,12 @@ export class IndicadorMeta extends Model<
 IndicadorMeta.init(
   {
     id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
+      type: DataTypes.INTEGER,
+      autoIncrement: true,
       primaryKey: true,
     },
     indicador_version_id: {
-      type: DataTypes.UUID,
+      type: DataTypes.INTEGER,
       allowNull: false,
       references: {
         model: IndicadorVersion,
@@ -264,9 +264,9 @@ export class IndicadorCalculoLog extends Model<
   InferAttributes<IndicadorCalculoLog>,
   InferCreationAttributes<IndicadorCalculoLog>
 > {
-  declare id: CreationOptional<string>;
-  declare indicador_id: string | null;
-  declare indicador_version_id: string | null;
+  declare id: CreationOptional<number>;
+  declare indicador_id: number | null;
+  declare indicador_version_id: number | null;
   declare mes_referencia: Date | null;
   declare status: string;
   declare filas_devueltas: number | null;
@@ -280,12 +280,12 @@ export class IndicadorCalculoLog extends Model<
 IndicadorCalculoLog.init(
   {
     id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
+      type: DataTypes.INTEGER,
+      autoIncrement: true,
       primaryKey: true,
     },
     indicador_id: {
-      type: DataTypes.UUID,
+      type: DataTypes.INTEGER,
       allowNull: true,
       references: {
         model: Indicador,
@@ -296,7 +296,7 @@ IndicadorCalculoLog.init(
       onUpdate: "CASCADE",
     },
     indicador_version_id: {
-      type: DataTypes.UUID,
+      type: DataTypes.INTEGER,
       allowNull: true,
       references: {
         model: IndicadorVersion,

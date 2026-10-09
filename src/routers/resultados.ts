@@ -33,6 +33,7 @@ import { OpenMRSUnavailableError } from "../errors.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { requirePrivilege } from "../middleware/auth.js";
 import { rateLimit, resetRateLimitStore } from "./resultados/rate-limit.js";
+import { parseNumericId } from "./parse-id.js";
 import { handleSeries } from "./resultados/series.js";
 import { handleRecalcularAnio } from "./resultados/recalcular-anio.js";
 import { settings } from "../config/index.js";
@@ -47,10 +48,10 @@ export { resetRateLimitStore };
 resultadosRouter.get(
   "/",
   asyncHandler(async (req: Request, res: Response) => {
-    const indicadorId = req.query["indicador_id"] as string | undefined;
+    const indicadorIdRaw = req.query["indicador_id"] as string | undefined;
     const periodoInicioStr = req.query["periodo_inicio"] as string | undefined;
     const periodoFinStr = req.query["periodo_fin"] as string | undefined;
-    const versionId = req.query["version_id"] as string | undefined;
+    const versionIdRaw = req.query["version_id"] as string | undefined;
     const includeHistoricos = req.query["include_historicos"] === "true";
     const pageRaw = req.query["page"] as string | undefined;
     const sizeRaw = req.query["size"] as string | undefined;
@@ -90,12 +91,20 @@ resultadosRouter.get(
       }
     }
 
-    if (
-      versionId !== undefined &&
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(versionId)
-    ) {
+    const indicadorId =
+      indicadorIdRaw !== undefined ? parseNumericId(indicadorIdRaw) : null;
+    if (indicadorIdRaw !== undefined && indicadorId === null) {
       res.status(422).json({
-        detail: { field: "version_id", message: "version_id debe ser un UUID válido" },
+        detail: { field: "indicador_id", message: "indicador_id debe ser un id numérico" },
+      });
+      return;
+    }
+
+    const versionId =
+      versionIdRaw !== undefined ? parseNumericId(versionIdRaw) : null;
+    if (versionIdRaw !== undefined && versionId === null) {
+      res.status(422).json({
+        detail: { field: "version_id", message: "version_id debe ser un id numérico" },
       });
       return;
     }
@@ -227,7 +236,7 @@ resultadosRouter.post(
 
     // Parse definitions and collect all order concepts before making one
     // OpenMRS lookup for the complete batch.
-    const definicionByIndicador = new Map<string, ReturnType<typeof parseDefinicionIndicador>>();
+    const definicionByIndicador = new Map<number, ReturnType<typeof parseDefinicionIndicador>>();
     const allConceptUuids = new Set<string>();
     for (const indicador of indicadores) {
       const version = latestVersionByIndicador.get(indicador.id);
@@ -253,8 +262,8 @@ resultadosRouter.post(
       }
     }
 
-    const conceptMapByIndicador = new Map<string, Record<string, number> | null>();
-    const conceptErrorByIndicador = new Map<string, string>();
+    const conceptMapByIndicador = new Map<number, Record<string, number> | null>();
+    const conceptErrorByIndicador = new Map<number, string>();
     for (const indicador of indicadores) {
       const definicion = definicionByIndicador.get(indicador.id);
       const ordenes = definicion?.evento?.ordenes;
@@ -283,7 +292,7 @@ resultadosRouter.post(
 
     let calculados = 0;
     const errores: Array<{
-      indicador_id: string;
+      indicador_id: number;
       indicador_nombre: string;
       error: string;
     }> = [];
@@ -335,6 +344,9 @@ resultadosRouter.post(
           conceptMap,
         );
 
+        // Persist the canonical month end as `periodo_fin` (not `fin`, the
+        // query cutoff). The row is keyed by `mes_referencia` and labeled as
+        // the whole month, so its period stays stable across calculation days.
         await executeAndPersist(
           sql,
           params as Record<string, unknown>,

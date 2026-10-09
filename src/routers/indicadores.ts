@@ -38,6 +38,7 @@ import { asyncHandler } from "../middleware/async-handler.js";
 import { requirePrivilege } from "../middleware/auth.js";
 import { handleCreateVersion } from "./indicadores/versiones.js";
 import { handlePreviewSql } from "./indicadores/preview-sql.js";
+import { parseNumericId } from "./parse-id.js";
 import { settings } from "../config/index.js";
 
 export const indicadoresRouter: Router = Router();
@@ -158,7 +159,11 @@ indicadoresRouter.get(
 indicadoresRouter.get(
   "/:id",
   asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params["id"] as string;
+    const id = parseNumericId(req.params["id"]);
+    if (id === null) {
+      res.status(404).json({ detail: "Indicador no encontrado" });
+      return;
+    }
     const indicador = await Indicador.findByPk(id);
     if (!indicador) {
       res.status(404).json({ detail: "Indicador no encontrado" });
@@ -183,7 +188,11 @@ indicadoresRouter.put(
   "/:id",
   requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params["id"] as string;
+    const id = parseNumericId(req.params["id"]);
+    if (id === null) {
+      res.status(404).json({ detail: "Indicador no encontrado" });
+      return;
+    }
     const indicador = await Indicador.findByPk(id);
     if (!indicador) {
       res.status(404).json({ detail: "Indicador no encontrado" });
@@ -293,8 +302,13 @@ indicadoresRouter.put(
 
 indicadoresRouter.delete(
   "/:id",
+  requirePrivilege(settings.openmrs_required_privilege),
   asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params["id"] as string;
+    const id = parseNumericId(req.params["id"]);
+    if (id === null) {
+      res.status(404).json({ detail: "Indicador no encontrado" });
+      return;
+    }
     const indicador = await Indicador.findByPk(id);
     if (!indicador) {
       res.status(404).json({ detail: "Indicador no encontrado" });

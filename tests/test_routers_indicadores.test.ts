@@ -126,13 +126,13 @@ function createTestApp() {
   return app;
 }
 
-const UUID = "00000000-0000-0000-0000-000000000001";
-const UUID2 = "00000000-0000-0000-0000-000000000002";
-const VERSION_UUID = "00000000-0000-0000-aaaa-000000000001";
+const INDICADOR_ID = 1;
+const NEW_VERSION_ID = 2;
+const PREV_VERSION_ID = 11;
 
 function makeIndicadorRow(overrides: Record<string, unknown> = {}) {
   return {
-    id: UUID,
+    id: INDICADOR_ID,
     nombre: "Test Indicador",
     descripcion: "Test description",
     activo: true,
@@ -149,8 +149,8 @@ function makeIndicadorRow(overrides: Record<string, unknown> = {}) {
 
 function makeVersionRow(overrides: Record<string, unknown> = {}) {
   return {
-    id: VERSION_UUID,
-    indicador_id: UUID,
+    id: PREV_VERSION_ID,
+    indicador_id: INDICADOR_ID,
     version: 1,
     definicion: {
       tipo: "conteo_atenciones",
@@ -365,7 +365,7 @@ describe("Indicadores Router", () => {
       mockVersionFindAll.mockResolvedValue([makeVersionRow()]);
 
       const app = createTestApp();
-      const res = await supertest(app).get(`/indicadores/${UUID}`);
+      const res = await supertest(app).get(`/indicadores/${INDICADOR_ID}`);
 
       expect(res.status).toBe(200);
       expect(res.body.versiones).toHaveLength(1);
@@ -375,7 +375,7 @@ describe("Indicadores Router", () => {
       mockIndicadorFindByPk.mockResolvedValue(null);
 
       const app = createTestApp();
-      const res = await supertest(app).get(`/indicadores/${UUID}`);
+      const res = await supertest(app).get(`/indicadores/${INDICADOR_ID}`);
 
       expect(res.status).toBe(404);
     });
@@ -388,7 +388,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app)
-        .put(`/indicadores/${UUID}`)
+        .put(`/indicadores/${INDICADOR_ID}`)
         .send({ nombre: "Updated" });
 
       expect(res.status).toBe(200);
@@ -404,7 +404,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app)
-        .put(`/indicadores/${UUID}`)
+        .put(`/indicadores/${INDICADOR_ID}`)
         .send({
           nombre: "Updated",
           definicion: {
@@ -428,7 +428,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app)
-        .put(`/indicadores/${UUID}`)
+        .put(`/indicadores/${INDICADOR_ID}`)
         .send({
           nombre: "Updated",
           definicion: {
@@ -445,7 +445,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app)
-        .put(`/indicadores/${UUID}`)
+        .put(`/indicadores/${INDICADOR_ID}`)
         .send({
           nombre: "Test",
           definicion: {
@@ -468,7 +468,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app)
-        .put(`/indicadores/${UUID}`)
+        .put(`/indicadores/${INDICADOR_ID}`)
         .send({
           nombre: "Updated",
           definicion: {
@@ -488,7 +488,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app)
-        .put(`/indicadores/${UUID}`)
+        .put(`/indicadores/${INDICADOR_ID}`)
         .send({ nombre: "Updated" });
 
       expect(res.status).toBe(404);
@@ -499,7 +499,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app)
-        .put(`/indicadores/${UUID}`)
+        .put(`/indicadores/${INDICADOR_ID}`)
         .send({ descripcion: "only metadata" });
 
       expect(res.status).toBe(422);
@@ -512,7 +512,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app)
-        .put(`/indicadores/${UUID}`)
+        .put(`/indicadores/${INDICADOR_ID}`)
         .send({ nombre: "   " });
 
       expect(res.status).toBe(422);
@@ -526,7 +526,7 @@ describe("Indicadores Router", () => {
       mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
 
       const app = createTestApp();
-      const res = await supertest(app).delete(`/indicadores/${UUID}`);
+      const res = await supertest(app).delete(`/indicadores/${INDICADOR_ID}`);
 
       expect(res.status).toBe(204);
     });
@@ -535,7 +535,7 @@ describe("Indicadores Router", () => {
       mockIndicadorFindByPk.mockResolvedValue(null);
 
       const app = createTestApp();
-      const res = await supertest(app).delete(`/indicadores/${UUID}`);
+      const res = await supertest(app).delete(`/indicadores/${INDICADOR_ID}`);
 
       expect(res.status).toBe(404);
     });
@@ -546,12 +546,12 @@ describe("Indicadores Router", () => {
       mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
       mockVersionMax.mockResolvedValue(2);
       mockVersionCreate.mockResolvedValue(
-        makeVersionRow({ version: 3, id: UUID2 }),
+        makeVersionRow({ version: 3, id: NEW_VERSION_ID }),
       );
 
       const app = createTestApp();
       const res = await supertest(app)
-        .post(`/indicadores/${UUID}/versiones`)
+        .post(`/indicadores/${INDICADOR_ID}/versiones`)
         .send({
           definicion: {
             tipo: "conteo_pacientes",
@@ -567,7 +567,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app)
-        .post(`/indicadores/${UUID}/versiones`)
+        .post(`/indicadores/${INDICADOR_ID}/versiones`)
         .send({
           definicion: {
             tipo: "conteo_atenciones",
@@ -582,7 +582,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app)
-        .post(`/indicadores/${UUID}/versiones`)
+        .post(`/indicadores/${INDICADOR_ID}/versiones`)
         .send(null);
 
       expect(res.status).toBe(422);
@@ -595,7 +595,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app)
-        .post(`/indicadores/${UUID}/versiones`)
+        .post(`/indicadores/${INDICADOR_ID}/versiones`)
         .send({
           definicion: {
             tipo: "conteo_atenciones",
@@ -615,7 +615,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app)
-        .post(`/indicadores/${UUID}/versiones`)
+        .post(`/indicadores/${INDICADOR_ID}/versiones`)
         .send({
           definicion: {
             tipo: "conteo_pacientes_ventana",
@@ -637,7 +637,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app)
-        .post(`/indicadores/${UUID}/versiones`)
+        .post(`/indicadores/${INDICADOR_ID}/versiones`)
         .send({
           definicion: {
             tipo: "conteo_atenciones",
@@ -657,14 +657,14 @@ describe("Indicadores Router", () => {
       mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
       mockVersionMax.mockResolvedValue(1);
       mockVersionCreate.mockResolvedValue(
-        makeVersionRow({ version: 2, id: UUID2 }),
+        makeVersionRow({ version: 2, id: NEW_VERSION_ID }),
       );
-      mockVersionFindOne.mockResolvedValue({ id: VERSION_UUID });
+      mockVersionFindOne.mockResolvedValue({ id: PREV_VERSION_ID });
       mockSequelizeQuery.mockResolvedValue([]);
 
       const app = createTestApp();
       const res = await supertest(app)
-        .post(`/indicadores/${UUID}/versiones`)
+        .post(`/indicadores/${INDICADOR_ID}/versiones`)
         .send({
           definicion: {
             tipo: "conteo_pacientes",
@@ -680,22 +680,22 @@ describe("Indicadores Router", () => {
       expect(sqlArg as string).toMatch(/ON CONFLICT \(indicador_version_id, anio\) DO NOTHING/);
 
       const replacements = mockSequelizeQuery.mock.calls[0]?.[1] as { replacements?: Record<string, unknown> };
-      expect(replacements?.replacements?.newVersionId).toBe(UUID2);
-      expect(replacements?.replacements?.oldVersionId).toBe(VERSION_UUID);
+      expect(replacements?.replacements?.newVersionId).toBe(NEW_VERSION_ID);
+      expect(replacements?.replacements?.oldVersionId).toBe(PREV_VERSION_ID);
     });
 
     test("SC-16: new version with no previous metas starts empty", async () => {
       mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
       mockVersionMax.mockResolvedValue(1);
       mockVersionCreate.mockResolvedValue(
-        makeVersionRow({ version: 2, id: UUID2 }),
+        makeVersionRow({ version: 2, id: NEW_VERSION_ID }),
       );
-      mockVersionFindOne.mockResolvedValue({ id: VERSION_UUID });
+      mockVersionFindOne.mockResolvedValue({ id: PREV_VERSION_ID });
       mockSequelizeQuery.mockResolvedValue([]);
 
       const app = createTestApp();
       const res = await supertest(app)
-        .post(`/indicadores/${UUID}/versiones`)
+        .post(`/indicadores/${INDICADOR_ID}/versiones`)
         .send({
           definicion: {
             tipo: "conteo_pacientes",
@@ -710,17 +710,17 @@ describe("Indicadores Router", () => {
       mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
       mockVersionMax.mockResolvedValue(1);
       mockVersionCreate.mockResolvedValue(
-        makeVersionRow({ version: 2, id: UUID2 }),
+        makeVersionRow({ version: 2, id: NEW_VERSION_ID }),
       );
       mockVersionFindOne
-        .mockResolvedValueOnce({ id: VERSION_UUID }) // previous version lookup
-        .mockResolvedValueOnce({ id: UUID2 }); // version existence check on PUT
+        .mockResolvedValueOnce({ id: PREV_VERSION_ID }) // previous version lookup
+        .mockResolvedValueOnce({ id: NEW_VERSION_ID }); // version existence check on PUT
       mockSequelizeQuery
         .mockResolvedValueOnce([]) // copy SQL
         .mockResolvedValueOnce([
           {
-            id: "00000000-0000-0000-bbbb-000000000002",
-            indicador_version_id: UUID2,
+            id: 7,
+            indicador_version_id: NEW_VERSION_ID,
             anio: 2025,
             valor_meta: 2000,
             creado_en: new Date("2026-01-01"),
@@ -729,7 +729,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const versionRes = await supertest(app)
-        .post(`/indicadores/${UUID}/versiones`)
+        .post(`/indicadores/${INDICADOR_ID}/versiones`)
         .send({
           definicion: {
             tipo: "conteo_pacientes",
@@ -740,13 +740,13 @@ describe("Indicadores Router", () => {
       expect(versionRes.body.version).toBe(2);
 
       const metaRes = await supertest(app).put("/metas").send({
-        indicador_version_id: UUID2,
+        indicador_version_id: NEW_VERSION_ID,
         anio: 2025,
         valor_meta: 2000,
       });
 
       expect(metaRes.status).toBe(200);
-      expect(metaRes.body.indicador_version_id).toBe(UUID2);
+      expect(metaRes.body.indicador_version_id).toBe(NEW_VERSION_ID);
       expect(metaRes.body.valor_meta).toBe(2000);
     });
   });
@@ -759,7 +759,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        `/indicadores/${UUID}/preview-sql`,
+        `/indicadores/${INDICADOR_ID}/preview-sql`,
       );
 
       expect(res.status).toBe(200);
@@ -774,11 +774,11 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        `/indicadores/${UUID}/preview-sql?version_id=${VERSION_UUID}`,
+        `/indicadores/${INDICADOR_ID}/preview-sql?version_id=${PREV_VERSION_ID}`,
       );
 
       expect(res.status).toBe(200);
-      expect(res.body.version_id).toBe(VERSION_UUID);
+      expect(res.body.version_id).toBe(PREV_VERSION_ID);
     });
 
     test("accepts versionId (camelCase) and returns preview", async () => {
@@ -787,30 +787,30 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        `/indicadores/${UUID}/preview-sql?versionId=${VERSION_UUID}`,
+        `/indicadores/${INDICADOR_ID}/preview-sql?versionId=${PREV_VERSION_ID}`,
       );
 
       expect(res.status).toBe(200);
-      expect(res.body.version_id).toBe(VERSION_UUID);
+      expect(res.body.version_id).toBe(PREV_VERSION_ID);
     });
 
     test("versionId takes precedence when both params are present", async () => {
       mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
       // versionFindOne is called with the resolved versionId;
-      // verify it received the camelCase value (UUID2), not the snake_case (VERSION_UUID)
+      // verify it received the camelCase value (NEW_VERSION_ID), not the snake_case (PREV_VERSION_ID)
       mockVersionFindOne.mockImplementation(async ({ where }: any) => {
-        return where.id === UUID2
-          ? makeVersionRow({ id: UUID2, version: 2 })
+        return where.id === NEW_VERSION_ID
+          ? makeVersionRow({ id: NEW_VERSION_ID, version: 2 })
           : null;
       });
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        `/indicadores/${UUID}/preview-sql?versionId=${UUID2}&version_id=${VERSION_UUID}`,
+        `/indicadores/${INDICADOR_ID}/preview-sql?versionId=${NEW_VERSION_ID}&version_id=${PREV_VERSION_ID}`,
       );
 
       expect(res.status).toBe(200);
-      expect(res.body.version_id).toBe(UUID2);
+      expect(res.body.version_id).toBe(NEW_VERSION_ID);
       expect(res.body.version_num).toBe(2);
     });
 
@@ -820,7 +820,7 @@ describe("Indicadores Router", () => {
 
       const app = createTestApp();
       const res = await supertest(app).get(
-        `/indicadores/${UUID}/preview-sql?version_id=wrong-uuid`,
+        `/indicadores/${INDICADOR_ID}/preview-sql?version_id=wrong-uuid`,
       );
 
       expect(res.status).toBe(404);

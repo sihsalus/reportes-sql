@@ -8,12 +8,20 @@
 /**
  * Calculate the current calendar month's boundaries in UTC.
  *
- * Returns [inicio, fin] where:
- * - inicio: first day of the current month at 00:00 UTC
- * - fin: today at 00:00 UTC (for real-time calculation) or last day of month
+ * - `inicio`: first day of the current month at 00:00 UTC.
+ * - `fin`: today at 00:00 UTC — the *query* upper bound for `calcular-ahora`
+ *   (real-time, month-to-date).
+ * - `finPersistencia`: last day of the current month. This — not `fin` — is
+ *   what `calcular-ahora` stores as `periodo_fin`.
+ * - `mes_referencia`: `inicio`; the canonical month identifier.
  *
- * Use `mes_referencia` (inicio) as the canonical month identifier
- * when persisting results.
+ * Why persist the month end and not the calculation day: `periodo_inicio` /
+ * `periodo_fin` are the canonical *period label* of the result, keyed by
+ * `mes_referencia` (which drives the unique index and the rollup views), not a
+ * record of the exact cutoff of the query. For the current month the two
+ * bounds count the same value (there are no future encounters), so labeling
+ * the row as the whole month keeps its period stable and consistent with
+ * `recalcular-anio`.
  */
 export function calcularMesActual(): {
   inicio: Date;

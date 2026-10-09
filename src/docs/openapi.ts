@@ -248,8 +248,8 @@ export const openapiSpec = {
             name: "id",
             in: "path",
             required: true,
-            schema: { type: "string", format: "uuid" },
-            description: "UUID del indicador",
+            schema: { type: "integer" },
+            description: "ID del indicador",
           },
         ],
         responses: {
@@ -270,7 +270,7 @@ export const openapiSpec = {
             name: "id",
             in: "path",
             required: true,
-            schema: { type: "string", format: "uuid" },
+            schema: { type: "integer" },
           },
         ],
         requestBody: {
@@ -314,7 +314,7 @@ export const openapiSpec = {
             name: "id",
             in: "path",
             required: true,
-            schema: { type: "string", format: "uuid" },
+            schema: { type: "integer" },
           },
         ],
         responses: {
@@ -337,7 +337,7 @@ export const openapiSpec = {
             name: "id",
             in: "path",
             required: true,
-            schema: { type: "string", format: "uuid" },
+            schema: { type: "integer" },
           },
         ],
         requestBody: {
@@ -383,19 +383,19 @@ export const openapiSpec = {
             name: "id",
             in: "path",
             required: true,
-            schema: { type: "string", format: "uuid" },
+            schema: { type: "integer" },
           },
           {
             name: "version_id",
             in: "query",
-            schema: { type: "string", format: "uuid" },
+            schema: { type: "integer" },
             description:
-              "UUID de versión específica (opcional; default: última versión). También acepta versionId (camelCase).",
+              "ID de versión específica (opcional; default: última versión). También acepta versionId (camelCase).",
           },
           {
             name: "versionId",
             in: "query",
-            schema: { type: "string", format: "uuid" },
+            schema: { type: "integer" },
             description:
               "Alias camelCase de version_id. Si ambos están presentes, versionId tiene precedencia.",
           },
@@ -412,7 +412,7 @@ export const openapiSpec = {
                     params: { type: "object" },
                     periodo_inicio: { type: "string", format: "date" },
                     periodo_fin: { type: "string", format: "date" },
-                    version_id: { type: "string", format: "uuid" },
+                    version_id: { type: "integer" },
                     version_num: { type: "integer" },
                   },
                 },
@@ -438,7 +438,7 @@ export const openapiSpec = {
           {
             name: "indicador_id",
             in: "query",
-            schema: { type: "string", format: "uuid" },
+            schema: { type: "integer" },
             description: "Filtrar por indicador",
           },
           {
@@ -451,7 +451,7 @@ export const openapiSpec = {
           {
             name: "version_id",
             in: "query",
-            schema: { type: "string", format: "uuid" },
+            schema: { type: "integer" },
             description: "Filtrar por una versión específica del indicador",
           },
           {
@@ -509,7 +509,7 @@ export const openapiSpec = {
                       items: {
                         type: "object",
                         properties: {
-                          indicador_id: { type: "string" },
+                          indicador_id: { type: "integer" },
                           indicador_nombre: { type: "string" },
                           error: { type: "string" },
                         },
@@ -536,8 +536,8 @@ export const openapiSpec = {
             name: "indicador_id",
             in: "query",
             required: true,
-            schema: { type: "string", format: "uuid" },
-            description: "UUID del indicador",
+            schema: { type: "integer" },
+            description: "ID del indicador",
           },
           {
             name: "anio",
@@ -585,8 +585,7 @@ export const openapiSpec = {
                           semestre: { type: "integer", nullable: true },
                           version_num: { type: "integer", nullable: true },
                           version_id: {
-                            type: "string",
-                            format: "uuid",
+                            type: "integer",
                             nullable: true,
                           },
                           versiones: {
@@ -597,7 +596,7 @@ export const openapiSpec = {
                         },
                       },
                     },
-                    indicador_id: { type: "string", format: "uuid" },
+                    indicador_id: { type: "integer" },
                     anio: { type: "integer" },
                     granularity: { type: "string" },
                   },
@@ -634,10 +633,9 @@ export const openapiSpec = {
                       "Año a recalcular (entero, >= 2000, no futuro). Para el año actual solo se procesan meses hasta el mes UTC actual.",
                   },
                   indicador_id: {
-                    type: "string",
-                    format: "uuid",
+                    type: "integer",
                     description:
-                      "UUID de un indicador específico. Si se omite, se procesan todos los indicadores activos.",
+                      "ID de un indicador específico. Si se omite, se procesan todos los indicadores activos.",
                     nullable: true,
                   },
                 },
@@ -655,8 +653,7 @@ export const openapiSpec = {
                   properties: {
                     anio: { type: "integer" },
                     indicador_id: {
-                      type: "string",
-                      format: "uuid",
+                      type: "integer",
                       nullable: true,
                     },
                     meses_procesados: { type: "integer" },
@@ -667,7 +664,7 @@ export const openapiSpec = {
                       items: {
                         type: "object",
                         properties: {
-                          indicador_id: { type: "string" },
+                          indicador_id: { type: "integer" },
                           indicador_nombre: { type: "string" },
                           mes: { type: "integer" },
                           error: { type: "string" },
@@ -836,7 +833,8 @@ export const openapiSpec = {
                       nombre: { type: "string" },
                       codigo: {
                         type: "string",
-                        description: "Código CIE-10 (si detectable)",
+                        description:
+                          "Código CIE-10, tomado del mapping ICD-10/CIE-10 del concepto o de su SHORT name (no del display)",
                       },
                     },
                   },
@@ -963,7 +961,11 @@ export const openapiSpec = {
                     properties: {
                       uuid: { type: "string" },
                       nombre: { type: "string" },
-                      codigo: { type: "string" },
+                      codigo: {
+                        type: "string",
+                        description:
+                          "Código CIE-10, tomado del mapping ICD-10/CIE-10 del concepto o de su SHORT name (no del display)",
+                      },
                     },
                   },
                 },
@@ -994,7 +996,7 @@ export const openapiSpec = {
                 type: "object",
                 required: ["indicador_version_id", "anio", "valor_meta"],
                 properties: {
-                  indicador_version_id: { type: "string", format: "uuid" },
+                  indicador_version_id: { type: "integer" },
                   anio: { type: "integer", minimum: 2000, maximum: 2100 },
                   valor_meta: { type: "number", minimum: 0 },
                 },
@@ -1018,14 +1020,14 @@ export const openapiSpec = {
           {
             name: "indicador_version_id",
             in: "query",
-            schema: { type: "string", format: "uuid" },
-            description: "UUID de la versión del indicador",
+            schema: { type: "integer" },
+            description: "ID de la versión del indicador",
           },
           {
             name: "indicador_id",
             in: "query",
-            schema: { type: "string", format: "uuid" },
-            description: "UUID del indicador (usa la última versión)",
+            schema: { type: "integer" },
+            description: "ID del indicador (usa la última versión)",
           },
         ],
         responses: {
@@ -1038,8 +1040,8 @@ export const openapiSpec = {
                   items: {
                     type: "object",
                     properties: {
-                      id: { type: "string" },
-                      indicador_version_id: { type: "string" },
+                      id: { type: "integer" },
+                      indicador_version_id: { type: "integer" },
                       anio: { type: "integer" },
                       valor_meta: { type: "number" },
                     },
@@ -1063,7 +1065,7 @@ export const openapiSpec = {
             name: "indicador_version_id",
             in: "query",
             required: true,
-            schema: { type: "string", format: "uuid" },
+            schema: { type: "integer" },
           },
           {
             name: "anio",

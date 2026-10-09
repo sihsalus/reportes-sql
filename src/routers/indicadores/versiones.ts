@@ -17,12 +17,17 @@ import {
   validateRegistrationUuids,
 } from "../../indicators/registration.js";
 import { logger } from "../../config/logger.js";
+import { parseNumericId } from "../parse-id.js";
 
 export async function handleCreateVersion(
   req: Request,
   res: Response,
 ): Promise<void> {
-  const id = req.params["id"] as string;
+  const id = parseNumericId(req.params["id"]);
+  if (id === null) {
+    res.status(404).json({ detail: "Indicador no encontrado" });
+    return;
+  }
   const indicador = await Indicador.findByPk(id);
   if (!indicador) {
     res.status(404).json({ detail: "Indicador no encontrado" });
@@ -105,8 +110,8 @@ export async function handleCreateVersion(
       });
       if (previousVersion) {
         await sequelize.query(
-          `INSERT INTO indicador_meta (id, indicador_version_id, anio, valor_meta, creado_en)
-           SELECT gen_random_uuid(), :newVersionId, anio, valor_meta, NOW()
+          `INSERT INTO indicador_meta (indicador_version_id, anio, valor_meta, creado_en)
+           SELECT :newVersionId, anio, valor_meta, NOW()
            FROM indicador_meta
            WHERE indicador_version_id = :oldVersionId
            ON CONFLICT (indicador_version_id, anio) DO NOTHING`,

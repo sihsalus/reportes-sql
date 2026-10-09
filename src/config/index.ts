@@ -41,9 +41,6 @@ export interface Settings {
   openmrs_api_password: string;
   // Privilege required for writes/recalculation (fail-closed when unset)
   openmrs_required_privilege: string | undefined;
-  // Dev-only kill switch: when true, requireSession and requirePrivilege let
-  // every request through without touching OpenMRS. NEVER enable in production.
-  auth_disabled: boolean;
 
   // Application
   port: number;
@@ -133,8 +130,8 @@ function envEither(primary: string, alias: string): string | undefined {
 
 /**
  * Parse OPENMRS_REQUIRED_PRIVILEGE. Empty/whitespace-only values count as
- * unset: writes stay fail-closed (403) until an admin configures the real
- * OpenMRS privilege name.
+ * unset: non-super users stay fail-closed (403) until an admin configures the
+ * real OpenMRS privilege name. Super users bypass the guard regardless.
  */
 function parseRequiredPrivilege(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
@@ -176,7 +173,6 @@ export const settings: Settings = {
   openmrs_required_privilege: parseRequiredPrivilege(
     process.env["OPENMRS_REQUIRED_PRIVILEGE"],
   ),
-  auth_disabled: parseBoolean(process.env["AUTH_DISABLED"], true),
 
   port: parsePort(process.env["PORT"], 8000),
   auto_register_catalog: parseBoolean(

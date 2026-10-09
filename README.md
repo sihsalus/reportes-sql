@@ -46,6 +46,7 @@ Copy `.env.example` to `.env` and adjust for your environment.
 | `OPENMRS_API_URL` | `http://localhost/openmrs` | OpenMRS REST API base URL |
 | `OPENMRS_API_USER` | `admin` | OpenMRS API basic-auth user |
 | `OPENMRS_API_PASSWORD` | `Admin123` | OpenMRS API basic-auth password |
+| `OPENMRS_REQUIRED_PRIVILEGE` | _(unset)_ | OpenMRS privilege required for writes (POST/PUT/DELETE). Empty = fail-closed for non-super users (403); super users (roles `System Developer`, `Application: Has Super User Privileges`) always pass |
 | `LOG_LEVEL` | `debug` (dev) / `info` (prod) | Minimum log level: `debug`, `info`, `warn`, `error` |
 
 ## BASE_PATH

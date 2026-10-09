@@ -17,6 +17,7 @@ import { calcularMesEspecifico } from "../../engine/periodo.js";
 import { findLatestVersions } from "../../indicators/latest-version.js";
 import { resolveConceptMap, OpenMRSUnavailableError } from "../../validators/openmrs.js";
 import { rateLimit } from "./rate-limit.js";
+import { parseNumericId } from "../parse-id.js";
 
 export async function handleRecalcularAnio(
   req: Request,
@@ -40,8 +41,21 @@ export async function handleRecalcularAnio(
 
   const { anio, indicador_id } = body as {
     anio?: number;
-    indicador_id?: string;
+    indicador_id?: number | string;
   };
+
+  let indicadorId: number | undefined;
+  if (indicador_id !== undefined && indicador_id !== null) {
+    const parsed =
+      typeof indicador_id === "number" ? indicador_id : parseNumericId(indicador_id);
+    if (parsed === null || !Number.isInteger(parsed) || parsed <= 0) {
+      res.status(422).json({
+        detail: { field: "indicador_id", message: "indicador_id debe ser un id numérico" },
+      });
+      return;
+    }
+    indicadorId = parsed;
+  }
 
   if (typeof anio !== "number" || !Number.isInteger(anio)) {
     res.status(422).json({
@@ -72,8 +86,8 @@ export async function handleRecalcularAnio(
   }
 
   let indicadores;
-  if (indicador_id) {
-    indicadores = await Indicador.findAll({ where: { id: indicador_id } });
+  if (indicadorId) {
+    indicadores = await Indicador.findAll({ where: { id: indicadorId } });
     if (indicadores.length === 0) {
       res.status(422).json({
         detail: { field: "indicador_id", message: "Indicador no encontrado" },
@@ -92,9 +106,9 @@ export async function handleRecalcularAnio(
   const versionMap = await findLatestVersions(indicadores.map((i) => i.id));
 
   // ── Phase 2: Parse definitions + collect all concept UUIDs ──
-  const definicionMap = new Map<string, ReturnType<typeof parseDefinicionIndicador>>();
+  const definicionMap = new Map<number, ReturnType<typeof parseDefinicionIndicador>>();
   const allConceptUuids = new Set<string>();
-  const indicatorsWithoutVersion: string[] = [];
+  const indicatorsWithoutVersion: number[] = [];
 
   for (const indicador of indicadores) {
     const version = versionMap.get(indicador.id);
@@ -132,8 +146,8 @@ export async function handleRecalcularAnio(
   }
 
   // ── Phase 4: Per-indicator concept validation ──
-  const conceptMapByIndicador = new Map<string, Record<string, number>>();
-  const conceptErrorByIndicador = new Map<string, string>();
+  const conceptMapByIndicador = new Map<number, Record<string, number>>();
+  const conceptErrorByIndicador = new Map<number, string>();
 
   for (const indicador of indicadores) {
     if (indicatorsWithoutVersion.includes(indicador.id)) continue;
@@ -166,7 +180,7 @@ export async function handleRecalcularAnio(
   // ── Phase 5: Per-indicator × per-month execution ──
   let recalculados = 0;
   const errores: Array<{
-    indicador_id: string;
+    indicador_id: number;
     indicador_nombre: string;
     mes: number;
     error: string;
@@ -269,7 +283,7 @@ export async function handleRecalcularAnio(
 
   res.json({
     anio,
-    indicador_id: indicador_id || null,
+    indicador_id: indicadorId ?? null,
     meses_procesados: meses.length,
     indicadores_considerados: indicadores.length,
     recalculados,

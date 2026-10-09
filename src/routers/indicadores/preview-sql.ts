@@ -12,12 +12,17 @@ import { buildQuery } from "../../engine/interpreter.js";
 import { calcularMesActual } from "../../engine/periodo.js";
 import { resolveOrcenesConceptMap } from "../../engine/concept-resolver.js";
 import { OpenMRSUnavailableError } from "../../validators/openmrs.js";
+import { parseNumericId } from "../parse-id.js";
 
 export async function handlePreviewSql(
   req: Request,
   res: Response,
 ): Promise<void> {
-  const id = req.params["id"] as string;
+  const id = parseNumericId(req.params["id"]);
+  if (id === null) {
+    res.status(404).json({ detail: "Indicador no encontrado" });
+    return;
+  }
   const indicador = await Indicador.findByPk(id);
   if (!indicador) {
     res.status(404).json({ detail: "Indicador no encontrado" });
@@ -27,12 +32,19 @@ export async function handlePreviewSql(
   // Fetch version (specific or latest)
   // Accept both camelCase (versionId) and snake_case (version_id).
   // If both are present, versionId takes precedence as the canonical JS name.
-  const versionId = (req.query["versionId"] ?? req.query["version_id"]) as
+  const versionIdRaw = (req.query["versionId"] ?? req.query["version_id"]) as
     | string
     | undefined;
 
   let version: LatestVersion | null;
-  if (versionId) {
+  if (versionIdRaw) {
+    const versionId = parseNumericId(versionIdRaw);
+    if (versionId === null) {
+      res.status(404).json({
+        detail: "Versión no encontrada para este indicador",
+      });
+      return;
+    }
     version = await IndicadorVersion.findOne({
       where: {
         id: versionId,

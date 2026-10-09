@@ -23,9 +23,9 @@ import { logger } from "../config/logger.js";
  */
 export interface CalcLogEntry {
   /** Indicator id — null when the caller has no indicator context. */
-  indicador_id: string | null;
+  indicador_id: number | null;
   /** IndicadorVersion id — null for the no-version error path. */
-  indicador_version_id: string | null;
+  indicador_version_id: number | null;
   /** Canonical month reference (first day of month), or null. */
   mes_referencia: Date | null;
   /** Error message for status "error"; null for status "success". */

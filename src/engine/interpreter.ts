@@ -79,17 +79,26 @@ function buildConteoAtenciones(
     "e.voided = 0",
   ];
 
-  // ── Evento filter (location_uuids) ──
+  // ── Evento filter (location_uuids, encounter_type_uuids) ──
   const evento = d.evento;
   const locationUuids: string[] =
     evento?.location_uuids && evento.location_uuids.length > 0
       ? evento.location_uuids
+      : [];
+  const encounterTypeUuids: string[] =
+    evento?.encounter_type_uuids && evento.encounter_type_uuids.length > 0
+      ? evento.encounter_type_uuids
       : [];
 
   if (locationUuids.length > 0) {
     const core = buildCoreFilterBlock(locationUuids, params);
     joins += "\n" + core.joins;
     conditions.push(core.clause);
+  }
+  if (encounterTypeUuids.length > 0) {
+    const etResult = buildEncounterTypesFilterBlock(encounterTypeUuids, params);
+    joins += "\n" + etResult.joins;
+    conditions.push(etResult.clause);
   }
 
   const hasMinimo =
@@ -153,6 +162,7 @@ function buildConteoAtenciones(
     params["min_oc"] = minOc;
     const subquery = buildMinimoOcurrenciasSubquery({
       locationUuids,
+      encounterTypeUuids,
       poblacion: d.poblacion ?? null,
       diagnosticos,
       params,
@@ -184,6 +194,10 @@ function buildConteoPacientes(
     evento?.location_uuids && evento.location_uuids.length > 0
       ? evento.location_uuids
       : [];
+  const encounterTypeUuids: string[] =
+    evento?.encounter_type_uuids && evento.encounter_type_uuids.length > 0
+      ? evento.encounter_type_uuids
+      : [];
 
   const hasMinimo =
     evento != null &&
@@ -200,6 +214,7 @@ function buildConteoPacientes(
     params["min_oc"] = minOc;
     const subquery = buildMinimoOcurrenciasSubquery({
       locationUuids,
+      encounterTypeUuids,
       poblacion: d.poblacion ?? null,
       diagnosticos,
       params,
@@ -230,6 +245,11 @@ function buildConteoPacientes(
     const core = buildCoreFilterBlock(locationUuids, params);
     joins += "\n" + core.joins;
     conditions.push(core.clause);
+  }
+  if (encounterTypeUuids.length > 0) {
+    const etResult = buildEncounterTypesFilterBlock(encounterTypeUuids, params);
+    joins += "\n" + etResult.joins;
+    conditions.push(etResult.clause);
   }
 
   // ── Diagnosticos filter ──
@@ -419,6 +439,7 @@ function maxWindowDays(poblacion: FiltrosPoblacion | null): number | null {
 
 interface SubqueryInput {
   locationUuids: string[];
+  encounterTypeUuids: string[];
   poblacion: FiltrosPoblacion | null;
   diagnosticos: FiltroDiagnostico[] | null;
   params: Record<string, unknown>;
@@ -432,6 +453,7 @@ function buildMinimoOcurrenciasSubquery(
 ): string {
   const {
     locationUuids,
+    encounterTypeUuids,
     poblacion,
     diagnosticos,
     params,
@@ -452,6 +474,11 @@ function buildMinimoOcurrenciasSubquery(
     const core = buildCoreFilterBlock(locationUuids, params);
     joins += core.joins;
     conditions.push(core.clause);
+  }
+  if (encounterTypeUuids.length > 0) {
+    const etResult = buildEncounterTypesFilterBlock(encounterTypeUuids, params);
+    joins += "\n" + etResult.joins;
+    conditions.push(etResult.clause);
   }
 
   // ── Person join for poblacion filters ──

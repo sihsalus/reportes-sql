@@ -9,6 +9,7 @@ import type { Request, Response } from "express";
 import { QueryTypes } from "sequelize";
 import { sequelize } from "../../database/postgres.js";
 import { findLatestVersion } from "../../indicators/latest-version.js";
+import { parseNumericId } from "../parse-id.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -23,7 +24,7 @@ interface SeriesRow {
   semestre?: number;
   anio: number;
   version_num?: number;
-  version_id?: string;
+  version_id?: number;
   versiones?: number[];
 }
 
@@ -98,14 +99,22 @@ const GRANULARITY_SQL: Record<Granularity, string> = {
 // ── Handler ────────────────────────────────────────────────────────────────
 
 export async function handleSeries(req: Request, res: Response): Promise<void> {
-  const indicadorId = req.query["indicador_id"] as string | undefined;
+  const indicadorIdRaw = req.query["indicador_id"] as string | undefined;
   const anioStr = req.query["anio"] as string | undefined;
   const granularity = (req.query["granularity"] as string) || "mensual";
   const includeMeta = req.query["include_meta"] === "true";
 
-  if (!indicadorId) {
+  if (!indicadorIdRaw) {
     res.status(422).json({
       detail: { field: "indicador_id", message: "indicador_id es obligatorio" },
+    });
+    return;
+  }
+
+  const indicadorId = parseNumericId(indicadorIdRaw);
+  if (indicadorId === null) {
+    res.status(422).json({
+      detail: { field: "indicador_id", message: "indicador_id debe ser un id numérico" },
     });
     return;
   }
@@ -171,7 +180,7 @@ export async function handleSeries(req: Request, res: Response): Promise<void> {
       item["version_num"] = Number(r.version_num);
     }
     if ("version_id" in r && r.version_id != null) {
-      item["version_id"] = String(r.version_id);
+      item["version_id"] = Number(r.version_id);
     }
     if ("versiones" in r && r.versiones != null) {
       item["versiones"] = r.versiones;

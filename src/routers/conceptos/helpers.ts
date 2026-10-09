@@ -23,35 +23,100 @@ export function openmrsUrl(path: string): string {
   return `${base}/ws/rest/v1/${path.replace(/^\/+/, "")}`;
 }
 
-// ── CIE-10 extraction ──────────────────────────────────────────────────────
+// ── Diagnosis concepts: representation + CIE-10 extraction ──────────────────
+//
+// Mirrors the CIE-10 convention already implemented on the front
+// (esm-patient-notes-app/src/notes/catalog-concept.utils.ts): the code comes
+// from the concept's explicit ICD-10/CIE-10 reference-term mapping, or — in
+// the MINSA catalog — from its SHORT name. Free display text is never treated
+// as authority (a legacy display can merely look like a code).
 
-// CIE-10 categories always start with a letter + two digits (E11, I10, J06),
-// optionally followed by a dot + 1-2 digit subcategory (E11.9, J00.0), and a
-// word boundary (space or end of string).
-// Known limitation: without a CIE-10 catalog, displays like "B12 deficiency"
-// can still match (B + 12); a regex cannot distinguish them from real codes.
-const CIE10_RE = /^[A-Z]\d{2}(\.\d{1,2})?(\s|$)/i;
+/**
+ * OpenMRS custom representation for diagnosis concepts. `conceptMappings`
+ * carries the reference terms (code + source) and `names` carries the
+ * `conceptNameType` needed to spot the catalog SHORT name.
+ */
+export const DIAGNOSIS_CONCEPT_REPRESENTATION =
+  "custom:(uuid,display,names:(display,conceptNameType,locale),conceptMappings:(conceptReferenceTerm:(conceptSource:(name,display),code)))";
 
-export function extractCie10FromNames(
-  names: Array<{ display: string }>,
-): string | null {
-  for (const entry of names) {
-    if (CIE10_RE.test(entry.display ?? "")) {
-      return entry.display;
-    }
-  }
-  return null;
+export interface ConceptName {
+  display?: string;
+  name?: string;
+  conceptNameType?: string | null;
+  locale?: string;
 }
 
-export function extractNombreFromNames(
-  names: Array<{ display: string }>,
-): string | null {
-  for (const entry of names) {
-    if (!CIE10_RE.test(entry.display ?? "")) {
-      return entry.display;
-    }
-  }
-  return null;
+export interface ConceptReferenceMapping {
+  display?: string;
+  conceptReferenceTerm?: {
+    code?: string;
+    display?: string;
+    conceptSource?: { name?: string; display?: string };
+  };
+}
+
+export interface DiagnosisConcept {
+  uuid: string;
+  display?: string;
+  names?: ConceptName[];
+  conceptMappings?: ConceptReferenceMapping[];
+  mappings?: ConceptReferenceMapping[];
+}
+
+const CIE10_CODE_RE = /^[A-Z][0-9][A-Z0-9.]{1,5}$/i;
+const CIE10_SOURCE_RE = /icd[-\s]?10|cie[-\s]?10/i;
+const CIE10_PREFIX_RE =
+  /^\s*(?<code>[A-Z][0-9][A-Z0-9.]{1,5})\s*(?:[-–—:]\s*|\s+)(?<name>.+?)\s*$/i;
+const CIE10_SUFFIX_RE =
+  /^\s*(?<name>.+?)\s*\((?<code>[A-Z][0-9][A-Z0-9.]{1,5})\)\s*$/i;
+
+/** Code from an explicit ICD-10/CIE-10 concept mapping, if any. */
+function mappedCie10Code(
+  mappings: ConceptReferenceMapping[],
+): string | undefined {
+  const hit = mappings.find((mapping) => {
+    const source =
+      mapping.conceptReferenceTerm?.conceptSource?.name?.trim() ||
+      mapping.conceptReferenceTerm?.conceptSource?.display?.trim() ||
+      "";
+    const code = mapping.conceptReferenceTerm?.code?.trim();
+    return CIE10_SOURCE_RE.test(source) && Boolean(code);
+  });
+  return hit?.conceptReferenceTerm?.code?.trim() || undefined;
+}
+
+/** Code carried by the catalog's SHORT name, when it is shaped like one. */
+function shortNameCie10Code(names: ConceptName[]): string | undefined {
+  const hit = names.find((name) => {
+    if (name.conceptNameType !== "SHORT") return false;
+    const text = (name.display ?? name.name ?? "").trim();
+    return text.length > 0 && CIE10_CODE_RE.test(text);
+  });
+  return (hit?.display ?? hit?.name ?? "").trim() || undefined;
+}
+
+/**
+ * Authoritative CIE-10 code: an explicit ICD-10/CIE-10 mapping, else the
+ * catalog SHORT name when it matches the code pattern. Display text is
+ * intentionally not a fallback.
+ */
+export function extractCie10Code(
+  concept: DiagnosisConcept,
+): string | undefined {
+  const mappings = concept.conceptMappings ?? concept.mappings ?? [];
+  const code =
+    mappedCie10Code(mappings) ?? shortNameCie10Code(concept.names ?? []);
+  return code ? code.toLocaleUpperCase("es-PE") : undefined;
+}
+
+/** Human-readable name: the display with any leading/trailing code stripped. */
+export function extractNombre(concept: DiagnosisConcept): string {
+  const display = (concept.display ?? "").trim();
+  if (!display) return "Sin nombre";
+  const match =
+    display.match(CIE10_PREFIX_RE) ?? display.match(CIE10_SUFFIX_RE);
+  const name = (match?.groups?.["name"] ?? display).trim();
+  return name || display;
 }
 
 // ── Error handling ─────────────────────────────────────────────────────────

@@ -44,7 +44,7 @@ export interface RegisterIndicatorResult {
   nombre: string;
   indicatorCreated: boolean;
   versionCreated: boolean;
-  indicadorId: string;
+  indicadorId: number;
 }
 
 /**

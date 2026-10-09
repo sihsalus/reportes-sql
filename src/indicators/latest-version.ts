@@ -12,7 +12,7 @@ import { sequelize } from "../database/postgres.js";
 
 /** The newest version of an indicator, with its definition loaded. */
 export interface LatestVersion {
-  id: string;
+  id: number;
   version: number;
   definicion: Record<string, unknown>;
 }
@@ -26,7 +26,7 @@ export interface LatestVersion {
  * already resolved by id).
  */
 export async function findLatestVersion(
-  indicadorId: string,
+  indicadorId: number,
   requireActive: boolean,
 ): Promise<LatestVersion | null> {
   // Static fragment only — never user input.
@@ -55,11 +55,11 @@ export async function findLatestVersion(
  * extra `activo` filter is applied here.
  */
 export async function findLatestVersions(
-  indicadorIds: string[],
-): Promise<Map<string, LatestVersion>> {
+  indicadorIds: number[],
+): Promise<Map<number, LatestVersion>> {
   if (indicadorIds.length === 0) return new Map();
 
-  const rows = await sequelize.query<LatestVersion & { indicador_id: string }>(
+  const rows = await sequelize.query<LatestVersion & { indicador_id: number }>(
     `SELECT DISTINCT ON (iv.indicador_id)
        iv.id, iv.indicador_id, iv.version, iv.definicion
      FROM indicador_version iv

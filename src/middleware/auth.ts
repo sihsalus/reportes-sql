@@ -15,10 +15,9 @@
  *   case.
  * - On success `body.user` is attached as-is (preserving the OpenMRS shape,
  *   including roles and privileges) to `req.authUser`.
- * - `requirePrivilege` is a fail-closed write guard: unset or missing
- *   privilege → 403.
- * - Escape hatch: `AUTH_DISABLED=true` bypasses both middlewares entirely.
- *   Dev-only — never in production.
+ * - `requirePrivilege` is a fail-closed write guard for non-super users: unset
+ *   or missing privilege → 403. Super users (the roles listed below) are always
+ *   allowed through, mirroring the frontend `userHasAccess`.
  */
 import type {
   NextFunction,
@@ -27,7 +26,6 @@ import type {
   Response,
 } from "express";
 import { settings } from "../config/index.js";
-import { logger } from "../config/logger.js";
 
 /**
  * Bounded timeout for the upstream `/session` call (implementation constant,
@@ -94,21 +92,12 @@ function isPublicPath(path: string): boolean {
  *
  * Mounted on `publicRouter` before all route registrations. Exempts `/health`
  * and `/docs`/`/docs/*`; every other request requires a valid OpenMRS session.
- *
- * Dev escape hatch: when `AUTH_DISABLED=true`, every request passes through
- * untouched (no upstream call, no `req.authUser`). Never enable in production.
  */
 export async function requireSession(
   req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> {
-  if (settings.auth_disabled) {
-    warnAuthDisabledOnce();
-    next();
-    return;
-  }
-
   if (isPublicPath(req.path ?? "/")) {
     next();
     return;
@@ -175,36 +164,43 @@ function userHasPrivilege(
   });
 }
 
-let authDisabledWarned = false;
-
 /**
- * Single warn per process when the dev bypass is active — loud enough to
- * notice in the logs, quiet enough not to spam one line per request.
+ * Roles that identify a super user. Mirrors the frontend
+ * (`@openmrs/esm-api` → `userHasAccess` → `isSuperUser`): a user holding any of
+ * these roles bypasses the write privilege guard, so an administrator can
+ * operate without being granted every module privilege.
  */
-function warnAuthDisabledOnce(): void {
-  if (authDisabledWarned) return;
-  authDisabledWarned = true;
-  logger.warn(
-    "[auth] AUTH_DISABLED=true — session and privilege checks BYPASSED. " +
-      "Dev-only. Never enable in production.",
+const SUPER_USER_ROLES = new Set([
+  "System Developer",
+  "Application: Has Super User Privileges",
+]);
+
+function isSuperUser(user: AuthUser | undefined): boolean {
+  const roles = user?.roles;
+  if (!Array.isArray(roles)) return false;
+  return roles.some(
+    (role) =>
+      SUPER_USER_ROLES.has(role?.display) ||
+      SUPER_USER_ROLES.has((role as { name?: string })?.name ?? ""),
   );
 }
 
 /**
- * Fail-closed write guard factory.
+ * Write guard factory.
  *
- * - `AUTH_DISABLED=true` → every request passes (dev escape hatch).
+ * - Super users (see {@link isSuperUser}) always pass, matching the frontend so
+ *   an administrator can operate without being granted each module privilege.
  * - `privilege` unset/empty (`OPENMRS_REQUIRED_PRIVILEGE` not configured) →
- *   403 for every authenticated user until an admin configures the real name.
- * - Authenticated user lacking the privilege → 403.
+ *   403 for every non-super user until an admin configures the real name
+ *   (fail-closed).
+ * - Non-super user lacking the privilege → 403.
  * - Reads are never gated by this middleware.
  */
 export function requirePrivilege(
   privilege: string | undefined,
 ): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (settings.auth_disabled) {
-      warnAuthDisabledOnce();
+    if (isSuperUser(req.authUser)) {
       next();
       return;
     }

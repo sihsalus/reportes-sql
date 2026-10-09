@@ -90,12 +90,32 @@ jest.mock("../src/validators/openmrs.js", () => ({
 // Mock global fetch: /ws/rest/v1/session returns an authenticated session
 // (for requireSession); every other OpenMRS call (conceptos proxy) returns
 // an empty results list.
-const MOCKED_SESSION_USER = {
+//
+// The default session user is a regular clinician (no super-user role) so the
+// write guard stays fail-closed. Tests that need an administrator swap in
+// SUPER_SESSION_USER via `currentSessionUser`.
+type MockSessionUser = {
+  uuid: string;
+  display: string;
+  roles: Array<{ display: string; uuid: string }>;
+  privileges: Array<{ display: string; uuid: string }>;
+};
+
+const NORMAL_SESSION_USER: MockSessionUser = {
   uuid: "user-uuid-1",
   display: "Test User",
+  roles: [{ display: "Provider", uuid: "role-uuid-1" }],
+  privileges: [{ display: "app:indicadores:write", uuid: "priv-uuid-1" }],
+};
+
+const SUPER_SESSION_USER: MockSessionUser = {
+  uuid: "user-uuid-1",
+  display: "Admin User",
   roles: [{ display: "System Developer", uuid: "role-uuid-1" }],
   privileges: [{ display: "app:indicadores:write", uuid: "priv-uuid-1" }],
 };
+
+let currentSessionUser: MockSessionUser = NORMAL_SESSION_USER;
 
 const mockFetch = jest.fn((input: RequestInfo | URL) => {
   const url =
@@ -108,7 +128,7 @@ const mockFetch = jest.fn((input: RequestInfo | URL) => {
     return Promise.resolve({
       ok: true,
       status: 200,
-      json: async () => ({ authenticated: true, user: MOCKED_SESSION_USER }),
+      json: async () => ({ authenticated: true, user: currentSessionUser }),
       text: async () => "",
     }) as Promise<Response>;
   }
@@ -145,6 +165,7 @@ const HEALTHY_BODY = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  currentSessionUser = NORMAL_SESSION_USER;
   mockFindAndCountAll.mockResolvedValue({ count: 0, rows: [] });
   mockFindByPk.mockResolvedValue(null);
   mockFindOne.mockResolvedValue(null);
@@ -410,13 +431,14 @@ describe("incoming auth — requireSession gate", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("returns 403 fail-closed on all seven write/recalc handlers (privilege unset)", async () => {
+  it("returns 403 fail-closed on all eight write/recalc handlers for a non-super user (privilege unset)", async () => {
     const { request } = requestFor("");
     const indicadorId = "00000000-0000-0000-0000-000000000001";
 
     const cases: Array<[string, string]> = [
       ["post", "/indicadores"],
       ["put", `/indicadores/${indicadorId}`],
+      ["delete", `/indicadores/${indicadorId}`],
       ["post", `/indicadores/${indicadorId}/versiones`],
       ["post", "/resultados/calcular-ahora"],
       ["post", "/resultados/recalcular-anio"],
@@ -430,6 +452,18 @@ describe("incoming auth — requireSession gate", () => {
       expect(res.status).toBe(403);
       expect(res.body).toEqual({ detail: "Sin privilegios" });
     }
+  });
+
+  it("lets a super user through the write guard even when the privilege is unset", async () => {
+    currentSessionUser = SUPER_SESSION_USER;
+    const { request } = requestFor("");
+
+    const res = await request.post("/indicadores").set(...session);
+
+    // Passes requirePrivilege as a super user, then fails request validation
+    // (422) — never the fail-closed 403.
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(422);
   });
 
   it("keeps /health public at both mount positions (no cookie needed)", async () => {
