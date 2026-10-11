@@ -1,5 +1,5 @@
 /**
- * Tests for main.ts: error middleware, CORS, body size limit, and start().
+ * Tests for main.ts: error middleware, body size limit, and start().
  *
  * Uses the same mock setup as test_app_routing.test.ts.
  */
@@ -17,12 +17,6 @@ const mockSequelizeAuthenticate = jest.fn().mockResolvedValue(undefined);
 jest.mock("../src/config/index.js", () => ({
   settings: {
     openmrs_api_url: "http://fake-openmrs/openmrs",
-    cors_origins: [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-      "http://localhost:8080",
-      "http://127.0.0.1:8080",
-    ],
     base_path: "",
     port: 8000,
   },
@@ -164,87 +158,6 @@ beforeEach(() => {
   mockFindByPk.mockResolvedValue(null);
   mockFindOne.mockResolvedValue(null);
   mockFindAll.mockResolvedValue([]);
-});
-
-// ── CORS ───────────────────────────────────────────────────────────────────
-
-describe("CORS headers", () => {
-  test("OPTIONS preflight returns CORS headers when Origin is set", async () => {
-    const { request } = makeApp();
-
-    const res = await request
-      .options("/health")
-      .set("Origin", "http://localhost:5173");
-
-    expect(res.headers["access-control-allow-origin"]).toBeDefined();
-    expect(res.headers["access-control-allow-credentials"]).toBe("true");
-  });
-
-  test("GET with Origin returns allow-origin", async () => {
-    const { request } = makeApp();
-
-    const res = await request
-      .get("/health")
-      .set("Origin", "http://localhost:5173");
-
-    expect(res.headers["access-control-allow-origin"]).toBeDefined();
-    expect(res.headers["access-control-allow-credentials"]).toBe("true");
-  });
-
-  test("OPTIONS preflight allows explicit methods, never a wildcard", async () => {
-    const { request } = makeApp();
-
-    const res = await request
-      .options("/indicadores")
-      .set("Origin", "http://localhost:5173")
-      .set("Access-Control-Request-Method", "POST");
-
-    expect(res.headers["access-control-allow-methods"]).toBeDefined();
-    expect(res.headers["access-control-allow-methods"]).not.toContain("*");
-    for (const method of ["GET", "POST", "PUT", "DELETE", "OPTIONS"]) {
-      expect(res.headers["access-control-allow-methods"]).toContain(method);
-    }
-  });
-
-  test("rejects preflight from a non-allowlisted origin (no allow-origin header)", async () => {
-    const { request } = makeApp();
-
-    const res = await request
-      .options("/indicadores")
-      .set("Origin", "https://evil.example")
-      .set("Access-Control-Request-Method", "POST");
-
-    // The granting header is never sent for a non-allowlisted origin; without
-    // Access-Control-Allow-Origin the browser blocks the cross-origin request.
-    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
-  });
-
-  test("GET from a non-allowlisted origin gets no CORS headers", async () => {
-    const { request } = makeApp();
-
-    const res = await request
-      .get("/health")
-      .set("Origin", "https://evil.example");
-
-    // Route still serves (CORS is browser enforcement), but no allow-origin.
-    expect(res.status).toBe(200);
-    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
-  });
-
-  test("OPTIONS preflight from an allowlisted origin keeps credentials: true", async () => {
-    const { request } = makeApp();
-
-    const res = await request
-      .options("/metas")
-      .set("Origin", "http://localhost:8080")
-      .set("Access-Control-Request-Method", "PUT")
-      .set("Access-Control-Request-Headers", "content-type");
-
-    expect(res.headers["access-control-allow-origin"]).toBe(
-      "http://localhost:8080",
-    );
-    expect(res.headers["access-control-allow-credentials"]).toBe("true");
-  });
 });
 
 // ── Body size limit ────────────────────────────────────────────────────────

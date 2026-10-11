@@ -41,7 +41,6 @@ export interface Settings {
   // Application
   port: number;
   auto_register_catalog: boolean;
-  cors_origins: string[];
 
   // Scheduled recalculation
   recalc_hour: number;
@@ -94,29 +93,6 @@ function parseIntInRange(
   const parsed = parseInt(value, 10);
   if (isNaN(parsed) || parsed < min || parsed > max) return fallback;
   return parsed;
-}
-
-/**
- * Parse CORS_ORIGINS from a comma-separated environment variable.
- *
- * Defaults to the localhost origins used during development (Vite dev server
- * on 5173 and common gateway/SPA ports on 8080). In production, set this to
- * the production-facing origin(s) of the gateway or SPA.
- */
-export function parseCorsOrigins(
-  value: string | undefined,
-): string[] {
-  const DEFAULT_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
-  ];
-  if (!value || value.trim() === "") return DEFAULT_ORIGINS;
-  return value
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
 }
 
 /**
@@ -192,11 +168,7 @@ export const settings: Settings = {
     24,
   ),
 
-  cors_origins: parseCorsOrigins(process.env["CORS_ORIGINS"]),
-
   base_path: normalizeBasePath(process.env["BASE_PATH"]),
-
-
 };
 
 /** PostgreSQL connection URL for Sequelize */

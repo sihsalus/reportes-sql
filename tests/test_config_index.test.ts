@@ -1,7 +1,7 @@
 /**
  * Unit tests for src/config/index.ts
  *
- * Covers parseCorsOrigins, normalizeBasePath, warnDefaultCredentials, and
+ * Covers normalizeBasePath, warnDefaultCredentials, and
  * getIndicadoresDatabaseUrl. Uses jest.resetModules() + dynamic import for
  * env-dependent parts.
  */
@@ -17,47 +17,10 @@ jest.mock("dotenv", () => {
 
 // Static import for env-independent pure functions
 import {
-  parseCorsOrigins,
   normalizeBasePath,
 } from "../src/config/index.js";
 
 // ── Pure functions (safe to import statically) ─────────────────────────────
-
-describe("parseCorsOrigins", () => {
-  test("returns defaults when value is undefined", () => {
-    const result = parseCorsOrigins(undefined);
-    expect(result).toContain("http://localhost:5173");
-    expect(result).toContain("http://127.0.0.1:8080");
-    expect(result.length).toBe(4);
-  });
-
-  test("returns defaults when value is empty string", () => {
-    expect(parseCorsOrigins("")).toHaveLength(4);
-  });
-
-  test("returns defaults when value is whitespace only", () => {
-    expect(parseCorsOrigins("   ")).toHaveLength(4);
-  });
-
-  test("parses single origin", () => {
-    expect(parseCorsOrigins("https://example.com")).toEqual([
-      "https://example.com",
-    ]);
-  });
-
-  test("parses comma-separated origins, trimming whitespace", () => {
-    expect(
-      parseCorsOrigins("https://a.com, https://b.com ,  https://c.com"),
-    ).toEqual(["https://a.com", "https://b.com", "https://c.com"]);
-  });
-
-  test("filters out empty segments", () => {
-    expect(parseCorsOrigins("https://a.com,,https://b.com")).toEqual([
-      "https://a.com",
-      "https://b.com",
-    ]);
-  });
-});
 
 describe("normalizeBasePath", () => {
   test("empty string returns empty", () => {

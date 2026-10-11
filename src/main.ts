@@ -1,7 +1,7 @@
 /**
  * Express application entry point for Motor de Indicadores SIH.SALUS.
  *
- * - Creates the Express app with CORS and error middleware.
+ * - Creates the Express app with error middleware.
  * - Includes all three routers: indicadores, resultados, conceptos.
  * - Exposes a /health endpoint for monitoring.
  * - Supports BASE_PATH env var for gateway-friendly path prefixing.
@@ -15,7 +15,6 @@ import express, {
   type NextFunction,
   Router,
 } from "express";
-import cors from "cors";
 import swaggerUi from "swagger-ui-express";
 import { ZodError } from "zod";
 import { settings, warnDefaultCredentials } from "./config/index.js";
@@ -145,17 +144,7 @@ export function createApp(basePath: string): Express {
 
   // ── Middleware ────────────────────────────────────────────────────────
 
-  app.use(
-    cors({
-      origin: settings.cors_origins,
-      credentials: true,
-      // Explicit lists — never `*` (no wildcard with credentials).
-      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Accept", "X-Request-Id"],
-    }),
-  );
-
-app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "1mb" }));
 
 // ── HTTP access logging (request-id + one line per request) ────────────
 app.use(accessLogMiddleware);

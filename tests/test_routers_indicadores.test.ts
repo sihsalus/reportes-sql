@@ -70,7 +70,6 @@ jest.mock("../src/config/index.js", () => ({
     openmrs_db_user: "test",
     openmrs_db_password: "test",
     port: 8000,
-    cors_origins: [],
     base_path: "",
     auto_register_catalog: false,
   },

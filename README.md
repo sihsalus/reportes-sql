@@ -48,7 +48,6 @@ Copy `.env.example` to `.env` and adjust for your environment.
 |----------|---------|-------------|
 | `PORT` | `8000` | HTTP listen port |
 | `BASE_PATH` | _(empty)_ | Path prefix when behind a gateway (see below) |
-| `CORS_ORIGINS` | `localhost:5173,localhost:8080` (plus their `127.0.0.1` equivalents) | Comma-separated allowed CORS origins |
 | `AUTO_REGISTER_CATALOG` | `true` | Register the official indicator catalog on startup |
 | `RECALC_HOUR` | `2` | Hour (0-23, `America/Lima`) the nightly recalculation runs |
 | `RECALC_WINDOW_MONTHS` | `3` | Rolling window of months to recalculate (current + previous). Legacy alias: `RECALC_VENTANA_MESES` |

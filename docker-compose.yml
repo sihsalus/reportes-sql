@@ -22,7 +22,6 @@ services:
         condition: service_healthy
     environment:
       PORT: 8000
-      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080
       INDICATORS_DB_HOST: indicators-postgres
       INDICATORS_DB_PORT: 5432
       INDICATORS_DB_NAME: ${INDICATORS_DB_NAME:-indicators}
