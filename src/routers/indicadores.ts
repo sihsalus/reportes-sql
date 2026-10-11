@@ -19,6 +19,7 @@ import {
 } from "../models/indicador.js";
 import {
   parseDefinicionIndicador,
+  stableStringify,
   type DefinicionIndicador,
 } from "../types/definicion.js";
 import {
@@ -243,19 +244,18 @@ indicadoresRouter.put(
         order: [["version", "DESC"]],
       });
 
-      // Normalize both for order-insensitive comparison
-      const incoming = JSON.stringify(
-        newDefinicion,
-        Object.keys(newDefinicion as Record<string, unknown>).sort(),
-      );
+      // Compare structurally, ignoring key order (JSONB does not preserve it)
+      // and array order (every array is an unordered filter). stableStringify
+      // recurses, so nested-only changes are detected too — a plain
+      // JSON.stringify with an array replacer drops nested keys and would miss
+      // them.
+      const incoming = stableStringify(newDefinicion);
 
       let existing: string | null = null;
       if (latestVersion) {
         try {
-          const parsed = parseDefinicionIndicador(latestVersion.definicion);
-          existing = JSON.stringify(
-            parsed,
-            Object.keys(parsed as Record<string, unknown>).sort(),
+          existing = stableStringify(
+            parseDefinicionIndicador(latestVersion.definicion),
           );
         } catch {
           existing = null;

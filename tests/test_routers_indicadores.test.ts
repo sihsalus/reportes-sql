@@ -437,6 +437,54 @@ describe("Indicadores Router", () => {
       expect(mockVersionCreate).not.toHaveBeenCalled();
     });
 
+    test("auto-creates version when only a nested filter changes", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      // Latest versioned definition: evento.location_uuids = ["uuid-loc"].
+      mockVersionFindOne.mockResolvedValue(makeVersionRow());
+      mockVersionMax.mockResolvedValue(1);
+      mockVersionCreate.mockResolvedValue(makeVersionRow({ version: 2 }));
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .put(`/indicadores/${INDICADOR_ID}`)
+        .send({
+          nombre: "Updated",
+          definicion: {
+            tipo: "conteo_atenciones",
+            evento: { location_uuids: ["uuid-otro"] },
+          },
+        });
+
+      expect(res.status).toBe(200);
+      expect(mockVersionCreate).toHaveBeenCalledTimes(1);
+    });
+
+    test("skips version when only array order changes (set semantics)", async () => {
+      mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
+      mockVersionFindOne.mockResolvedValue(
+        makeVersionRow({
+          definicion: {
+            tipo: "conteo_atenciones",
+            evento: { location_uuids: ["uuid-a", "uuid-b"] },
+          },
+        }),
+      );
+
+      const app = createTestApp();
+      const res = await supertest(app)
+        .put(`/indicadores/${INDICADOR_ID}`)
+        .send({
+          nombre: "Updated",
+          definicion: {
+            tipo: "conteo_atenciones",
+            evento: { location_uuids: ["uuid-b", "uuid-a"] },
+          },
+        });
+
+      expect(res.status).toBe(200);
+      expect(mockVersionCreate).not.toHaveBeenCalled();
+    });
+
     test("rejects definicion with periodo field", async () => {
       mockIndicadorFindByPk.mockResolvedValue(makeIndicadorRow());
 

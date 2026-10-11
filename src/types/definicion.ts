@@ -260,6 +260,32 @@ export function parseFiltrosEvento(data: unknown): FiltrosEvento {
   return FiltrosEventoSchema.parse(data);
 }
 
+// ── Equality helper ─────────────────────────────────────────────────────
+
+/**
+ * Deterministic serializer for structurally comparing two definitions.
+ *
+ * Object keys are sorted recursively because Postgres JSONB does not preserve
+ * key order, so a raw `JSON.stringify` comparison would flag reordered keys as
+ * a change. Arrays are treated as sets (each element serialized, then the
+ * results sorted) because every array in a definition is an unordered filter
+ * (`IN (...)`, OR across diagnosticos, AND across ordenes) — reordering the
+ * same elements must not count as a definition change.
+ */
+export function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => stableStringify(v)).sort().join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    return `{${Object.keys(obj)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
 // ── Helper: has_age_filter ──────────────────────────────────────────────
 
 export function hasAgeFilter(poblacion: FiltrosPoblacion): boolean {

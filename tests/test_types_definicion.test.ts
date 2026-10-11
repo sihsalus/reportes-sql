@@ -16,6 +16,7 @@ import {
   parseFiltrosEvento,
   rejectPeriodoInPayload,
   hasAgeFilter,
+  stableStringify,
 } from "../src/types/definicion";
 import { ZodError } from "zod";
 
@@ -566,5 +567,39 @@ describe("PeriodoRejection", () => {
       evento: { location_uuids: ["uuid-x"] },
     });
     expect("periodo" in d).toBe(false);
+  });
+});
+
+// ── stableStringify ────────────────────────────────────────────────────
+
+describe("stableStringify", () => {
+  test("ignores object key order", () => {
+    expect(stableStringify({ a: 1, b: 2 })).toBe(
+      stableStringify({ b: 2, a: 1 }),
+    );
+  });
+
+  test("treats arrays as unordered sets", () => {
+    expect(stableStringify({ location_uuids: ["a", "b"] })).toBe(
+      stableStringify({ location_uuids: ["b", "a"] }),
+    );
+  });
+
+  test("treats nested arrays of objects as unordered sets", () => {
+    const a = { evento: { diagnosticos: [{ concepto_uuids: ["x", "y"] }] } };
+    const b = { evento: { diagnosticos: [{ concepto_uuids: ["y", "x"] }] } };
+    expect(stableStringify(a)).toBe(stableStringify(b));
+  });
+
+  test("detects a nested content change", () => {
+    expect(stableStringify({ evento: { location_uuids: ["a"] } })).not.toBe(
+      stableStringify({ evento: { location_uuids: ["b"] } }),
+    );
+  });
+
+  test("detects a top-level change", () => {
+    expect(stableStringify({ tipo: "conteo_atenciones" })).not.toBe(
+      stableStringify({ tipo: "conteo_pacientes" }),
+    );
   });
 });
