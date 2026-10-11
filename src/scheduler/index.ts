@@ -74,7 +74,7 @@ export async function runRecalcTick(): Promise<void> {
       dia: clave,
       zona: SCHEDULE_TIME_ZONE,
     });
-    await recalcularProgramado(now, settings.recalc_ventana_meses);
+    await recalcularProgramado(now, settings.recalc_window_months);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error("Recálculo programado falló", { error: message });
@@ -106,7 +106,7 @@ export function startRecalcScheduler(): void {
 
   logger.info("Recálculo programado activo", {
     hora: settings.recalc_hour,
-    ventanaMeses: settings.recalc_ventana_meses,
+    ventanaMeses: settings.recalc_window_months,
     zona: SCHEDULE_TIME_ZONE,
   });
 }

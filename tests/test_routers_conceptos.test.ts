@@ -9,13 +9,11 @@ import { jest } from "@jest/globals";
 jest.mock("../src/config/index.js", () => ({
   settings: {
     openmrs_api_url: "http://fake-openmrs/openmrs",
-    openmrs_api_user: "admin",
-    openmrs_api_password: "test",
-    indicadores_db_host: "localhost",
-    indicadores_db_port: 5432,
-    indicadores_db_name: "test",
-    indicadores_db_user: "test",
-    indicadores_db_password: "test",
+    indicators_db_host: "localhost",
+    indicators_db_port: 5432,
+    indicators_db_name: "test",
+    indicators_db_user: "test",
+    indicators_db_password: "test",
     openmrs_db_host: "localhost",
     openmrs_db_port: 3306,
     openmrs_db_name: "test",
@@ -34,6 +32,12 @@ import { conceptosRouter } from "../src/routers/conceptos.js";
 function createTestApp() {
   const app = express();
   app.use(express.json());
+  // The conceptos proxy forwards the caller's OpenMRS session cookie, which
+  // `requireSession` validates in the real app.
+  app.use((req, _res, next) => {
+    req.headers.cookie = "JSESSIONID=test-session";
+    next();
+  });
   app.use("/conceptos", conceptosRouter);
   return app;
 }
@@ -93,6 +97,18 @@ describe("Conceptos Router", () => {
       expect(res.status).toBe(200);
       expect(res.body).toHaveLength(1);
       expect(res.body[0].display).toBe("Consulta externa");
+    });
+
+    test("forwards the caller's session cookie, never service credentials", async () => {
+      (globalThis.fetch as jest.Mock).mockResolvedValue(
+        mockFetchRes(200, { results: [] }),
+      );
+
+      const app = createTestApp();
+      await supertest(app).get("/conceptos/encounter-types");
+
+      const init = (globalThis.fetch as jest.Mock).mock.calls[0][1] as RequestInit;
+      expect(init.headers).toEqual({ Cookie: "JSESSIONID=test-session" });
     });
 
     test("returns 502 when OpenMRS is unavailable", async () => {

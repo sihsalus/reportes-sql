@@ -13,11 +13,11 @@ dotenv.config();
 
 export interface Settings {
   // PostgreSQL: Indicators database (read/write)
-  indicadores_db_host: string;
-  indicadores_db_port: number;
-  indicadores_db_name: string;
-  indicadores_db_user: string;
-  indicadores_db_password: string;
+  indicators_db_host: string;
+  indicators_db_port: number;
+  indicators_db_name: string;
+  indicators_db_user: string;
+  indicators_db_password: string;
 
   // MySQL: OpenMRS database (read-only)
   openmrs_db_host: string;
@@ -37,10 +37,6 @@ export interface Settings {
 
   // OpenMRS REST API
   openmrs_api_url: string;
-  openmrs_api_user: string;
-  openmrs_api_password: string;
-  // Privilege required for writes/recalculation (fail-closed when unset)
-  openmrs_required_privilege: string | undefined;
 
   // Application
   port: number;
@@ -49,7 +45,7 @@ export interface Settings {
 
   // Scheduled recalculation
   recalc_hour: number;
-  recalc_ventana_meses: number;
+  recalc_window_months: number;
 
   // Routing
   base_path: string;
@@ -150,23 +146,12 @@ function envEither(primary: string, alias: string): string | undefined {
   return process.env[primary] ?? process.env[alias];
 }
 
-/**
- * Parse OPENMRS_REQUIRED_PRIVILEGE. Empty/whitespace-only values count as
- * unset: non-super users stay fail-closed (403) until an admin configures the
- * real OpenMRS privilege name. Super users bypass the guard regardless.
- */
-function parseRequiredPrivilege(value: string | undefined): string | undefined {
-  if (value === undefined) return undefined;
-  const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
-}
-
 export const settings: Settings = {
-  indicadores_db_host: envEither("INDICATORS_DB_HOST", "INDICADORES_DB_HOST") ?? "localhost",
-  indicadores_db_port: parsePort(envEither("INDICATORS_DB_PORT", "INDICADORES_DB_PORT"), 5432),
-  indicadores_db_name: envEither("INDICATORS_DB_NAME", "INDICADORES_DB_NAME") ?? "indicators",
-  indicadores_db_user: envEither("INDICATORS_DB_USER", "INDICADORES_DB_USER") ?? "postgres",
-  indicadores_db_password: envEither("INDICATORS_DB_PASSWORD", "INDICADORES_DB_PASSWORD") ?? "postgres",
+  indicators_db_host: envEither("INDICATORS_DB_HOST", "INDICADORES_DB_HOST") ?? "localhost",
+  indicators_db_port: parsePort(envEither("INDICATORS_DB_PORT", "INDICADORES_DB_PORT"), 5432),
+  indicators_db_name: envEither("INDICATORS_DB_NAME", "INDICADORES_DB_NAME") ?? "indicators",
+  indicators_db_user: envEither("INDICATORS_DB_USER", "INDICADORES_DB_USER") ?? "postgres",
+  indicators_db_password: envEither("INDICATORS_DB_PASSWORD", "INDICADORES_DB_PASSWORD") ?? "postgres",
 
   openmrs_db_host: process.env["OPENMRS_DB_HOST"] ?? "localhost",
   openmrs_db_port: parsePort(process.env["OPENMRS_DB_PORT"], 3306),
@@ -190,11 +175,6 @@ export const settings: Settings = {
   ),
 
   openmrs_api_url: process.env["OPENMRS_API_URL"] ?? "http://localhost/openmrs",
-  openmrs_api_user: process.env["OPENMRS_API_USER"] ?? "admin",
-  openmrs_api_password: process.env["OPENMRS_API_PASSWORD"] ?? "Admin123",
-  openmrs_required_privilege: parseRequiredPrivilege(
-    process.env["OPENMRS_REQUIRED_PRIVILEGE"],
-  ),
 
   port: parsePort(process.env["PORT"], 8000),
   auto_register_catalog: parseBoolean(
@@ -205,8 +185,8 @@ export const settings: Settings = {
   recalc_hour: parseIntInRange(process.env["RECALC_HOUR"], 2, 0, 23),
   // Rolling window of months to recalculate each nightly run: the current
   // month plus this many minus one previous ones (to absorb late data entry).
-  recalc_ventana_meses: parseIntInRange(
-    process.env["RECALC_VENTANA_MESES"],
+  recalc_window_months: parseIntInRange(
+    envEither("RECALC_WINDOW_MONTHS", "RECALC_VENTANA_MESES"),
     3,
     1,
     24,
@@ -221,7 +201,7 @@ export const settings: Settings = {
 
 /** PostgreSQL connection URL for Sequelize */
 export function getIndicadoresDatabaseUrl(): string {
-  return `postgres://${settings.indicadores_db_user}:${encodeURIComponent(settings.indicadores_db_password)}@${settings.indicadores_db_host}:${settings.indicadores_db_port}/${settings.indicadores_db_name}`;
+  return `postgres://${settings.indicators_db_user}:${encodeURIComponent(settings.indicators_db_password)}@${settings.indicators_db_host}:${settings.indicators_db_port}/${settings.indicators_db_name}`;
 }
 
 /**
@@ -232,7 +212,6 @@ export function warnDefaultCredentials(): void {
   const checks = [
     "INDICATORS_DB_PASSWORD",
     "OPENMRS_DB_PASSWORD",
-    "OPENMRS_API_PASSWORD",
   ];
 
   for (const env of checks) {

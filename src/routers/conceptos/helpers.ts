@@ -3,19 +3,26 @@
  *
  * Extracted to avoid duplication across search and resolve endpoint modules.
  */
-import type { Response } from "express";
+import type { Request, Response } from "express";
 import { settings } from "../../config/index.js";
+import { extractJSESSIONID } from "../../middleware/auth.js";
 
 export const MAX_RESOLVE_UUIDS = 100;
 export const MAX_OPENMRS_CONCURRENCY = 8;
 
 // ── Auth & URL ─────────────────────────────────────────────────────────────
 
-export function authHeader(): string {
-  const creds = Buffer.from(
-    `${settings.openmrs_api_user}:${settings.openmrs_api_password}`,
-  ).toString("base64");
-  return `Basic ${creds}`;
+/**
+ * Headers that forward the caller's OpenMRS session to upstream OpenMRS calls.
+ * Only the session cookie travels — never service credentials. The session is
+ * already validated by `requireSession` before this router runs.
+ */
+export function openmrsSessionHeaders(req: Request): { Cookie: string } {
+  const jsessionid = extractJSESSIONID(req.headers["cookie"]);
+  if (!jsessionid) {
+    throw new Error("Sesión OpenMRS ausente");
+  }
+  return { Cookie: `JSESSIONID=${jsessionid}` };
 }
 
 export function openmrsUrl(path: string): string {

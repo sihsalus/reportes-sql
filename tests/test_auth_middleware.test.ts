@@ -10,7 +10,7 @@
  *   preserved); Set-Cookie discarded; no-cache (repeated calls hit upstream)
  * - no Authorization / service credentials / extra cookies in fetch args
  * - public exemptions: /health, /docs, /docs/* public; /docsfoo NOT exempt
- * - requirePrivilege: has (display/uuid/string) / lacks / unset (fail-closed)
+ * - requireManagePrivilege: has (display/uuid/string) / lacks; super users bypass
  * - handler-visible req.authUser propagation through a real Express mount
  */
 
@@ -21,9 +21,6 @@ import { jest } from "@jest/globals";
 jest.mock("../src/config/index.js", () => ({
   settings: {
     openmrs_api_url: "http://fake-openmrs/openmrs",
-    openmrs_api_user: "admin",
-    openmrs_api_password: "test",
-    openmrs_required_privilege: undefined,
   },
 }));
 
@@ -32,8 +29,11 @@ import supertest from "supertest";
 import type { NextFunction, Request, Response } from "express";
 import {
   extractJSESSIONID,
+  requireModuleAccess,
+  requireManagePrivilege,
   requireSession,
-  requirePrivilege,
+  MANAGE_PRIVILEGE,
+  MODULE_PRIVILEGE,
   SESSION_VALIDATION_TIMEOUT_MS,
   type AuthUser,
 } from "../src/middleware/auth.js";
@@ -426,23 +426,21 @@ describe("requireSession", () => {
   });
 });
 
-// ── requirePrivilege ─────────────────────────────────────────────────────
+// ── requireManagePrivilege ───────────────────────────────────────────────
 
-describe("requirePrivilege", () => {
-  const PRIVILEGE = "app:indicadores:write";
-
+describe("requireManagePrivilege", () => {
   function privilegedReq(privileges: unknown): Request {
     return makeReq({
       authUser: { uuid: "u1", privileges: privileges as AuthUser["privileges"] },
     });
   }
 
-  test("next() when the user has the privilege (display match)", () => {
+  test("next() when the user has the manage privilege (display match)", () => {
     const res = makeRes();
     const next = makeNext();
 
-    requirePrivilege(PRIVILEGE)(
-      privilegedReq([{ display: PRIVILEGE, uuid: "p1" }]),
+    requireManagePrivilege(
+      privilegedReq([{ display: MANAGE_PRIVILEGE, uuid: "p1" }]),
       res,
       next,
     );
@@ -451,12 +449,12 @@ describe("requirePrivilege", () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  test("next() when the user has the privilege (uuid match)", () => {
+  test("next() when the manage privilege matches by uuid", () => {
     const res = makeRes();
     const next = makeNext();
 
-    requirePrivilege(PRIVILEGE)(
-      privilegedReq([{ display: "Other", uuid: PRIVILEGE }]),
+    requireManagePrivilege(
+      privilegedReq([{ display: "Other", uuid: MANAGE_PRIVILEGE }]),
       res,
       next,
     );
@@ -468,17 +466,17 @@ describe("requirePrivilege", () => {
     const res = makeRes();
     const next = makeNext();
 
-    requirePrivilege(PRIVILEGE)(privilegedReq([PRIVILEGE]), res, next);
+    requireManagePrivilege(privilegedReq([MANAGE_PRIVILEGE]), res, next);
 
     expect(next).toHaveBeenCalledTimes(1);
   });
 
-  test("403 when the authenticated user lacks the privilege", () => {
+  test("403 when the authenticated user lacks the manage privilege", () => {
     const res = makeRes();
     const next = makeNext();
 
-    requirePrivilege(PRIVILEGE)(
-      privilegedReq([{ display: "View Patients", uuid: "p2" }]),
+    requireManagePrivilege(
+      privilegedReq([{ display: "app:indicadores", uuid: "p2" }]),
       res,
       next,
     );
@@ -492,60 +490,17 @@ describe("requirePrivilege", () => {
     const res = makeRes();
     const next = makeNext();
 
-    requirePrivilege(PRIVILEGE)(privilegedReq(undefined), res, next);
+    requireManagePrivilege(privilegedReq(undefined), res, next);
 
     expect(res.status).toHaveBeenCalledWith(403);
     expect(next).not.toHaveBeenCalled();
   });
 
-  test("fail-closed: 403 when the required privilege is unset (undefined)", () => {
+  test("super user (System Developer) passes without the privilege", () => {
     const res = makeRes();
     const next = makeNext();
 
-    requirePrivilege(undefined)(
-      privilegedReq([{ display: PRIVILEGE, uuid: "p1" }]),
-      res,
-      next,
-    );
-
-    expect(res.status).toHaveBeenCalledWith(403);
-    expect(res.json).toHaveBeenCalledWith({ detail: "Sin privilegios" });
-    expect(next).not.toHaveBeenCalled();
-  });
-
-  test("fail-closed: 403 when the required privilege is empty string", () => {
-    const res = makeRes();
-    const next = makeNext();
-
-    requirePrivilege("")(
-      privilegedReq([{ display: PRIVILEGE, uuid: "p1" }]),
-      res,
-      next,
-    );
-
-    expect(res.status).toHaveBeenCalledWith(403);
-    expect(next).not.toHaveBeenCalled();
-  });
-
-  test("super user (System Developer) passes even when the privilege is unset", () => {
-    const res = makeRes();
-    const next = makeNext();
-
-    requirePrivilege(undefined)(
-      makeReq({ authUser: { uuid: "u1", roles: [{ display: "System Developer", uuid: "r-super" }] } }),
-      res,
-      next,
-    );
-
-    expect(next).toHaveBeenCalledTimes(1);
-    expect(res.status).not.toHaveBeenCalled();
-  });
-
-  test("super user passes without holding the required privilege", () => {
-    const res = makeRes();
-    const next = makeNext();
-
-    requirePrivilege(PRIVILEGE)(
+    requireManagePrivilege(
       makeReq({
         authUser: {
           uuid: "u1",
@@ -565,7 +520,7 @@ describe("requirePrivilege", () => {
     const res = makeRes();
     const next = makeNext();
 
-    requirePrivilege(PRIVILEGE)(
+    requireManagePrivilege(
       makeReq({
         authUser: {
           uuid: "u1",
@@ -580,14 +535,50 @@ describe("requirePrivilege", () => {
 
     expect(next).toHaveBeenCalledTimes(1);
   });
+});
 
-  test("non-super user stays fail-closed (403) when the privilege is unset", () => {
+// ── requireModuleAccess ──────────────────────────────────────────────────
+
+describe("requireModuleAccess", () => {
+  function reqWith(authUser: AuthUser | undefined, path = "/indicadores"): Request {
+    return makeReq({ path, authUser });
+  }
+
+  test("next() when the user holds the module privilege (display)", () => {
     const res = makeRes();
     const next = makeNext();
 
-    requirePrivilege(undefined)(
-      makeReq({
-        authUser: { uuid: "u1", roles: [{ display: "Provider", uuid: "r-provider" }], privileges: [] },
+    requireModuleAccess(
+      reqWith({ uuid: "u1", privileges: [{ display: MODULE_PRIVILEGE, uuid: "p1" }] }),
+      res,
+      next,
+    );
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  test("next() when the module privilege matches by uuid", () => {
+    const next = makeNext();
+
+    requireModuleAccess(
+      reqWith({ uuid: "u1", privileges: [{ display: "Other", uuid: MODULE_PRIVILEGE }] }),
+      makeRes(),
+      next,
+    );
+
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  test("403 when a non-super user lacks the module privilege", () => {
+    const res = makeRes();
+    const next = makeNext();
+
+    requireModuleAccess(
+      reqWith({
+        uuid: "u1",
+        roles: [{ display: "Provider", uuid: "r1" }],
+        privileges: [{ display: "app:indicadores:write", uuid: "p1" }],
       }),
       res,
       next,
@@ -596,6 +587,44 @@ describe("requirePrivilege", () => {
     expect(res.status).toHaveBeenCalledWith(403);
     expect(res.json).toHaveBeenCalledWith({ detail: "Sin privilegios" });
     expect(next).not.toHaveBeenCalled();
+  });
+
+  test("403 when the session has no privileges array", () => {
+    const res = makeRes();
+    const next = makeNext();
+
+    requireModuleAccess(reqWith({ uuid: "u1" }), res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test("super user passes even without the module privilege", () => {
+    const next = makeNext();
+
+    requireModuleAccess(
+      reqWith({
+        uuid: "u1",
+        roles: [{ display: "System Developer", uuid: "r1" }],
+        privileges: [],
+      }),
+      makeRes(),
+      next,
+    );
+
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  test("skips public paths (/health, /docs) even without authUser", () => {
+    for (const path of ["/health", "/docs", "/docs/openapi.json"]) {
+      const res = makeRes();
+      const next = makeNext();
+
+      requireModuleAccess(reqWith(undefined, path), res, next);
+
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(res.status).not.toHaveBeenCalled();
+    }
   });
 });
 

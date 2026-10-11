@@ -17,9 +17,6 @@ const mockSequelizeAuthenticate = jest.fn().mockResolvedValue(undefined);
 jest.mock("../src/config/index.js", () => ({
   settings: {
     openmrs_api_url: "http://fake-openmrs/openmrs",
-    openmrs_api_user: "admin",
-    openmrs_api_password: "test",
-    openmrs_required_privilege: "app:indicadores:write",
     cors_origins: [
       "http://localhost:5173",
       "http://127.0.0.1:5173",

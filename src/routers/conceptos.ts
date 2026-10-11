@@ -9,13 +9,13 @@
  * - GET /conceptos/diagnosticos/resolve?uuids=... → batch resolve diagnosis UUIDs
  * - GET /conceptos/buscar/resolve?uuids=... → batch resolve concept UUID → display label
  *
- * All communication uses fetch with Basic Auth. Connection errors
+ * All communication uses fetch with the caller's OpenMRS session cookie. Connection errors
  * return 502 Bad Gateway with a descriptive message.
  */
 
 import { Router, type Request, type Response } from "express";
 import {
-  authHeader,
+  openmrsSessionHeaders,
   openmrsUrl,
   DIAGNOSIS_CONCEPT_REPRESENTATION,
   extractCie10Code,
@@ -35,13 +35,13 @@ export const conceptosRouter: Router = Router();
 
 conceptosRouter.get(
   "/encounter-types",
-  async (_req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     await proxyWithErrorHandling(res, async () => {
       const url = openmrsUrl("encountertype");
       const response = await fetch(
         `${url}?v=custom:(uuid,display)`,
         {
-          headers: { Authorization: authHeader() },
+          headers: openmrsSessionHeaders(req),
           signal: AbortSignal.timeout(10_000),
         },
       );
@@ -99,7 +99,7 @@ conceptosRouter.get("/buscar", async (req: Request, res: Response) => {
     });
 
     const response = await fetch(`${url}?${params}`, {
-      headers: { Authorization: authHeader() },
+      headers: openmrsSessionHeaders(req),
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {
@@ -147,7 +147,7 @@ conceptosRouter.get(
       });
 
       const response = await fetch(`${url}?${params}`, {
-        headers: { Authorization: authHeader() },
+        headers: openmrsSessionHeaders(req),
         signal: AbortSignal.timeout(10_000),
       });
       if (!response.ok) {
@@ -234,7 +234,7 @@ conceptosRouter.get("/locations", async (req: Request, res: Response) => {
       const response = await fetch(
         `${url}?${baseParams}&q=${encodeURIComponent(seed)}`,
         {
-          headers: { Authorization: authHeader() },
+          headers: openmrsSessionHeaders(req),
           signal: AbortSignal.timeout(10_000),
         },
       );

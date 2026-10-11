@@ -4,9 +4,9 @@
  *
  * Contract (see `sdd/incoming-openmrs-auth`):
  *
- * - Only `Cookie: JSESSIONID=<value>` is forwarded upstream. Never
- *   `Authorization`, `authHeader()` (Basic service credentials), or any other
- *   cookie (including `JSESSIONIDSSO`).
+ * - Only `Cookie: JSESSIONID=<value>` is forwarded upstream by this gate. Never
+ *   `Authorization` or any other cookie (including `JSESSIONIDSSO`). The
+ *   conceptos proxy forwards the same cookie to OpenMRS.
  * - No caching: every request re-validates against OpenMRS.
  * - Upstream `Set-Cookie` headers are discarded — never forwarded to the client.
  * - The accept gate is `response.ok && body.authenticated === true`. Every
@@ -15,9 +15,11 @@
  *   case.
  * - On success `body.user` is attached as-is (preserving the OpenMRS shape,
  *   including roles and privileges) to `req.authUser`.
- * - `requirePrivilege` is a fail-closed write guard for non-super users: unset
- *   or missing privilege → 403. Super users (the roles listed below) are always
- *   allowed through, mirroring the frontend `userHasAccess`.
+ * - `requireModuleAccess` gates every non-public route with `app:indicadores`,
+ *   matching the frontend route/extension guard.
+ * - `requireManagePrivilege` additionally gates writes with
+ *   `app:indicadores.editar`. Super users (the roles listed below) bypass both,
+ *   mirroring the frontend `userHasAccess`.
  */
 import type {
   NextFunction,
@@ -186,26 +188,23 @@ function isSuperUser(user: AuthUser | undefined): boolean {
 }
 
 /**
- * Write guard factory.
- *
- * - Super users (see {@link isSuperUser}) always pass, matching the frontend so
- *   an administrator can operate without being granted each module privilege.
- * - `privilege` unset/empty (`OPENMRS_REQUIRED_PRIVILEGE` not configured) →
- *   403 for every non-super user until an admin configures the real name
- *   (fail-closed).
- * - Non-super user lacking the privilege → 403.
- * - Reads are never gated by this middleware.
+ * Privileges that gate the module, fixed in code (name in code + definition in
+ * metadata, the OpenMRS pattern). `MODULE_PRIVILEGE` gates read/access and
+ * matches the frontend route/extension guard; `MANAGE_PRIVILEGE` gates writes
+ * (POST/PUT/DELETE). Neither is a per-deployment knob.
  */
-export function requirePrivilege(
-  privilege: string | undefined,
-): RequestHandler {
+export const MODULE_PRIVILEGE = "app:indicadores";
+export const MANAGE_PRIVILEGE = "app:indicadores.editar";
+
+/**
+ * Shared guard: super users always pass; a non-super user must hold the
+ * privilege. Mirrors the frontend `userHasAccess` so an administrator is never
+ * locked out.
+ */
+function makePrivilegeGuard(privilege: string): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     if (isSuperUser(req.authUser)) {
       next();
-      return;
-    }
-    if (!privilege) {
-      res.status(403).json({ detail: "Sin privilegios" });
       return;
     }
     if (!userHasPrivilege(req.authUser, privilege)) {
@@ -215,3 +214,30 @@ export function requirePrivilege(
     next();
   };
 }
+
+const moduleAccessGuard = makePrivilegeGuard(MODULE_PRIVILEGE);
+
+/**
+ * Module access gate — mounted after {@link requireSession}, so every
+ * non-public route requires a valid session AND {@link MODULE_PRIVILEGE}.
+ * `/health` and `/docs`/`/docs/*` stay public (no session is validated for
+ * them, so no `authUser` is attached).
+ */
+export function requireModuleAccess(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (isPublicPath(req.path ?? "/")) {
+    next();
+    return;
+  }
+  moduleAccessGuard(req, res, next);
+}
+
+/**
+ * Write guard — required by every mutating route (POST/PUT/DELETE) on top of
+ * {@link requireModuleAccess}, so a writer must also hold
+ * {@link MANAGE_PRIVILEGE}.
+ */
+export const requireManagePrivilege = makePrivilegeGuard(MANAGE_PRIVILEGE);

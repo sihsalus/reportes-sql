@@ -25,12 +25,11 @@ import { queryMysql } from "../database/mysql.js";
 import { OpenMRSUnavailableError } from "../errors.js";
 import { calcularAhora, type CalcularAhoraResultado } from "../engine/batch.js";
 import { asyncHandler } from "../middleware/async-handler.js";
-import { requirePrivilege } from "../middleware/auth.js";
+import { requireManagePrivilege } from "../middleware/auth.js";
 import { rateLimit, resetRateLimitStore } from "./resultados/rate-limit.js";
 import { parseNumericId } from "./parse-id.js";
 import { handleSeries } from "./resultados/series.js";
 import { handleRecalcularAnio } from "./resultados/recalcular-anio.js";
-import { settings } from "../config/index.js";
 
 export const resultadosRouter: Router = Router();
 
@@ -196,7 +195,7 @@ resultadosRouter.get(
 
 resultadosRouter.post(
   "/calcular-ahora",
-  requirePrivilege(settings.openmrs_required_privilege),
+  requireManagePrivilege,
   asyncHandler(async (req: Request, res: Response) => {
     const clientIp = req.ip ?? req.socket.remoteAddress ?? "unknown";
     if (!rateLimit(`calcular-ahora:${clientIp}`, 3, 60_000)) {
@@ -243,7 +242,7 @@ resultadosRouter.post(
 
 resultadosRouter.post(
   "/recalcular-anio",
-  requirePrivilege(settings.openmrs_required_privilege),
+  requireManagePrivilege,
   asyncHandler(async (req: Request, res: Response) => {
     await handleRecalcularAnio(req, res);
   }),

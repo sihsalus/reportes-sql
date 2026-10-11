@@ -4,7 +4,7 @@ import { jest } from "@jest/globals";
 
 const mockSettings = {
   recalc_hour: 2,
-  recalc_ventana_meses: 3,
+  recalc_window_months: 3,
 };
 
 jest.mock("../src/config/index.js", () => ({
@@ -41,7 +41,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   stopRecalcScheduler();
   mockSettings.recalc_hour = 2;
-  mockSettings.recalc_ventana_meses = 3;
+  mockSettings.recalc_window_months = 3;
   mockRecalcularProgramado.mockResolvedValue({
     recalculados: 0,
     errores: [],
@@ -71,7 +71,7 @@ describe("runRecalcTick", () => {
     expect(mockRecalcularProgramado).toHaveBeenCalledTimes(1);
     expect(mockRecalcularProgramado).toHaveBeenCalledWith(
       expect.any(Date),
-      mockSettings.recalc_ventana_meses,
+      mockSettings.recalc_window_months,
     );
   });
 

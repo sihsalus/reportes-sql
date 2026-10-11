@@ -123,11 +123,11 @@ beforeEach(() => {
   delete process.env["OPENMRS_DB_NAME"];
   delete process.env["OPENMRS_DB_USER"];
   delete process.env["OPENMRS_DB_PASSWORD"];
-  delete process.env["OPENMRS_API_PASSWORD"];
   delete process.env["OPENMRS_DB_CONNECT_TIMEOUT_MS"];
   delete process.env["OPENMRS_DB_ACQUIRE_TIMEOUT_MS"];
   delete process.env["OPENMRS_DB_QUERY_TIMEOUT_MS"];
   delete process.env["RECALC_HOUR"];
+  delete process.env["RECALC_WINDOW_MONTHS"];
   delete process.env["RECALC_VENTANA_MESES"];
 });
 
@@ -155,7 +155,6 @@ describe("warnDefaultCredentials", () => {
 
     warnDefaultCredentials();
 
-    // Should warn about OPENMRS and API passwords (both unset)
     expect(c).toHaveBeenCalledWith(
       expect.stringContaining("OPENMRS_DB_PASSWORD"),
     );
@@ -169,11 +168,10 @@ describe("warnDefaultCredentials", () => {
     warnDefaultCredentials();
 
     const calls = c.mock.calls.map((call) => call[0] as string);
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(2);
     expect(calls.some((line) => line.includes("INDICATORS_DB_PASSWORD"))).toBe(true);
     expect(calls.some((line) => line.includes("OPENMRS_DB_PASSWORD"))).toBe(true);
-    expect(calls.some((line) => line.includes("OPENMRS_API_PASSWORD"))).toBe(true);
-    for (const credential of ["postgres", "openmrs", "Admin123"]) {
+    for (const credential of ["postgres", "openmrs"]) {
       expect(calls.some((line) => line.includes(credential))).toBe(false);
     }
     c.mockRestore();
@@ -182,7 +180,6 @@ describe("warnDefaultCredentials", () => {
   test("does not warn when all passwords are set", async () => {
     process.env["INDICATORS_DB_PASSWORD"] = "s3cret";
     process.env["OPENMRS_DB_PASSWORD"] = "s3cret";
-    process.env["OPENMRS_API_PASSWORD"] = "s3cret";
     const c = jest.spyOn(console, "warn").mockImplementation(() => {});
     const { warnDefaultCredentials } = await importConfigFresh();
 
@@ -201,10 +198,10 @@ describe("warnDefaultCredentials", () => {
 
     warnDefaultCredentials();
 
-    // Should warn only about OPENMRS_API_PASSWORD (still unset)
+    // Both passwords are set → nothing to warn about.
     const calls = c.mock.calls.map((call) => call[0] as string);
     expect(calls.some((line) => line.includes("INDICATORS_DB_PASSWORD"))).toBe(false);
-    expect(calls.some((line) => line.includes("OPENMRS_API_PASSWORD"))).toBe(true);
+    expect(c).not.toHaveBeenCalled();
     c.mockRestore();
   });
 });
@@ -248,27 +245,35 @@ describe("scheduled recalculation", () => {
     const { settings: freshSettings } = await importConfigFresh();
 
     expect(freshSettings.recalc_hour).toBe(2);
-    expect(freshSettings.recalc_ventana_meses).toBe(3);
+    expect(freshSettings.recalc_window_months).toBe(3);
   });
 
-  test("parses RECALC_HOUR / RECALC_VENTANA_MESES", async () => {
+  test("parses RECALC_HOUR / RECALC_WINDOW_MONTHS", async () => {
     process.env["RECALC_HOUR"] = "0";
-    process.env["RECALC_VENTANA_MESES"] = "6";
+    process.env["RECALC_WINDOW_MONTHS"] = "6";
 
     const { settings: freshSettings } = await importConfigFresh();
 
     expect(freshSettings.recalc_hour).toBe(0);
-    expect(freshSettings.recalc_ventana_meses).toBe(6);
+    expect(freshSettings.recalc_window_months).toBe(6);
+  });
+
+  test("honors the legacy RECALC_VENTANA_MESES alias", async () => {
+    process.env["RECALC_VENTANA_MESES"] = "5";
+
+    const { settings: freshSettings } = await importConfigFresh();
+
+    expect(freshSettings.recalc_window_months).toBe(5);
   });
 
   test("falls back when values are invalid or out of range", async () => {
     process.env["RECALC_HOUR"] = "24";
-    process.env["RECALC_VENTANA_MESES"] = "0";
+    process.env["RECALC_WINDOW_MONTHS"] = "0";
 
     const { settings: freshSettings } = await importConfigFresh();
 
     expect(freshSettings.recalc_hour).toBe(2);
-    expect(freshSettings.recalc_ventana_meses).toBe(3);
+    expect(freshSettings.recalc_window_months).toBe(3);
   });
 });
 

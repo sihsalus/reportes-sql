@@ -32,7 +32,7 @@ import { indicadoresRouter } from "./routers/indicadores.js";
 import { resultadosRouter } from "./routers/resultados.js";
 import { conceptosRouter } from "./routers/conceptos.js";
 import { metasRouter } from "./routers/metas.js";
-import { requireSession } from "./middleware/auth.js";
+import { requireModuleAccess, requireSession } from "./middleware/auth.js";
 import { buildOpenapiSpec } from "./docs/openapi.js";
 import { registerIndicatorCatalog } from "./catalog/indicators.js";
 import {
@@ -169,6 +169,10 @@ app.use(accessLogMiddleware);
   // /health (both mount positions) and exactly /docs + /docs/* (including
   // /docs/openapi.json) via an inline path check in the middleware.
   publicRouter.use(requireSession);
+  // Module access gate — every non-public route also requires the module
+  // privilege (`app:indicadores`), matching the frontend guard. /health and
+  // /docs stay public.
+  publicRouter.use(requireModuleAccess);
   publicRouter.use("/indicadores", indicadoresRouter);
   publicRouter.use("/resultados", resultadosRouter);
   publicRouter.use("/conceptos", conceptosRouter);

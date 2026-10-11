@@ -7,7 +7,7 @@
  */
 import type { Request, Response } from "express";
 import {
-  authHeader,
+  openmrsSessionHeaders,
   openmrsUrl,
   DIAGNOSIS_CONCEPT_REPRESENTATION,
   extractCie10Code,
@@ -59,7 +59,7 @@ export async function handleBuscarResolve(
       const url = openmrsUrl(`concept/${uid}`);
       try {
         const resp = await fetch(`${url}?v=custom:(uuid,display)`, {
-          headers: { Authorization: authHeader() },
+          headers: openmrsSessionHeaders(req),
           signal: AbortSignal.timeout(10_000),
         });
         if (resp.status === 404) return null;
@@ -125,7 +125,7 @@ export async function handleLocationsResolve(
       const url = openmrsUrl(`location/${uid}`);
       try {
         const resp = await fetch(`${url}?v=custom:(uuid,display)`, {
-          headers: { Authorization: authHeader() },
+          headers: openmrsSessionHeaders(req),
           signal: AbortSignal.timeout(10_000),
         });
         if (resp.status === 404) return null;
@@ -197,7 +197,7 @@ export async function handleDiagnosticosResolve(
         const resp = await fetch(
           `${url}?v=${DIAGNOSIS_CONCEPT_REPRESENTATION}`,
           {
-            headers: { Authorization: authHeader() },
+            headers: openmrsSessionHeaders(req),
             signal: AbortSignal.timeout(10_000),
           },
         );

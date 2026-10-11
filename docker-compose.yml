@@ -34,8 +34,6 @@ services:
       OPENMRS_DB_USER: ${OPENMRS_DB_USER:-openmrs}
       OPENMRS_DB_PASSWORD: ${OPENMRS_DB_PASSWORD:-openmrs}
       OPENMRS_API_URL: ${OPENMRS_API_URL:-http://host.docker.internal/openmrs}
-      OPENMRS_API_USER: ${OPENMRS_API_USER:-admin}
-      OPENMRS_API_PASSWORD: ${OPENMRS_API_PASSWORD:-Admin123}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

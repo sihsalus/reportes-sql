@@ -55,18 +55,15 @@ jest.mock("../src/validators/openmrs.js", () => ({
   validarLocations: jest.fn().mockResolvedValue([]),
 }));
 
-// Configured write privilege so the real requirePrivilege guard passes.
+// The stub user holds the fixed manage privilege so the real guard passes.
 jest.mock("../src/config/index.js", () => ({
   settings: {
     openmrs_api_url: "http://fake-openmrs/openmrs",
-    openmrs_api_user: "admin",
-    openmrs_api_password: "test",
-    openmrs_required_privilege: "app:indicadores:write",
-    indicadores_db_host: "localhost",
-    indicadores_db_port: 5432,
-    indicadores_db_name: "test",
-    indicadores_db_user: "test",
-    indicadores_db_password: "test",
+    indicators_db_host: "localhost",
+    indicators_db_port: 5432,
+    indicators_db_name: "test",
+    indicators_db_user: "test",
+    indicators_db_password: "test",
     openmrs_db_host: "localhost",
     openmrs_db_port: 3306,
     openmrs_db_name: "test",
@@ -101,7 +98,7 @@ function stubAuthenticatedSession(
 ) {
   (req as Request & { authUser?: unknown }).authUser = {
     uuid: "user-uuid-1",
-    privileges: [{ display: "app:indicadores:write" }],
+    privileges: [{ display: "app:indicadores.editar" }],
   };
   next();
 }

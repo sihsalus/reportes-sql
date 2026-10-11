@@ -35,11 +35,10 @@ import {
   validateRegistrationUuids,
 } from "../indicators/registration.js";
 import { asyncHandler } from "../middleware/async-handler.js";
-import { requirePrivilege } from "../middleware/auth.js";
+import { requireManagePrivilege } from "../middleware/auth.js";
 import { handleCreateVersion } from "./indicadores/versiones.js";
 import { handlePreviewSql } from "./indicadores/preview-sql.js";
 import { parseNumericId } from "./parse-id.js";
-import { settings } from "../config/index.js";
 
 export const indicadoresRouter: Router = Router();
 
@@ -47,7 +46,7 @@ export const indicadoresRouter: Router = Router();
 
 indicadoresRouter.post(
   "/",
-  requirePrivilege(settings.openmrs_required_privilege),
+  requireManagePrivilege,
   asyncHandler(async (req: Request, res: Response) => {
     let body;
     try {
@@ -186,7 +185,7 @@ indicadoresRouter.get(
 
 indicadoresRouter.put(
   "/:id",
-  requirePrivilege(settings.openmrs_required_privilege),
+  requireManagePrivilege,
   asyncHandler(async (req: Request, res: Response) => {
     const id = parseNumericId(req.params["id"]);
     if (id === null) {
@@ -302,7 +301,7 @@ indicadoresRouter.put(
 
 indicadoresRouter.delete(
   "/:id",
-  requirePrivilege(settings.openmrs_required_privilege),
+  requireManagePrivilege,
   asyncHandler(async (req: Request, res: Response) => {
     const id = parseNumericId(req.params["id"]);
     if (id === null) {
@@ -324,7 +323,7 @@ indicadoresRouter.delete(
 
 indicadoresRouter.post(
   "/:id/versiones",
-  requirePrivilege(settings.openmrs_required_privilege),
+  requireManagePrivilege,
   asyncHandler(async (req: Request, res: Response) => {
     await handleCreateVersion(req, res);
   }),

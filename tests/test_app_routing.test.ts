@@ -105,14 +105,14 @@ const NORMAL_SESSION_USER: MockSessionUser = {
   uuid: "user-uuid-1",
   display: "Test User",
   roles: [{ display: "Provider", uuid: "role-uuid-1" }],
-  privileges: [{ display: "app:indicadores:write", uuid: "priv-uuid-1" }],
+  privileges: [{ display: "app:indicadores", uuid: "priv-uuid-0" }],
 };
 
 const SUPER_SESSION_USER: MockSessionUser = {
   uuid: "user-uuid-1",
   display: "Admin User",
   roles: [{ display: "System Developer", uuid: "role-uuid-1" }],
-  privileges: [{ display: "app:indicadores:write", uuid: "priv-uuid-1" }],
+  privileges: [{ display: "app:indicadores", uuid: "priv-uuid-0" }],
 };
 
 let currentSessionUser: MockSessionUser = NORMAL_SESSION_USER;
@@ -431,7 +431,7 @@ describe("incoming auth — requireSession gate", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("returns 403 fail-closed on all eight write/recalc handlers for a non-super user (privilege unset)", async () => {
+  it("returns 403 on all eight write/recalc handlers for a non-super user lacking the manage privilege", async () => {
     const { request } = requestFor("");
     const indicadorId = "00000000-0000-0000-0000-000000000001";
 
@@ -460,7 +460,7 @@ describe("incoming auth — requireSession gate", () => {
 
     const res = await request.post("/indicadores").set(...session);
 
-    // Passes requirePrivilege as a super user, then fails request validation
+    // Passes requireManagePrivilege as a super user, then fails request validation
     // (422) — never the fail-closed 403.
     expect(res.status).not.toBe(403);
     expect(res.status).toBe(422);
@@ -499,5 +499,65 @@ describe("incoming auth — requireSession gate", () => {
     const res = await request.get(`${prefix}/docs/openapi.json`);
     expect(res.status).toBe(200);
     expect(res.body.servers[0].url).toBe(`http://localhost:8000${prefix}`);
+  });
+});
+
+// ── Module access gate (app:indicadores) ────────────────────────────────
+
+describe("incoming auth — module access gate (app:indicadores)", () => {
+  const session = ["Cookie", "JSESSIONID=test-session"] as const;
+
+  it("returns 403 on reads when the session lacks app:indicadores", async () => {
+    currentSessionUser = {
+      uuid: "user-uuid-1",
+      display: "No Module Privilege",
+      roles: [{ display: "Provider", uuid: "role-uuid-1" }],
+      privileges: [],
+    };
+    const { request } = requestFor("");
+
+    for (const path of [
+      "/indicadores",
+      "/resultados",
+      "/metas",
+      "/conceptos/encounter-types",
+    ]) {
+      const res = await request.get(path).set(...session);
+      expect(res.status).toBe(403);
+      expect(res.body).toEqual({ detail: "Sin privilegios" });
+    }
+  });
+
+  it("serves a read when the session holds app:indicadores", async () => {
+    const { request } = requestFor("");
+
+    const res = await request.get("/indicadores").set(...session);
+    expect(res.status).toBe(200);
+  });
+
+  it("keeps /health and /docs public at the module gate", async () => {
+    const { request } = requestFor("");
+
+    expect((await request.get("/health")).status).toBe(200);
+    expect((await request.get("/docs/openapi.json")).status).toBe(200);
+  });
+
+  it("lets a non-super user holding the manage privilege through the write guard", async () => {
+    currentSessionUser = {
+      uuid: "user-uuid-1",
+      display: "Manager",
+      roles: [{ display: "Provider", uuid: "role-uuid-1" }],
+      privileges: [
+        { display: "app:indicadores", uuid: "priv-uuid-0" },
+        { display: "app:indicadores.editar", uuid: "priv-uuid-1" },
+      ],
+    };
+    const { request } = requestFor("");
+
+    const res = await request.post("/indicadores").set(...session);
+
+    // Passes the module + manage guards, then fails request validation (422).
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(422);
   });
 });
