@@ -119,21 +119,36 @@ BASE_PATH=/openmrs/services/reportes-sql yarn dev
 # Health probe at http://localhost:8000/health
 ```
 
-### Local frontend override for `esm-indicadores-app`
+### Integrated local dev inside the SIH.SALUS stack
 
-If you want to run only the indicadores microfrontend against a standalone local
-`reportes-sql` instance, use a local override in the frontend repo instead of
-committing shared repo config:
+To run this local `reportes-sql` source behind the full `sihsalus` stack
+(gateway + OpenMRS + MariaDB), build a local image and point the stack at it.
+The stack's `compose/indicadores.yml` reads the image from two environment
+variables, so no committed file changes are needed.
 
-```json
-{
-  "@sihsalus/esm-indicadores-app": {
-    "reportesSqlApiPath": "http://127.0.0.1:8000"
-  }
-}
+```bash
+# 1. Build an image from this working copy (the name is arbitrary, but must match .env)
+docker build -t sihsalus-reportes-sql:local .
+
+# 2. In the sihsalus repo, add to its .env (gitignored):
+#    REPORTES_SQL_IMAGE=sihsalus-reportes-sql
+#    REPORTES_SQL_TAG=local
+#    SIHSALUS_REPORTES_SQL_DB_PASSWORD=<any local password>   # the profile's Postgres requires it
+
+# 3. Bring up the indicadores profile (from the sihsalus repo)
+cd ../sihsalus
+docker compose --profile indicadores up -d reportes-sql
 ```
 
-Notes:
-- Put that override in your local `config/frontend.json` inside the frontend repo.
-- Do not use the deprecated `indicatorsApiPath` key for this app.
-- Do not commit that override unless the whole team explicitly wants the shared local default.
+The gateway exposes it at `/openmrs/services/reportes-sql` (`BASE_PATH` is set
+by the compose file). To pick up code changes, rebuild the image and restart the
+container:
+
+```bash
+docker build -t sihsalus-reportes-sql:local .
+cd ../sihsalus && docker compose --profile indicadores up -d reportes-sql
+```
+
+Verify with `curl http://localhost/openmrs/services/reportes-sql/health` (expects
+`200`). Remove the two `REPORTES_SQL_*` variables to fall back to the published
+image.

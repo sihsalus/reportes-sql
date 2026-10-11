@@ -19,6 +19,7 @@ WORKDIR /app
 COPY --from=builder /build/node_modules ./node_modules
 COPY --from=builder /build/dist ./dist
 COPY --from=builder /build/package.json ./
+COPY --from=builder /build/yarn.lock /build/.yarnrc.yml ./
 
 EXPOSE 8000
 CMD ["yarn", "tsx", "watch", "src/main.ts"]
