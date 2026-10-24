@@ -1,6 +1,6 @@
 [
   {
-    "nombre": "5000027 Infección respiratoria aguda (IRA) no complicada en menores de 5 años",
+    "nombre": "3331101 Infección respiratoria aguda (IRA) no complicada",
     "descripcion": "Sumatoria mensual de atenciones ambulatorias de menores de 5 años con diagnóstico definitivo de IRA no complicada (J00.X, J04.0, J04.1, J04.2, J06.0, J06.8, J06.9, J20.9).",
     "definicion": {
       "tipo": "conteo_atenciones",
@@ -31,7 +31,7 @@
     "activo": true
   },
   {
-    "nombre": "3331102 Faringoamigdalitis purulenta aguda (FAPA) en menores de 5 años",
+    "nombre": "3331102 Faringoamigdalitis purulenta aguda (FAPA)",
     "descripcion": "Atención de menores de 5 años con diagnóstico de Faringoamigdalitis aguda, atendida de manera ambulatoria. Sumatoria mensual de atenciones con diagnóstico definitivo de Faringoamigdalitis purulenta aguda (J020, J029, J030, J038, J039).",
     "definicion": {
       "tipo": "conteo_atenciones",
@@ -59,7 +59,7 @@
     "activo": true
   },
   {
-    "nombre": "3331103 Otitis media aguda (OMA) en menores de 5 años",
+    "nombre": "3331103 Otitis media aguda (OMA)",
     "descripcion": "Atención de menores de 5 años con diagnóstico de otitis media aguda, atendida de manera ambulatoria. Sumatoria mensual de atenciones con diagnóstico definitivo de otitis media aguda (H65.0, H65.1, H66.0, H66.9).",
     "definicion": {
       "tipo": "conteo_atenciones",
@@ -86,7 +86,7 @@
     "activo": true
   },
   {
-    "nombre": "3331104 Sinusitis aguda en menores de 5 años",
+    "nombre": "3331104 Sinusitis aguda",
     "descripcion": "Atención de menores de 5 años con diagnóstico de sinusitis aguda, atendida de manera ambulatoria. Sumatoria mensual de atenciones con diagnóstico definitivo de sinusitis aguda (J01.0, J01.1, J01.2, J01.3, J01.4, J01.9).",
     "definicion": {
       "tipo": "conteo_atenciones",
@@ -115,8 +115,8 @@
     "activo": true
   },
   {
-    "nombre": "3331105 Neumonía sin complicaciones y otros en menores de 5 años",
-    "descripcion": "Atención de menores de 5 años con diagnóstico de neumonía no complicada y otros, atendida de manera ambulatoria. Sumatoria mensual de atenciones con diagnóstico definitivo de neumonía sin complicaciones y otros (J12.9, J15.9, J18.9).",
+    "nombre": "3331105 Neumonía sin complicaciones y otros",
+    "descripcion": "Atención de menores de 5 años con diagnóstico de neumonía no complicada y otros, atendida de manera ambulatoria. Sumatoria del número de casos de neumonía sin complicación en niños menores de 05 años, registrados con los códigos CIE 10: J12.9, J15.9, J18.9, tipo de diagnóstico definitivo, atendidos en consultorio externo. Fuente: HIS MINSA. Reporte de morbilidad, mensual, trimestral, semestral y anual según corresponda, del año en curso.",
     "definicion": {
       "tipo": "conteo_atenciones",
       "poblacion": {
@@ -132,6 +132,303 @@
               "a593d173-0521-45c6-9b33-4b68682a5172",
               "f895ef4f-9b7f-4a0a-85d9-809b8b624b36",
               "9f6c9fb8-9e89-40e7-8bec-71ab4ed609e1"
+            ],
+            "tipo_diagnostico": "definitivo"
+          }
+        ]
+      }
+    },
+    "activo": true
+  },
+  {
+    "nombre": "3331201 EDA Acuosa no complicada",
+    "descripcion": "Atención de menores de 5 años con diagnóstico de diarrea acuosa (sin deshidratación), atendida de manera ambulatoria.",
+    "definicion": {
+      "tipo": "conteo_atenciones",
+      "poblacion": {
+        "max_anios_excl": 5
+      },
+      "evento": {
+        "location_uuids": [
+          "35d2234e-129a-4c40-abb2-1ae0b2400001"
+        ],
+        "diagnosticos": [
+          {
+            "concepto_uuids": [
+              "78df0a98-81db-45d0-b98f-67e83acde3de",
+              "8a3f12ba-2326-4f86-a44c-854dfb9f73f8",
+              "3074f277-0772-4a22-9f12-b700fc54f965",
+              "e66dfcb3-e5ac-4797-806f-a2c14400834c",
+              "04dc10a4-c3ec-412b-ac5f-9b9699df3d21",
+              "7648a8d8-2713-47a8-9e98-73d3eac9608a",
+              "92174f02-e951-437d-9717-b260aa608c99",
+              "409192fb-8da6-42dd-8774-b1904ea50b69",
+              "e185241f-640d-4853-8e14-a191eb9820af",
+              "c4558e15-1f35-47eb-808d-621f288171be",
+              "35d177dc-cb94-48ef-9a46-a5956222bbba",
+              "9483673a-2bcf-4895-ac1e-e8a8f63d390b",
+              "d43c2e9e-b39a-41bf-aa20-923e411cd445",
+              "1e8f7940-d923-4f13-b235-a95515162f73",
+              "664d0975-3e14-46ff-87f8-1f06b58d08ae",
+              "9defa929-d070-49fc-b6fe-90f29ee9bc99",
+              "d246873b-6b00-4418-ade3-a4f03a1086c6",
+              "51efad59-7148-4d0b-a3d3-d05f11a77556",
+              "72f0953d-ab8c-49e7-a1ce-30038ac8416e"
+            ],
+            "tipo_diagnostico": "definitivo"
+          }
+        ]
+      }
+    },
+    "activo": true
+  },
+  {
+    "nombre": "3331203 EDA Disenterica",
+    "descripcion": "Atención de menores de 5 años con diagnóstico de diarrea disentérica (sin deshidratación), atendida de manera ambulatoria.",
+    "definicion": {
+      "tipo": "conteo_atenciones",
+      "poblacion": {
+        "max_anios_excl": 5
+      },
+      "evento": {
+        "location_uuids": [
+          "35d2234e-129a-4c40-abb2-1ae0b2400001"
+        ],
+        "diagnosticos": [
+          {
+            "concepto_uuids": [
+              "b8c84da2-dcb0-4162-8192-58cc2295314a",
+              "82d7b779-c9ce-4a9a-a322-7acff05a5026",
+              "6ae7ab99-66da-436b-a7da-630f42a43b20",
+              "eaa4ba00-28fe-4e97-9277-0ad0572b043f",
+              "3886e1ef-7ea6-48ad-8fda-f0452332652c",
+              "df5ba71b-c3ee-4e30-9f76-6fd8b378cb35"
+            ],
+            "tipo_diagnostico": "definitivo"
+          }
+        ]
+      }
+    },
+    "activo": true
+  },
+  {
+    "nombre": "3331204 EDA Persistente",
+    "descripcion": "Atención de menores de 5 años con diagnóstico de diarrea persistente (sin deshidratación), atendida de manera ambulatoria.",
+    "definicion": {
+      "tipo": "conteo_atenciones",
+      "poblacion": {
+        "max_anios_excl": 5
+      },
+      "evento": {
+        "location_uuids": [
+          "35d2234e-129a-4c40-abb2-1ae0b2400001"
+        ],
+        "diagnosticos": [
+          {
+            "concepto_uuids": [
+              "e7a1bb61-4711-49cc-9ee7-10fae1182cac"
+            ],
+            "tipo_diagnostico": "definitivo"
+          }
+        ]
+      }
+    },
+    "activo": true
+  },
+  {
+    "nombre": "3331301 Infecciones respiratorias agudas con complicaciones",
+    "descripcion": "Intervención orientada al diagnóstico y tratamiento de los casos de Infecciones respiratorias agudas con complicaciones en menores de 5 años, atendidos de manera ambulatoria o con internamiento/hospitalización.",
+    "definicion": {
+      "tipo": "conteo_atenciones",
+      "poblacion": {
+        "max_anios_excl": 5
+      },
+      "evento": {
+        "location_uuids": [
+          "35d2234e-129a-4c40-abb2-1ae0b2400001",
+          "35d2234e-129a-4c40-abb2-1ae0b2400002"
+        ],
+        "diagnosticos": [
+          {
+            "concepto_uuids": [
+              "f30df1bc-738e-4438-9d59-9b7dcd021f47",
+              "34b39f56-c410-45d8-b0f6-54fd9910093f",
+              "d7dcec13-890f-4b9e-8a06-e6fa990088c6",
+              "c150c769-e77c-48f7-8932-6344d40ec10f",
+              "67fcd928-8b8e-4ebe-a087-81e764e1ed86",
+              "bbcea9ec-d290-49cb-b041-69082da9aeb5",
+              "c5ffc632-38ae-4910-8c76-f08d33f79071",
+              "9b4a18a1-dfb1-4617-b987-52c4670fff13",
+              "75152f13-109b-4583-8f45-98e5fa350f50",
+              "ace0cb21-a695-4112-be0c-1d65ace6fc53",
+              "58f21bf2-0795-44c2-9fe4-496561c85c0e",
+              "c025ec0e-b872-4432-8d7d-f516b4ad923b",
+              "76341e81-42d9-452f-a2b0-33cd41b73cdc",
+              "e23aeb89-e75b-45a4-9dba-416ac72a287d",
+              "c4ac4d1b-d21a-472f-aa27-3695be26e32d",
+              "6f08ab7c-87cb-42f7-bd09-b18cc6744ff8",
+              "8615a006-8339-433c-b39d-6027d49ce6cb",
+              "bc440380-d477-4efa-8e53-1e33ab98f522",
+              "48187a53-d0ad-4b71-8fcd-0a9e3c1d082a",
+              "d8c672f4-24cf-4dbc-baa0-ae00d699a430",
+              "c8139c49-c9d9-4092-89ed-56786196691e"
+            ],
+            "tipo_diagnostico": "definitivo"
+          }
+        ]
+      }
+    },
+    "activo": true
+  },
+  {
+    "nombre": "3331302 Neumonía grave o enfermedad muy grave en niños menores de 2 meses",
+    "descripcion": "Intervención orientada al diagnóstico y tratamiento de los casos de Neumonía y enfermedad muy grave en niños menores de 2 meses, atendidos de manera ambulatoria o con internamiento. Sumatoria de casos con diagnóstico definitivo (J05.0, J05.1, J85.1, J86.0, J86.9, J90.X, J93.9, J10.0, J11.0, J15.5, J15.6, J18.0, J18.1, J18.2, J18.8), atendidos en consultorio externo, emergencia y hospitalización/internamiento. Fuente: HIS MINSA.",
+    "definicion": {
+      "tipo": "conteo_atenciones",
+      "poblacion": {
+        "max_meses_excl": 2
+      },
+      "evento": {
+        "location_uuids": [
+          "35d2234e-129a-4c40-abb2-1ae0b2400001",
+          "35d2234e-129a-4c40-abb2-1ae0b2400002",
+          "35d2234e-129a-4c40-abb2-1ae0b2400003"
+        ],
+        "diagnosticos": [
+          {
+            "concepto_uuids": [
+              "2355a2aa-8c81-43c1-949a-177c6ba9cd6c",
+              "c2af07da-d066-4933-a728-616b8217d95a",
+              "c219af0e-2aaf-4362-b9e3-847822e2107d",
+              "c4b295fa-60b5-461a-8c13-357a0110c74d",
+              "ad6cde09-5a79-4762-b1d5-1336050b895a",
+              "6aadfc49-b182-4778-9bbc-2d7206794e97",
+              "75a9f94d-eb40-47c9-87bf-9c8478a92037",
+              "c8849cfa-21d6-482b-999c-3b0d6894310f",
+              "f060294d-0b41-44fe-89f2-dcfd64a95c63",
+              "c55dc51e-8f07-4fc9-8b7c-edba12995ced",
+              "3607dc60-cd52-4d4f-9547-a671b32cfa5f",
+              "a5d83e66-32c0-40ce-a63f-ed7e03aa8f90",
+              "71d6fdc3-290a-4c1c-b29d-a7f7895ede5e",
+              "38f68124-ff17-45c4-91ea-3c24caf8ee53",
+              "01fe6119-00ac-40e2-bbf6-f39d806d141b"
+            ],
+            "tipo_diagnostico": "definitivo"
+          }
+        ]
+      }
+    },
+    "activo": true
+  },
+  {
+    "nombre": "3331305 Neumonía y enfermedad muy grave en niños de 2 meses a 4 años",
+    "descripcion": "Intervención orientada al diagnóstico y tratamiento de los casos de Neumonía y enfermedad muy grave en niños de 2 meses a 4 años, atendidos de manera ambulatoria o con internamiento. Sumatoria de casos con diagnóstico definitivo (J05.0, J05.1, J85.1, J86.0, J86.9, J90.X, J93.9, J10.0, J11.0, J15.5, J15.6, J18.0, J18.1, J18.2, J18.8), atendidos en consultorio externo, emergencia y hospitalización/internamiento. Fuente: HIS MINSA.",
+    "definicion": {
+      "tipo": "conteo_atenciones",
+      "poblacion": {
+        "min_meses": 2,
+        "max_anios_excl": 5
+      },
+      "evento": {
+        "location_uuids": [
+          "35d2234e-129a-4c40-abb2-1ae0b2400001",
+          "35d2234e-129a-4c40-abb2-1ae0b2400002",
+          "35d2234e-129a-4c40-abb2-1ae0b2400003"
+        ],
+        "diagnosticos": [
+          {
+            "concepto_uuids": [
+              "2355a2aa-8c81-43c1-949a-177c6ba9cd6c",
+              "c2af07da-d066-4933-a728-616b8217d95a",
+              "c219af0e-2aaf-4362-b9e3-847822e2107d",
+              "c4b295fa-60b5-461a-8c13-357a0110c74d",
+              "ad6cde09-5a79-4762-b1d5-1336050b895a",
+              "6aadfc49-b182-4778-9bbc-2d7206794e97",
+              "75a9f94d-eb40-47c9-87bf-9c8478a92037",
+              "c8849cfa-21d6-482b-999c-3b0d6894310f",
+              "f060294d-0b41-44fe-89f2-dcfd64a95c63",
+              "c55dc51e-8f07-4fc9-8b7c-edba12995ced",
+              "3607dc60-cd52-4d4f-9547-a671b32cfa5f",
+              "a5d83e66-32c0-40ce-a63f-ed7e03aa8f90",
+              "71d6fdc3-290a-4c1c-b29d-a7f7895ede5e",
+              "38f68124-ff17-45c4-91ea-3c24caf8ee53",
+              "01fe6119-00ac-40e2-bbf6-f39d806d141b"
+            ],
+            "tipo_diagnostico": "definitivo"
+          }
+        ]
+      }
+    },
+    "activo": true
+  },
+  {
+    "nombre": "3331502 SOB/ASMA",
+    "descripcion": "Intervención orientada al diagnóstico y tratamiento de los casos de SOB/ASMA en menores de 5 años, atendida de manera ambulatoria, por emergencia, internamiento u hospitalización. Sumatoria de casos de SOB/ASMA en niñas y niños menores de 5 años, registrados con códigos CIE 10: J21.0, J21.1, J21.8, J21.9, J44.0, J44.1, J44.8, J44.9, J45.0, J45.1, J45.9, J46.X, tipo de diagnóstico definitivo, atendidos en consultorio externo, emergencia y hospitalización/internamiento.",
+    "definicion": {
+      "tipo": "conteo_atenciones",
+      "poblacion": {
+        "max_anios_excl": 5
+      },
+      "evento": {
+        "location_uuids": [
+          "35d2234e-129a-4c40-abb2-1ae0b2400001",
+          "35d2234e-129a-4c40-abb2-1ae0b2400002",
+          "35d2234e-129a-4c40-abb2-1ae0b2400003"
+        ],
+        "diagnosticos": [
+          {
+            "concepto_uuids": [
+              "0ba9efc1-bcff-431b-a46e-d1939486267e",
+              "516dfe8c-8e07-490a-8845-7c5f9d7f0a9a",
+              "34640087-f579-4dd9-b4fc-b075e83c2da8",
+              "80bb35cd-3d30-40be-ba25-54667a00a979",
+              "3d355b5a-fee3-40ba-8b8b-aaa4307c1c27",
+              "57f9d475-4e23-42f5-8f93-4c68dee6fe4e",
+              "06d26345-7dfe-40a9-a21b-779a6fcd8728",
+              "67fdd2dc-6bef-4f37-bb52-4892556e8a75",
+              "e239955c-90b0-4efa-94c2-bc849b6880c3",
+              "b1a0344e-28c1-4862-a331-e90fc848fe43",
+              "4d5fe639-f492-44a0-bc4a-dbdf5d691614",
+              "6b50eced-5b5c-4ef4-8cd8-f006aa8c443d"
+            ],
+            "tipo_diagnostico": "definitivo"
+          }
+        ]
+      }
+    },
+    "activo": true
+  },
+  {
+    "nombre": "3341401 Parasitosis Intestinal",
+    "descripcion": "Intervención orientada al diagnóstico y tratamiento de los casos de parasitosis intestinal en niñas y niños de 1 año hasta los 4 años 11 meses 29 días, atendidos de manera ambulatoria. Total de niñas y niños de 1 a 4 años 11 meses 29 días, con diagnóstico definitivo de parasitosis intestinal (Códigos CIE 10: A06, A07.1, A07.0, B66.3, B66.4, B68.0, B68.1, B68.9, B70, B71, B71.0, B76.0, B76.1, B76.9, B77.9, B78.0, B79, B80, B82.0, B82.9) que reciben tratamiento en consulta externa. Fuente: HIS/MINSA, reporte mensual, trimestral, semestral y anual según corresponda, del año en curso.",
+    "definicion": {
+      "tipo": "conteo_pacientes",
+      "poblacion": {
+        "min_anios": 1,
+        "max_anios_excl": 5
+      },
+      "evento": {
+        "location_uuids": [
+          "35d2234e-129a-4c40-abb2-1ae0b2400001"
+        ],
+        "diagnosticos": [
+          {
+            "concepto_uuids": [
+              "43cb6995-1221-4e36-a93f-0e9b75e948b2",
+              "cb82f587-00fa-4446-a12b-da358b9f6ddc",
+              "2732d6b2-e7c3-4c9b-a138-78d112109416",
+              "e6304721-9c47-4561-8514-b7a86c981887",
+              "e7d9fe27-38a9-4752-b0cc-229e9d744919",
+              "e3e43314-a199-4447-8dda-f95d1e3a2c3f",
+              "90cbd27f-bfb3-492b-a7ef-a218c2d75f17",
+              "70f37bcf-fad4-4afc-91b2-c444bb2989ae",
+              "6664abab-d8ad-474f-b197-604324c96078",
+              "fa6802a5-78b5-46e6-8974-ebcbf33225ae",
+              "b8115646-0172-48d1-a9a6-84a5061e6ddd",
+              "97b2618b-4546-42f3-90f0-1819fda9d90d",
+              "de301bf5-b82b-45b7-892b-48870923e959",
+              "f4fa71ee-b05f-44e2-9161-ca58996095d2",
+              "e8205428-e661-4a99-b3ae-9601ba389568"
             ],
             "tipo_diagnostico": "definitivo"
           }
